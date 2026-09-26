@@ -207,8 +207,6 @@ class MainApp : public wxApp
         wxString customConfigFileName;
         wxString defaultConfigFilePath;
 
-        // --glissando: open the Glissando console in place of the main window.
-        bool glissandoAtStartup = false;
         
         // PTT -----------------------------------    
         int        m_intHamlibRig;
@@ -408,11 +406,10 @@ class MainFrame : public TopFrame, public IGlissandoHost
     void stopTextMessaging_();
 
 public:
-    // The Glissando console (glissando_host.cpp). Opening it switches text
-    // chat to the Glissando mode; closing it switches chat back to the codec2
-    // data modes. With hideMainWindow the console stands in for this window,
-    // and closing it quits.
-    void openGlissandoConsole(bool hideMainWindow);
+    // The Glissando console (glissando_host.cpp), the application's window;
+    // this frame stays hidden behind it. Opening it switches text chat to the
+    // Glissando mode, and closing it quits.
+    void openGlissandoConsole();
 
     // IGlissandoHost
     virtual GlissandoTelemetry glissandoTelemetry() override;
@@ -420,9 +417,10 @@ public:
     virtual bool glissandoSpectrum(std::vector<float>& magnitudesDb, double& nyquistHz) override;
     virtual void glissandoSetAudioRunning(bool running) override;
     virtual void glissandoSetRigFrequency(double hz) override;
+    virtual std::vector<double> glissandoFrequencyPresets() override;
     virtual void glissandoShowChat() override;
-    virtual void glissandoShowMainWindow(bool show) override;
-    virtual bool glissandoMainWindowShown() override;
+    virtual bool glissandoSetupAvailable(GlissandoSetup setup) override;
+    virtual void glissandoOpenSetup(GlissandoSetup setup) override;
     virtual void glissandoConsoleClosed(const wxRect& lastPosition) override;
 
 private:

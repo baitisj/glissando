@@ -2,7 +2,8 @@
 // Name:            glissando_host.cpp
 // Purpose:         MainFrame's side of the Glissando console: opening and
 //                  closing it, and answering what it asks of the radio,
-//                  the audio and the chat modem.
+//                  the audio and the chat modem. The console is the
+//                  application's window; MainFrame stays hidden behind it.
 //=========================================================================
 
 #include <algorithm>
@@ -29,8 +30,8 @@ namespace
 // so this is only the lamp, not carrier sense (the modem does that).
 constexpr double RECEIVING_LAMP_SECONDS = 4.0;
 
-// Set while the main window closes the console on its way out, so the
-// console closing does not in turn try to close the main window.
+// Set while MainFrame closes the console on its way out, so the console
+// closing does not in turn try to close MainFrame.
 bool closingWithMainWindow = false;
 
 uint64_t steadyNowMs()
@@ -61,7 +62,7 @@ GlissandoConsoleSettings MainFrame::loadGlissandoSettings_() const
     return settings;
 }
 
-void MainFrame::openGlissandoConsole(bool hideMainWindow)
+void MainFrame::openGlissandoConsole()
 {
     if (m_glissandoConsole == nullptr)
     {
@@ -71,23 +72,17 @@ void MainFrame::openGlissandoConsole(bool hideMainWindow)
         if (position.x < 0 || position.y < 0) position.SetPosition(wxDefaultPosition);
 
         m_glissandoConsole = new GlissandoConsole(this, this, loadGlissandoSettings_(), position);
-        config.glissandoEnabled = true;
         applyGlissandoToModem_(true);
         log_info("Glissando console opened; text chat now uses Glissando");
     }
 
     m_glissandoConsole->Show();
     m_glissandoConsole->Raise();
-
-    // Hidden once the event loop is running: at startup the main window has
-    // only just been shown, and hiding it before GTK has mapped it leaves it
-    // unmapped but still claiming to be shown.
-    if (hideMainWindow) CallAfter([this]() { Hide(); });
 }
 
 void MainFrame::OnToolsGlissando(wxCommandEvent&)
 {
-    openGlissandoConsole(false);
+    openGlissandoConsole();
 }
 
 void MainFrame::closeGlissandoConsole_()
@@ -106,14 +101,13 @@ void MainFrame::glissandoConsoleClosed(const wxRect& lastPosition)
     config.glissandoWindowTop = lastPosition.y;
     config.glissandoWindowWidth = lastPosition.width;
     config.glissandoWindowHeight = lastPosition.height;
-    config.glissandoEnabled = false;
 
     m_glissandoConsole = nullptr;
     applyGlissandoToModem_(false);
     log_info("Glissando console closed; text chat back on the codec2 data modes");
 
-    // Standing in for the main window, the console was the application.
-    if (!IsShown() && !terminating_ && !closingWithMainWindow) Close();
+    // The console is the application: closing it quits.
+    if (!terminating_ && !closingWithMainWindow) Close();
 }
 
 void MainFrame::applyGlissandoToModem_(bool enabled)
@@ -210,23 +204,52 @@ void MainFrame::glissandoSetRigFrequency(double hz)
     OnChangeReportFrequency(event);
 }
 
+std::vector<double> MainFrame::glissandoFrequencyPresets()
+{
+    auto& reporting = wxGetApp().appConfiguration.reportingConfiguration;
+    double scale = reporting.reportingFrequencyAsKhz ? 1000.0 : 1000000.0;
+
+    std::vector<double> presets;
+    for (const wxString& item : reporting.reportingFrequencyList.get())
+    {
+        double value = 0.0;
+        if (wxNumberFormatter::FromString(item, &value) && value > 0.0) presets.push_back(std::round(value * scale));
+    }
+    return presets;
+}
+
 void MainFrame::glissandoShowChat()
 {
     wxCommandEvent event;
     OnToolsTextMessaging(event);
 }
 
-void MainFrame::glissandoShowMainWindow(bool show)
+bool MainFrame::glissandoSetupAvailable(GlissandoSetup setup)
 {
-    Show(show);
-    if (show)
+    switch (setup)
     {
-        Iconize(false);
-        Raise();
+        case GlissandoSetup::Options:
+        case GlissandoSetup::Filters:
+            return true;
+        case GlissandoSetup::AudioDevices:
+        case GlissandoSetup::RigControl:
+        case GlissandoSetup::EasySetup:
+            return !m_RxRunning;
     }
+    return false;
 }
 
-bool MainFrame::glissandoMainWindowShown()
+void MainFrame::glissandoOpenSetup(GlissandoSetup setup)
 {
-    return IsShown();
+    if (!glissandoSetupAvailable(setup)) return;
+
+    wxCommandEvent event;
+    switch (setup)
+    {
+        case GlissandoSetup::Options: OnToolsOptions(event); break;
+        case GlissandoSetup::AudioDevices: OnToolsAudio(event); break;
+        case GlissandoSetup::RigControl: OnToolsComCfg(event); break;
+        case GlissandoSetup::Filters: OnToolsFilter(event); break;
+        case GlissandoSetup::EasySetup: OnToolsEasySetup(event); break;
+    }
 }

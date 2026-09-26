@@ -586,7 +586,9 @@ void MainApp::OnInitCmdLine(wxCmdLineParser& parser)
     parser.AddOption("txoutfile", wxEmptyString, "In UT mode, records TX output to the given WAV file.");
     parser.AddOption("txtime", "60", "In UT mode, the amount of time to transmit (default 60 seconds)", wxCMD_LINE_VAL_NUMBER);
     parser.AddOption("txattempts", "1", "In UT mode, the number of times to transmit (default 1)", wxCMD_LINE_VAL_NUMBER);
-    parser.AddSwitch("g", "glissando", "Start with the Glissando console in place of the main window.");
+    // The console is always the window now; the switch stays so older
+    // scripts that pass it still start.
+    parser.AddSwitch("g", "glissando", "Accepted for compatibility; the Glissando console always opens.");
 }
 
 bool MainApp::OnCmdLineParsed(wxCmdLineParser& parser)
@@ -604,7 +606,6 @@ bool MainApp::OnCmdLineParsed(wxCmdLineParser& parser)
         return false;
     }
 
-    glissandoAtStartup = parser.Found("g");
 
     wxString configPath;
     if (parser.Found("f", &configPath))
@@ -854,15 +855,13 @@ bool MainApp::OnInit()
     frame = new MainFrame(NULL);
     SetTopWindow(frame);
 
-    frame->Layout();    
-    frame->Show();
+    // The frame keeps the radio, audio and chat running but is never shown:
+    // the Glissando console is the application's window, with the chat
+    // window floating beside it.
+    frame->Layout();
     g_parent = frame;
-
-    // The console reopens if it was open when FreeDV last closed.
-    if (glissandoAtStartup || appConfiguration.glissandoEnabled)
-    {
-        frame->openGlissandoConsole(glissandoAtStartup);
-    }
+    frame->openGlissandoConsole();
+    frame->CallAfter([]() { wxGetApp().frame->glissandoShowChat(); });
 
     // Begin test execution
     if (testName != "")
@@ -2499,13 +2498,8 @@ void MainFrame::OnTimer(wxTimerEvent &evt)
 
 void MainFrame::topFrame_OnClose( wxCloseEvent& event )
 {
-    // The console goes with the main window; remember it was open so it
-    // comes back next time.
-    if (!terminating_ && m_glissandoConsole != nullptr)
-    {
-        closeGlissandoConsole_();
-        wxGetApp().appConfiguration.glissandoEnabled = true;
-    }
+    // The console goes with this frame.
+    if (!terminating_ && m_glissandoConsole != nullptr) closeGlissandoConsole_();
 
     if (terminating_)
     {

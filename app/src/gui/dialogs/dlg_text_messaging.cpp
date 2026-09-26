@@ -1,6 +1,6 @@
 //=========================================================================
 // Name:            dlg_text_messaging.cpp
-// Purpose:         Chat window for FreeDV text messaging.
+// Purpose:         The Glissando chat window, in the console's Chaotica dress.
 //
 // Authors:         FreeDV text messaging contributors
 // License:
@@ -37,13 +37,17 @@
 #include <algorithm>
 #include <cstdlib>
 
+#include <memory>
+
 #include <wx/datetime.h>
+#include <wx/dcbuffer.h>
+#include <wx/graphics.h>
 #include <wx/menu.h>
-#include <wx/settings.h>
 #include <wx/sizer.h>
-#include <wx/statbox.h>
 
 #include "main.h"
+#include "gui/glissando/ChaoticaControls.h"
+#include "gui/glissando/ChaoticaTheme.h"
 #include "text_messaging/DeliveryChip.h"
 #include "text_messaging/FrameCodec.h"
 #include "text_messaging/HeardStationList.h"
@@ -140,7 +144,7 @@ struct DeliveryChip
 {
     wxString label;
     wxString background;
-    wxString foreground = "#FFFFFF";
+    wxString foreground = "#EEE8D8";
 };
 
 // Which chip applies is decided in DeliveryChip.h; this is its wording and
@@ -149,8 +153,11 @@ DeliveryChip deliveryChip(const TextMessage& message)
 {
     DeliveryChipState state = deliveryChipState(message);
 
-    const wxString grey = "#7F8C8D";
-    const wxString yellow = "#F1C40F";
+    // Black and white, like the rest of the console: dark while waiting,
+    // lit while going out, chrome once confirmed. Only a failure is red.
+    const wxString smoke = "#4A4845";
+    const wxString silver = "#B8B2A2";
+    const wxString black = "#0A0A0B";
 
     DeliveryChip chip;
     switch (state.kind)
@@ -159,37 +166,39 @@ DeliveryChip deliveryChip(const TextMessage& message)
             return chip;
         case DeliveryChipKind::Queued:
             chip.label = _("QUEUED");
-            chip.background = grey;
+            chip.background = smoke;
             break;
         case DeliveryChipKind::Sending:
             chip.label = _("SENDING");
-            chip.background = "#2980B9";
+            chip.background = "#FFFCF0";
+            chip.foreground = black;
             break;
         case DeliveryChipKind::Sent:
             chip.label = _("SENT");
-            chip.background = grey;
+            chip.background = smoke;
             break;
         case DeliveryChipKind::Retry:
             chip.label = wxString::Format(_("RETRY #%d"), state.retry);
-            chip.background = yellow;
-            chip.foreground = "#000000";
+            chip.background = silver;
+            chip.foreground = black;
             break;
         case DeliveryChipKind::Resend:
             chip.label = _("RESEND");
-            chip.background = yellow;
-            chip.foreground = "#000000";
+            chip.background = silver;
+            chip.foreground = black;
             break;
         case DeliveryChipKind::Acknowledged:
             chip.label = _("OK");
-            chip.background = "#27AE60";
+            chip.background = "#C8C6C0";
+            chip.foreground = black;
             break;
         case DeliveryChipKind::NotAcknowledged:
             chip.label = _("NO ACK");
-            chip.background = "#E74C3C";
+            chip.background = "#8E2A20";
             break;
         case DeliveryChipKind::NotSent:
             chip.label = _("NOT SENT");
-            chip.background = grey;
+            chip.background = smoke;
             break;
     }
 
@@ -249,7 +258,7 @@ TextMessagingDialog::TextMessagingDialog(wxWindow* parent, wxWindowID id, const 
             wxCommandEventHandler(TextMessagingDialog::OnMenuSelectStation));
     Connect(ID_MENU_REMOVE_STATION, wxEVT_COMMAND_MENU_SELECTED,
             wxCommandEventHandler(TextMessagingDialog::OnMenuRemoveStation));
-    Connect(ID_AUTO_REPLY, wxEVT_COMMAND_CHECKBOX_CLICKED,
+    Connect(ID_AUTO_REPLY, wxEVT_TOGGLEBUTTON,
             wxCommandEventHandler(TextMessagingDialog::OnAutoReplyToggled));
     Connect(ID_STATION_LIST, wxEVT_COMMAND_LIST_ITEM_SELECTED,
             wxListEventHandler(TextMessagingDialog::OnStationSelected));
@@ -315,114 +324,157 @@ void TextMessagingDialog::connectStationMouse(bool connect)
 
 TextMessagingDialog::Palette TextMessagingDialog::palette() const
 {
-    wxColour windowColour = wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW);
-    bool dark = (windowColour.Red() + windowColour.Green() + windowColour.Blue()) / 3 < 128;
+    auto html = [](const wxColour& colour) { return colour.GetAsString(wxC2S_HTML_SYNTAX); };
 
     Palette palette;
-    if (dark)
-    {
-        palette.page = "#1E1E1E";
-        palette.text = "#ECECEC";
-        palette.sentBubble = "#1F4E66";
-        palette.receivedBubble = "#333333";
-        palette.subdued = "#9E9E9E";
-    }
-    else
-    {
-        palette.page = "#FFFFFF";
-        palette.text = "#000000";
-        palette.sentBubble = "#D6EAF8";
-        palette.receivedBubble = "#EDEDED";
-        palette.subdued = "#666666";
-    }
-
+    palette.page = html(Chaotica::Colour::Void);
+    palette.text = html(Chaotica::Colour::Bone);
+    palette.sentBubble = "#3A3936";
+    palette.receivedBubble = html(Chaotica::Colour::Plate);
+    palette.subdued = html(Chaotica::Colour::Dim);
     return palette;
 }
 
+namespace
+{
+
+// Column captions over the station list, engraved like the console's, in
+// place of the platform's light header bar.
+class StationHeader : public wxPanel
+{
+public:
+    StationHeader(wxWindow* parent, wxListCtrl* list)
+        : wxPanel(parent, wxID_ANY, wxDefaultPosition, wxSize(-1, 18))
+        , list_(list)
+    {
+        SetBackgroundStyle(wxBG_STYLE_PAINT);
+        Bind(wxEVT_PAINT, &StationHeader::OnPaint, this);
+    }
+
+private:
+    void OnPaint(wxPaintEvent&)
+    {
+        wxAutoBufferedPaintDC dc(this);
+        dc.SetBackground(wxBrush(Chaotica::Colour::Plate));
+        dc.Clear();
+        std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::CreateFromUnknownDC(dc));
+        if (!gc) return;
+
+        gc->SetFont(Chaotica::font(Chaotica::FontRole::Caption), Chaotica::Colour::Dim);
+        double x = 6;
+        for (int column = 0; column < list_->GetColumnCount(); column++)
+        {
+            wxListItem item;
+            item.SetMask(wxLIST_MASK_TEXT);
+            list_->GetColumn(column, item);
+            Chaotica::drawSpacedText(gc.get(), item.GetText(), x, 3, 2.0);
+            x += list_->GetColumnWidth(column);
+        }
+    }
+
+    wxListCtrl* list_;
+};
+
+void darken(wxWindow* window)
+{
+    window->SetBackgroundColour(Chaotica::Colour::Bakelite);
+    window->SetForegroundColour(Chaotica::Colour::Bone);
+}
+
+} // namespace
+
 void TextMessagingDialog::buildControls()
 {
-    Palette colors = palette();
+    using Chaotica::Button;
+    using Chaotica::Panel;
+    namespace Colour = Chaotica::Colour;
 
+    SetBackgroundColour(Colour::Void);
     wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
 
-    // Heard stations on the left, conversation on the right.
+    // Heard stations on the left, the log of transmissions on the right.
     wxBoxSizer* topSizer = new wxBoxSizer(wxHORIZONTAL);
 
-    // Controls inside a wxStaticBoxSizer are children of the box, not of the
-    // dialog: on GTK3 the wrong parent leaves them mispositioned for hit
-    // testing even though they draw in the right place.
-    wxStaticBox* stationBox = new wxStaticBox(this, wxID_ANY, _("Heard Stations"));
-    wxStaticBoxSizer* stationSizer = new wxStaticBoxSizer(stationBox, wxVERTICAL);
+    Panel* stationPlate = new Panel(this, _("Heard stations"));
+    wxSizer* stationSizer = stationPlate->GetContentSizer();
 
-    m_stationList = new wxListCtrl(stationBox, ID_STATION_LIST, wxDefaultPosition, wxSize(260, -1),
-                                   wxLC_REPORT | wxLC_SINGLE_SEL);
+    m_stationList = new wxListCtrl(stationPlate, ID_STATION_LIST, wxDefaultPosition, wxSize(260, -1),
+                                   wxLC_REPORT | wxLC_SINGLE_SEL | wxLC_NO_HEADER | wxBORDER_NONE);
+    darken(m_stationList);
+    m_stationList->SetTextColour(Colour::Bone);
     m_stationList->InsertColumn(0, _("Callsign"), wxLIST_FORMAT_LEFT, 100);
     m_stationList->InsertColumn(1, _("SNR"), wxLIST_FORMAT_RIGHT, 70);
     m_stationList->InsertColumn(2, _("Heard"), wxLIST_FORMAT_LEFT, 90);
-    stationSizer->Add(m_stationList, 1, wxEXPAND | wxALL, 2);
+    stationSizer->Add(new StationHeader(stationPlate, m_stationList), 0, wxEXPAND);
+    stationSizer->Add(m_stationList, 1, wxEXPAND | wxBOTTOM, 6);
 
     // Typing a callsign puts a station on the list before it has been heard,
     // so a directed message can be the first thing sent.
     wxBoxSizer* addSizer = new wxBoxSizer(wxHORIZONTAL);
-    m_txtAddStation = new wxTextCtrl(stationBox, ID_ADD_STATION_ENTRY, wxEmptyString,
-                                     wxDefaultPosition, wxDefaultSize, wxTE_PROCESS_ENTER);
+    m_txtAddStation = new wxTextCtrl(stationPlate, ID_ADD_STATION_ENTRY, wxEmptyString,
+                                     wxDefaultPosition, wxSize(-1, 32), wxTE_PROCESS_ENTER | wxBORDER_SIMPLE);
+    darken(m_txtAddStation);
     m_txtAddStation->SetHint(_("Callsign"));
     m_txtAddStation->SetToolTip(_("Add a station to message before it has been heard."));
-    addSizer->Add(m_txtAddStation, 1, wxALIGN_CENTER_VERTICAL | wxALL, 2);
+    addSizer->Add(m_txtAddStation, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
 
-    m_btnAddStation = new wxButton(stationBox, ID_ADD_STATION, _("Add Station"));
+    m_btnAddStation = new Button(stationPlate, ID_ADD_STATION, _("Add"), false, wxSize(76, 32));
     m_btnAddStation->Enable(false);
-    addSizer->Add(m_btnAddStation, 0, wxALL, 2);
-    stationSizer->Add(addSizer, 0, wxEXPAND);
+    addSizer->Add(m_btnAddStation, 0);
+    stationSizer->Add(addSizer, 0, wxEXPAND | wxBOTTOM, 6);
 
-    m_btnPing = new wxButton(stationBox, ID_PING, _("Ping"));
+    m_btnPing = new Button(stationPlate, ID_PING, _("Ping"), false, wxSize(-1, 32));
     m_btnPing->SetToolTip(_("Ask the selected station to answer, to see whether you are being heard."));
     m_btnPing->Enable(false);
-    stationSizer->Add(m_btnPing, 0, wxEXPAND | wxALL, 2);
+    stationSizer->Add(m_btnPing, 0, wxEXPAND);
 
-    topSizer->Add(stationSizer, 0, wxEXPAND | wxALL, 4);
+    topSizer->Add(stationPlate, 0, wxEXPAND | wxRIGHT, 6);
 
-    wxStaticBox* chatBox = new wxStaticBox(this, wxID_ANY, _("Chat"));
-    wxStaticBoxSizer* chatSizer = new wxStaticBoxSizer(chatBox, wxVERTICAL);
-    m_chatWindow = new wxHtmlWindow(chatBox, wxID_ANY, wxDefaultPosition, wxDefaultSize,
-                                    wxHW_SCROLLBAR_AUTO | wxBORDER_SUNKEN);
-    chatSizer->Add(m_chatWindow, 1, wxEXPAND | wxALL, 2);
-    topSizer->Add(chatSizer, 1, wxEXPAND | wxALL, 4);
+    Panel* logPlate = new Panel(this, _("Transmission log"));
+    m_chatWindow = new wxHtmlWindow(logPlate, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+                                    wxHW_SCROLLBAR_AUTO | wxBORDER_NONE);
+    m_chatWindow->SetBackgroundColour(Colour::Void);
+    m_chatWindow->SetStandardFonts(10, "DejaVu Sans Condensed", "DejaVu Sans Mono");
+    logPlate->GetContentSizer()->Add(m_chatWindow, 1, wxEXPAND);
+    topSizer->Add(logPlate, 1, wxEXPAND);
 
-    mainSizer->Add(topSizer, 1, wxEXPAND);
+    mainSizer->Add(topSizer, 1, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 6);
 
-    // Entry box with a send button beside it.
+    // The transmitter: entry box with a send button beside it.
+    Panel* transmitPlate = new Panel(this, _("Transmitter"));
     wxBoxSizer* entrySizer = new wxBoxSizer(wxHORIZONTAL);
-    m_txtEntry = new wxTextCtrl(this, ID_ENTRY, wxEmptyString, wxDefaultPosition, wxSize(-1, 70),
-                                wxTE_MULTILINE);
-    m_txtEntry->SetBackgroundColour(wxColour(colors.sentBubble));
+    m_txtEntry = new wxTextCtrl(transmitPlate, ID_ENTRY, wxEmptyString, wxDefaultPosition, wxSize(-1, 70),
+                                wxTE_MULTILINE | wxBORDER_SIMPLE);
+    darken(m_txtEntry);
     m_txtEntry->SetToolTip(_("Enter sends the message; Shift+Enter starts a new line."));
-    entrySizer->Add(m_txtEntry, 1, wxEXPAND | wxALL, 4);
+    entrySizer->Add(m_txtEntry, 1, wxEXPAND | wxRIGHT, 6);
 
     // The button names where the message goes; updateSelectionControls keeps
     // it right as the selection changes.
-    m_btnSend = new wxButton(this, ID_SEND, wxEmptyString, wxDefaultPosition, wxSize(140, 70));
-    entrySizer->Add(m_btnSend, 0, wxEXPAND | wxALL, 4);
-    mainSizer->Add(entrySizer, 0, wxEXPAND);
+    m_btnSend = new Button(transmitPlate, ID_SEND, wxEmptyString, false, wxSize(170, 70));
+    entrySizer->Add(m_btnSend, 0, wxEXPAND);
+    transmitPlate->GetContentSizer()->Add(entrySizer, 0, wxEXPAND | wxBOTTOM, 6);
 
     // Why the station may not transmit, while it may not. A line of its own,
     // so that the ordinary status line cannot write over it.
-    m_txtInhibited = new wxStaticText(this, wxID_ANY, wxEmptyString);
-    m_txtInhibited->SetForegroundColour(wxColour("#E67E22"));
+    m_txtInhibited = new wxStaticText(transmitPlate, wxID_ANY, wxEmptyString);
+    m_txtInhibited->SetForegroundColour(wxColour("#E0A060"));
     m_txtInhibited->Hide();
-    mainSizer->Add(m_txtInhibited, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 4);
+    transmitPlate->GetContentSizer()->Add(m_txtInhibited, 0, wxEXPAND | wxBOTTOM, 4);
 
     wxBoxSizer* bottomSizer = new wxBoxSizer(wxHORIZONTAL);
-    m_chkAutoReply = new wxCheckBox(this, ID_AUTO_REPLY,
-                                    _("Automatically acknowledge messages and answer pings"));
-    m_chkAutoReply->SetValue(TextMessagingSession::instance().protocol().autoReplyEnabled());
+    m_chkAutoReply = new Button(transmitPlate, ID_AUTO_REPLY, _("Auto acknowledge"), true, wxSize(190, 30));
+    m_chkAutoReply->SetChecked(TextMessagingSession::instance().protocol().autoReplyEnabled());
     m_chkAutoReply->SetToolTip(
-        _("When checked, this station transmits on its own to confirm messages and answer pings."));
-    bottomSizer->Add(m_chkAutoReply, 0, wxALIGN_CENTER_VERTICAL | wxALL, 4);
+        _("When lit, this station transmits on its own to confirm messages and answer pings."));
+    bottomSizer->Add(m_chkAutoReply, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 10);
 
-    m_txtStatus = new wxStaticText(this, wxID_ANY, wxEmptyString);
-    bottomSizer->Add(m_txtStatus, 1, wxALIGN_CENTER_VERTICAL | wxALL, 4);
-    mainSizer->Add(bottomSizer, 0, wxEXPAND);
+    m_txtStatus = new wxStaticText(transmitPlate, wxID_ANY, wxEmptyString);
+    m_txtStatus->SetForegroundColour(Colour::Bone);
+    bottomSizer->Add(m_txtStatus, 1, wxALIGN_CENTER_VERTICAL);
+    transmitPlate->GetContentSizer()->Add(bottomSizer, 0, wxEXPAND);
+
+    mainSizer->Add(transmitPlate, 0, wxEXPAND | wxALL, 6);
 
     updateSelectionControls();
 
@@ -440,11 +492,11 @@ void TextMessagingDialog::refreshFromSession()
         wxGetApp().appConfiguration.reportingConfiguration.reportingCallsign->ToStdString());
 
     m_messages = session.store().recentMessages(TextMessagingSession::MESSAGES_TO_RESTORE);
-    m_chkAutoReply->SetValue(session.protocol().autoReplyEnabled());
+    m_chkAutoReply->SetChecked(session.protocol().autoReplyEnabled());
 
     if (session.protocol().myCallsign().empty())
     {
-        setStatus(_("Set your callsign in Tools/Options before sending anything."));
+        setStatus(_("Set your callsign in Preferences, Options before sending anything."));
     }
     else
     {
@@ -894,9 +946,9 @@ void TextMessagingDialog::OnAddStation(wxCommandEvent&)
 
 void TextMessagingDialog::OnAutoReplyToggled(wxCommandEvent& event)
 {
-    TextMessagingSession::instance().protocol().setAutoReplyEnabled(m_chkAutoReply->GetValue());
+    TextMessagingSession::instance().protocol().setAutoReplyEnabled(m_chkAutoReply->IsChecked());
 
-    if (!m_chkAutoReply->GetValue())
+    if (!m_chkAutoReply->IsChecked())
     {
         setStatus(_("This station will no longer transmit on its own."));
     }
