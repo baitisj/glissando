@@ -3,12 +3,12 @@
 // Purpose:         The Glissando console: a floating window holding the
 //                  visi-scope, the tuning dial and the modulation controls
 //                  of the Glissando melodic chirp mode, dressed as Chaotica's
-//                  control room. Chat itself stays in the text chat window,
-//                  which floats on its own.
+//                  control room. Chat itself is in the chat window, which
+//                  floats on its own.
 //
-// The console owns no radio or audio state. It asks its host (MainFrame) for
-// everything and tells it about every change, so the same window can sit on
-// top of the FreeDV main window or stand in for it.
+// The console is the application's main window. It owns no radio or audio
+// state: it asks its host (MainFrame, which stays hidden) for everything and
+// tells it about every change.
 //=========================================================================
 
 #ifndef GUI_GLISSANDO__GLISSANDO_CONSOLE_H
@@ -61,6 +61,16 @@ struct GlissandoTelemetry
     double rigFrequencyHz = 0.0;
 };
 
+// The setup dialogs the console's Preferences button leads to.
+enum class GlissandoSetup
+{
+    Options,
+    AudioDevices,
+    RigControl,
+    Filters,
+    EasySetup,
+};
+
 class IGlissandoHost
 {
 public:
@@ -74,9 +84,15 @@ public:
 
     virtual void glissandoSetAudioRunning(bool running) = 0;
     virtual void glissandoSetRigFrequency(double hz) = 0;
+
+    // The operator's list of favourite dial frequencies, in Hz.
+    virtual std::vector<double> glissandoFrequencyPresets() = 0;
+
     virtual void glissandoShowChat() = 0;
-    virtual void glissandoShowMainWindow(bool show) = 0;
-    virtual bool glissandoMainWindowShown() = 0;
+
+    // Some setup can only change while the audio is stopped.
+    virtual bool glissandoSetupAvailable(GlissandoSetup setup) = 0;
+    virtual void glissandoOpenSetup(GlissandoSetup setup) = 0;
 
     // The console is going away (it has been closed); the host forgets it.
     virtual void glissandoConsoleClosed(const wxRect& lastPosition) = 0;
@@ -104,6 +120,9 @@ private:
     void selectGear(int gear);
     void selectScale(Glissando::Scale scale);
     void setTuning(double hz);
+    void enterRigFrequency();
+    void showFrequencyPresets();
+    void showPreferences();
 
     void OnTimer(wxTimerEvent& event);
     void OnClose(wxCloseEvent& event);
@@ -117,6 +136,7 @@ private:
     Chaotica::Dial* tuningDial_;
     Chaotica::Dial* scanRateDial_;
     Chaotica::Readout* rigReadout_;
+    Chaotica::Button* presetsButton_;
     Chaotica::Button* rigButton_;
     Chaotica::Meter* snrMeter_;
     Chaotica::Readout* dopplerReadout_;
@@ -130,7 +150,7 @@ private:
     Chaotica::Button* wideButton_;
     Chaotica::Button* engageButton_;
     Chaotica::Button* chatButton_;
-    Chaotica::Button* mainWindowButton_;
+    Chaotica::Button* preferencesButton_;
     Chaotica::Lamp* engagedLamp_;
     Chaotica::Lamp* receivingLamp_;
     Chaotica::Lamp* transmittingLamp_;

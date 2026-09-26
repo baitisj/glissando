@@ -6,7 +6,7 @@ add_definitions(-DULOG_NO_COLOR)
 # in downstream projects -- must define it (see freedv-gui's src/CMakeLists.txt).
 add_definitions(-DULOG_ASYNC)
 
-# Including 3rdparty folder in include path in order for websocketpp to be correctly found
+# Including 3rdparty folder in include path so that yyjson and WebRTC_AGC are found
 include_directories(3rdparty)
 
 add_subdirectory(3rdparty)

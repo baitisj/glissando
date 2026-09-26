@@ -11,6 +11,8 @@
 
 #include <wx/dcbuffer.h>
 #include <wx/graphics.h>
+#include <wx/eventfilter.h>
+#include <wx/popupwin.h>
 #include <wx/sizer.h>
 #include <wx/tglbtn.h>
 
@@ -536,6 +538,120 @@ void Readout::paint(wxGraphicsContext* gc, const wxSize& size)
     gc->SetFont(font(FontRole::Readout), Colour::Glow);
     gc->GetTextExtent(text_, &tw, &th);
     gc->DrawText(text_, 8, y + (size.y - y - 2 - th) / 2);
+}
+
+//--------------------------------------------------------------- Choices
+
+namespace
+{
+
+// A plain popup rather than wxPopupTransientWindow: the transient kind holds
+// a pointer grab on GTK that swallows the buttons' own mouse capture, so a
+// click on a choice never arrives. Closing on a click elsewhere is done with
+// an event filter instead.
+class ChoicePopup : public wxPopupWindow, public wxEventFilter
+{
+public:
+    ChoicePopup(wxWindow* anchor, const std::vector<Choice>& choices, std::function<void(int)> chosen)
+        : wxPopupWindow(anchor, wxBORDER_NONE)
+        , anchor_(anchor)
+        , chosen_(std::move(chosen))
+    {
+        SetBackgroundColour(Colour::PlateEdge);
+        auto* panel = new wxPanel(this);
+        panel->SetBackgroundColour(Colour::Plate);
+        auto* sizer = new wxBoxSizer(wxVERTICAL);
+
+        int width = std::max(anchor->GetSize().GetWidth(), 150);
+        for (size_t i = 0; i < choices.size(); i++)
+        {
+            auto* button = new Button(panel, wxID_ANY, choices[i].label, false, wxSize(width, 32));
+            button->Enable(choices[i].enabled);
+            if (!choices[i].tooltip.empty()) button->SetToolTip(choices[i].tooltip);
+            int index = (int)i;
+            button->Bind(wxEVT_BUTTON, [this, index](wxCommandEvent&) { close(index); });
+            sizer->Add(button, 0, wxALL, 3);
+        }
+        panel->SetSizer(sizer);
+
+        auto* frame = new wxBoxSizer(wxVERTICAL);
+        frame->Add(panel, 1, wxEXPAND | wxALL, 1);
+        SetSizerAndFit(frame);
+
+        wxEvtHandler::AddFilter(this);
+    }
+
+    virtual ~ChoicePopup()
+    {
+        wxEvtHandler::RemoveFilter(this);
+    }
+
+    virtual int FilterEvent(wxEvent& event) override
+    {
+        if (closing_) return Event_Skip;
+
+        wxEventType type = event.GetEventType();
+        if (type == wxEVT_LEFT_DOWN || type == wxEVT_RIGHT_DOWN || type == wxEVT_MIDDLE_DOWN)
+        {
+            // A press anywhere but on the column closes it; a press on the
+            // anchor closes it and is eaten, so the anchor does not at once
+            // open it again.
+            wxWindow* window = wxDynamicCast(event.GetEventObject(), wxWindow);
+            if (!isInside(window))
+            {
+                bool onAnchor = window == anchor_;
+                close(-1);
+                return onAnchor ? Event_Processed : Event_Skip;
+            }
+        }
+        else if (type == wxEVT_CHAR_HOOK && static_cast<wxKeyEvent&>(event).GetKeyCode() == WXK_ESCAPE)
+        {
+            close(-1);
+            return Event_Processed;
+        }
+        else if (type == wxEVT_ACTIVATE && !static_cast<wxActivateEvent&>(event).GetActive() &&
+                 event.GetEventObject() == wxGetTopLevelParent(anchor_))
+        {
+            close(-1);
+        }
+        return Event_Skip;
+    }
+
+private:
+    bool isInside(wxWindow* window) const
+    {
+        for (; window != nullptr; window = window->GetParent())
+        {
+            if (window == this) return true;
+        }
+        return false;
+    }
+
+    void close(int index)
+    {
+        if (closing_) return;
+        closing_ = true;
+        Hide();
+
+        // Called back once the column has gone, so a dialog it opens comes
+        // up over the console rather than under a closing popup.
+        if (index >= 0) anchor_->CallAfter([chosen = chosen_, index]() { chosen(index); });
+        CallAfter([this]() { Destroy(); });
+    }
+
+    wxWindow* anchor_;
+    std::function<void(int)> chosen_;
+    bool closing_ = false;
+};
+
+} // namespace
+
+void ShowChoices(wxWindow* anchor, const std::vector<Choice>& choices, std::function<void(int)> chosen)
+{
+    auto* popup = new ChoicePopup(anchor, choices, std::move(chosen));
+    wxPoint below = anchor->ClientToScreen(wxPoint(0, anchor->GetSize().GetHeight() + 2));
+    popup->Position(below, wxSize(0, 0));
+    popup->Show();
 }
 
 } // namespace Chaotica

@@ -26,7 +26,6 @@
 #include <inttypes.h>
 
 #include "../defines.h"
-#include "reporting/FreeDVReporter.h"
 #include "ReportingConfiguration.h"
 
 ReportingConfiguration::ReportingConfiguration()
@@ -41,27 +40,6 @@ ReportingConfiguration::ReportingConfiguration()
     , manualFrequencyReporting("/Reporting/ManualFrequencyReporting", false)
         
     , pskReporterEnabled("/Reporting/PSKReporter/Enable", true)
-        
-    , freedvReporterEnabled("/Reporting/FreeDV/Enable", true)
-    , freedvReporterForcedOff("/Reporting/FreeDV/ForcedOff", false)
-    , freedvReporterHostname("/Reporting/FreeDV/Hostname", wxT(FREEDV_REPORTER_DEFAULT_HOSTNAME))
-    , freedvReporterUseTls("/Reporting/FreeDV/UseTls", true)
-    , freedvReporterBandFilter("/Reporting/FreeDV/CurrentBandFilter", 0)
-    , useMetricDistances("/Reporting/FreeDV/UseMetricDistances", true)
-    , freedvReporterBandFilterTracksFrequency("/Reporting/FreeDV/BandFilterTracksFrequency", false)
-    , freedvReporterForceReceiveOnly("/Reporting/FreeDV/ForceReceiveOnly", false)
-    , freedvReporterBandFilterTracksFreqBand("/Reporting/FreeDV/BandFilterTracking/TracksFreqBand", true)
-    , freedvReporterBandFilterTracksExactFreq("/Reporting/FreeDV/BandFilterTracking/TracksExactFreq", false)
-    , freedvReporterStatusText("/Reporting/FreeDV/StatusText", _(""))
-    , freedvReporterRecentStatusTexts("/Reporting/FreeDV/RecentStatusTexts", {})
-    
-    , freedvReporterColumnOrder("/Reporting/FreeDV/ColumnOrder", { }) /* empty means default ordering */
-    , freedvReporterColumnVisibility("/Reporting/FreeDV/ColumnVisibility", { })
-
-    , freedvReporterEnableMaxIdleFilter("/Reporting/FreeDV/EnableMaxIdleFilter", false)
-    , freedvReporterMaxIdleMinutes("/Reporting/FreeDV/MaxIdleMinutes", 120)
-    , freedvReporterColumnFilterOperators("/Reporting/FreeDV/ColumnFilterOperators", {})
-    , freedvReporterColumnFilterValues("/Reporting/FreeDV/ColumnFilterValues", {})
 
     , udpReportingEnabled("/Reporting/UDP/Enable", false)
     , udpReportingHostname("/Reporting/UDP/Hostname", _("127.0.0.1"))
@@ -93,15 +71,8 @@ ReportingConfiguration::ReportingConfiguration()
         _("28.7200"),
         _("10489.6400"),
     })
-    , freedvReporterTxRowBackgroundColor("/Reporting/FreeDV/TxRowBackgroundColor", "#fc4500")
-    , freedvReporterTxRowForegroundColor("/Reporting/FreeDV/TxRowForegroundColor", "#000000")
-    , freedvReporterRxRowBackgroundColor("/Reporting/FreeDV/RxRowBackgroundColor", "#379baf")
-    , freedvReporterRxRowForegroundColor("/Reporting/FreeDV/RxRowForegroundColor", "#000000")
-    , freedvReporterMsgRowBackgroundColor("/Reporting/FreeDV/MsgRowBackgroundColor", "#E58BE5")
-    , freedvReporterMsgRowForegroundColor("/Reporting/FreeDV/MsgRowForegroundColor", "#000000")
         
     , reportingFrequencyAsKhz("/Reporting/FrequencyAsKHz", false)
-    , reportingDirectionAsCardinal("/Reporting/DirectionAsCardinal", false)
     , csvLogFilePath("/Reporting/CSV/LogFilePath", _(""))
 {
     // Special handling for the frequency list to properly handle locales
@@ -190,20 +161,7 @@ void ReportingConfiguration::load(wxConfigBase* config)
     load_(config, reportingGridSquare);
     
     load_(config, pskReporterEnabled);
-    
-    load_(config, freedvReporterEnabled);
-    load_(config, freedvReporterForcedOff);
-    load_(config, freedvReporterHostname);
-    load_(config, freedvReporterUseTls);
-    load_(config, freedvReporterBandFilter);
-    load_(config, useMetricDistances);
-    load_(config, freedvReporterBandFilterTracksFrequency);
-    load_(config, freedvReporterForceReceiveOnly);
-    load_(config, freedvReporterBandFilterTracksFreqBand);
-    load_(config, freedvReporterBandFilterTracksExactFreq);
-    load_(config, freedvReporterStatusText);
-    load_(config, freedvReporterRecentStatusTexts);
-    
+
     load_(config, udpReportingEnabled);
     load_(config, udpReportingHostname);
     load_(config, udpReportingPort);
@@ -211,15 +169,6 @@ void ReportingConfiguration::load(wxConfigBase* config)
     load_(config, udpBroadcastEnabled);
     load_(config, udpBroadcastAddress);
     load_(config, udpBroadcastPort);
-
-    load_(config, freedvReporterColumnOrder);
-    load_(config, freedvReporterColumnVisibility);
-
-    load_(config, freedvReporterEnableMaxIdleFilter);
-    load_(config, freedvReporterMaxIdleMinutes);
-
-    load_(config, freedvReporterColumnFilterOperators);
-    load_(config, freedvReporterColumnFilterValues);
 
     load_(config, useUTCForReporting);
     
@@ -230,15 +179,6 @@ void ReportingConfiguration::load(wxConfigBase* config)
     load_(config, reportingFrequencyList);
     
     load_(config, manualFrequencyReporting);
-
-    load_(config, freedvReporterTxRowBackgroundColor);
-    load_(config, freedvReporterTxRowForegroundColor);
-    load_(config, freedvReporterRxRowBackgroundColor);
-    load_(config, freedvReporterRxRowForegroundColor);
-    load_(config, freedvReporterMsgRowBackgroundColor);
-    load_(config, freedvReporterMsgRowForegroundColor);
-
-    load_(config, reportingDirectionAsCardinal);
 
     load_(config, csvLogFilePath);
 
@@ -285,28 +225,6 @@ void ReportingConfiguration::save(wxConfigBase* config)
     save_(config, reportingGridSquare);
     
     save_(config, pskReporterEnabled);
-    
-    save_(config, freedvReporterEnabled);
-    save_(config, freedvReporterForcedOff);
-    save_(config, freedvReporterHostname);
-    save_(config, freedvReporterUseTls);
-    save_(config, freedvReporterBandFilter);
-    save_(config, useMetricDistances);
-    save_(config, freedvReporterBandFilterTracksFrequency);
-    save_(config, freedvReporterForceReceiveOnly);
-    save_(config, freedvReporterBandFilterTracksFreqBand);
-    save_(config, freedvReporterBandFilterTracksExactFreq);
-    save_(config, freedvReporterStatusText);
-    save_(config, freedvReporterRecentStatusTexts);
-    
-    save_(config, freedvReporterColumnOrder);
-    save_(config, freedvReporterColumnVisibility);
-
-    save_(config, freedvReporterEnableMaxIdleFilter);
-    save_(config, freedvReporterMaxIdleMinutes);
-
-    save_(config, freedvReporterColumnFilterOperators);
-    save_(config, freedvReporterColumnFilterValues);
 
     save_(config, udpReportingEnabled);
     save_(config, udpReportingHostname);
@@ -322,15 +240,6 @@ void ReportingConfiguration::save(wxConfigBase* config)
     save_(config, reportingFrequencyList);
     
     save_(config, manualFrequencyReporting);
-
-    save_(config, freedvReporterTxRowBackgroundColor);
-    save_(config, freedvReporterTxRowForegroundColor);
-    save_(config, freedvReporterRxRowBackgroundColor);
-    save_(config, freedvReporterRxRowForegroundColor);
-    save_(config, freedvReporterMsgRowBackgroundColor);
-    save_(config, freedvReporterMsgRowForegroundColor);
-
-    save_(config, reportingDirectionAsCardinal);
 
     save_(config, csvLogFilePath);
 

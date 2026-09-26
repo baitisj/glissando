@@ -87,7 +87,6 @@
 #include "rig_control/SerialPortOutRigController.h"
 #include "rig_control/SerialPortInRigController.h"
 #include "reporting/IReporter.h"
-#include "reporting/FreeDVReporter.h"
 #include "freedv_interface.h"
 #include "audio/AudioEngineFactory.h"
 #include "audio/IAudioDevice.h"
@@ -168,7 +167,6 @@ void      clearLastUsedConfigPath();
 
 class MainFrame;
 class FilterDlg;
-class FreeDVReporterDialog;
 class TextMessagingDialog;
 class TextMessagingTransport;
 
@@ -190,7 +188,6 @@ class MainApp : public wxApp
         {
             UNSELECTED,
             MAIN_WINDOW,
-            FREEDV_REPORTER,
         };
 
         virtual bool        OnInit();
@@ -207,8 +204,6 @@ class MainApp : public wxApp
         wxString customConfigFileName;
         wxString defaultConfigFilePath;
 
-        // --glissando: open the Glissando console in place of the main window.
-        bool glissandoAtStartup = false;
         
         // PTT -----------------------------------    
         int        m_intHamlibRig;
@@ -223,11 +218,6 @@ class MainApp : public wxApp
 
         wxRect              m_rTopWindow;
 
-        // To support viewing FreeDV Reporter data outside of a session, we need to have
-        // a running connection and know when to appropriately kill it. A shared_ptr
-        // allows us to do so.
-        std::shared_ptr<FreeDVReporter> m_sharedReporterObject;
-        
         std::vector<std::shared_ptr<IReporter> > m_reporters;
         
         bool                loadConfig();
@@ -309,7 +299,6 @@ class MainFrame : public TopFrame, public IGlissandoHost
         virtual ~MainFrame();
 
         FilterDlg*              m_filterDialog;
-        FreeDVReporterDialog*   m_reporterDialog;
         TextMessagingDialog*    m_textMessagingDialog;
         TextMessagingTransport* m_textMessagingTransport;
         GlissandoConsole*       m_glissandoConsole;
@@ -408,11 +397,10 @@ class MainFrame : public TopFrame, public IGlissandoHost
     void stopTextMessaging_();
 
 public:
-    // The Glissando console (glissando_host.cpp). Opening it switches text
-    // chat to the Glissando mode; closing it switches chat back to the codec2
-    // data modes. With hideMainWindow the console stands in for this window,
-    // and closing it quits.
-    void openGlissandoConsole(bool hideMainWindow);
+    // The Glissando console (glissando_host.cpp), the application's window;
+    // this frame stays hidden behind it. Opening it switches text chat to the
+    // Glissando mode, and closing it quits.
+    void openGlissandoConsole();
 
     // IGlissandoHost
     virtual GlissandoTelemetry glissandoTelemetry() override;
@@ -420,9 +408,10 @@ public:
     virtual bool glissandoSpectrum(std::vector<float>& magnitudesDb, double& nyquistHz) override;
     virtual void glissandoSetAudioRunning(bool running) override;
     virtual void glissandoSetRigFrequency(double hz) override;
+    virtual std::vector<double> glissandoFrequencyPresets() override;
     virtual void glissandoShowChat() override;
-    virtual void glissandoShowMainWindow(bool show) override;
-    virtual bool glissandoMainWindowShown() override;
+    virtual bool glissandoSetupAvailable(GlissandoSetup setup) override;
+    virtual void glissandoOpenSetup(GlissandoSetup setup) override;
     virtual void glissandoConsoleClosed(const wxRect& lastPosition) override;
 
 private:
@@ -455,7 +444,6 @@ private:
         virtual void topFrame_OnSize( wxSizeEvent& event ) override;
         virtual void topFrame_OnClose( wxCloseEvent& event ) override;
         virtual void OnCloseFrame(wxCloseEvent& event);
-        virtual void OnActivateWindow(wxActivateEvent& event) override;
         void OnExitClick(wxCommandEvent& event);
 
         void startTxStream();
@@ -470,8 +458,6 @@ private:
 
         void OnToolsEasySetup( wxCommandEvent& event ) override;
         void OnToolsEasySetupUI( wxUpdateUIEvent& event ) override;
-        void OnToolsFreeDVReporter( wxCommandEvent& event ) override;
-        void OnToolsFreeDVReporterUI( wxUpdateUIEvent& event ) override;
         void OnToolsTextMessaging( wxCommandEvent& event ) override;
         void OnToolsGlissando( wxCommandEvent& event ) override;
         void OnToolsTextMessagingUI( wxUpdateUIEvent& event ) override;
@@ -493,10 +479,6 @@ private:
 
         void OnCenterRx(wxCommandEvent& event) override;
 
-        void OnHelpCheckUpdates( wxCommandEvent& event ) override;
-        void OnHelpCheckUpdatesUI( wxUpdateUIEvent& event ) override;
-        void OnHelpAbout( wxCommandEvent& event ) override;
-        void OnHelpManual( wxCommandEvent& event ) override;
         void OnCmdSliderScroll( wxScrollEvent& event ) override;
         void OnCheckSQClick( wxCommandEvent& event ) override;
         void OnCheckSNRClick( wxCommandEvent& event ) override;
@@ -515,7 +497,6 @@ private:
         void OnTogBtnVoiceKeyerClick (wxCommandEvent& event) override;
         void OnTogBtnVoiceKeyerRightClick( wxContextMenuEvent& event ) override;
         
-        void OnHelp( wxCommandEvent& event ) override;
 
         void OnTogBtnOnOff( wxCommandEvent& event ) override;
         void OnTogBtnRecord( wxCommandEvent& event ) override;
@@ -587,7 +568,6 @@ private:
         void OnOpenCallsignList( wxCommandEvent& event ) override;
         void OnCloseCallsignList( wxCommandEvent& event ) override;
 
-        void OnToggleReporterVisibility (wxCommandEvent& event) override;
         void OnTogBtnTune(wxCommandEvent& event) override;
         
     private:
@@ -714,7 +694,6 @@ private:
         
         void updateReportingFreqList_();
         
-        void initializeFreeDVReporter_();
         void updateVoiceKeyerButtonLabel_();
         int captureCurrentMicGroupTab_();
         
@@ -737,16 +716,6 @@ private:
         static void OnRxInAudioData_(IAudioDevice& dev, void* data, size_t size, void* state) FREEDV_NONBLOCKING;
         static void OnRxOutAudioData_(IAudioDevice& dev, void* data, size_t size, void* state) FREEDV_NONBLOCKING;
 
-        // QSY request handling
-        struct QsyRequestArgs {
-            std::string callsign;
-            uint64_t freqHz;
-            std::string message;
-        };
-
-        void onQsyRequest_(std::string callsign, uint64_t freqHz, std::string message);
-        void onQsyRequestUIThread_(QsyRequestArgs* args);
-        
         bool isFrequencyControlEnabled_()
         {
 #if 0

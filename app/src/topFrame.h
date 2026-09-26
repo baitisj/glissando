@@ -73,7 +73,6 @@
 #define ID_CUT 1005
 #define ID_PASTE 1006
 #define ID_OPTIONS 1007
-#define ID_ABOUT 1008
 
 #define ID_MODE_COLLAPSE 1100
 
@@ -98,7 +97,6 @@ class TopFrame : public wxFrame
         wxMenu* file;
         wxMenu* edit;
         wxMenu* tools;
-        wxMenu* help;
         wxGauge* m_gaugeSNR;
         wxStaticText* m_textSNR;
         wxCheckBox* m_ckboxSNR;
@@ -158,10 +156,8 @@ class TopFrame : public wxFrame
         wxMenuItem* m_menuItemExportConfig;
         wxMenuItem* m_menuItemImportConfig;
 
-        wxToggleButton *m_reporterHidden;
     
         // Virtual event handlers, override them in your derived class
-        virtual void OnActivateWindow(wxActivateEvent& event) { event.Skip(); }
         virtual void topFrame_OnClose( wxCloseEvent& event ) { event.Skip(); }
         virtual void topFrame_OnPaint( wxPaintEvent& event ) { event.Skip(); }
         virtual void topFrame_OnSize( wxSizeEvent& event ) { event.Skip(); }
@@ -171,8 +167,6 @@ class TopFrame : public wxFrame
         virtual void OnTop( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnToolsEasySetup( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnToolsEasySetupUI( wxUpdateUIEvent& event ) { event.Skip(); }
-        virtual void OnToolsFreeDVReporter( wxCommandEvent& event ) { event.Skip(); }
-        virtual void OnToolsFreeDVReporterUI( wxUpdateUIEvent& event ) { event.Skip(); }
         virtual void OnToolsTextMessaging( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnToolsGlissando( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnToolsTextMessagingUI( wxUpdateUIEvent& event ) { event.Skip(); }
@@ -195,10 +189,6 @@ class TopFrame : public wxFrame
         virtual void OnToolsLoadDefaultConfig( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnToolsLoadDefaultConfigUI( wxUpdateUIEvent& event ) { event.Skip(); }
 
-        virtual void OnHelpCheckUpdates( wxCommandEvent& event ) { event.Skip(); }
-        virtual void OnHelpCheckUpdatesUI( wxUpdateUIEvent& event ) { event.Skip(); }
-        virtual void OnHelpAbout( wxCommandEvent& event ) { event.Skip(); }
-        virtual void OnHelpManual( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnCmdSliderScroll( wxScrollEvent& event ) { event.Skip(); }
         virtual void OnCheckSQClick( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnCheckSNRClick( wxCommandEvent& event ) { event.Skip(); }
@@ -213,7 +203,6 @@ class TopFrame : public wxFrame
         virtual void OnTogBtnPTT( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnTogBtnPTTRightClick( wxContextMenuEvent& event ) { event.Skip(); }
 
-        virtual void OnHelp( wxCommandEvent& event ) { event.Skip(); }
         
         virtual void OnTogBtnRecord( wxCommandEvent& event ) { event.Skip(); }
         
@@ -256,7 +245,6 @@ class TopFrame : public wxFrame
         virtual void OnOpenCallsignList( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnCloseCallsignList( wxCommandEvent& event ) { event.Skip(); }
 
-        virtual void OnToggleReporterVisibility (wxCommandEvent& event) { event.Skip(); }
         
         virtual void OnTogBtnTune(wxCommandEvent& event) { event.Skip(); }
 

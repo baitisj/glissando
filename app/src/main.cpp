@@ -49,7 +49,6 @@
 #include "codec2_fdmdv.h"
 #include "pipeline/TxRxThread.h"
 #include "reporting/pskreporter.h"
-#include "reporting/FreeDVReporter.h"
 #include "reporting/CsvReporter.h"
 #include "reporting/UdpReporter.h"
 
@@ -58,7 +57,6 @@
 #include "gui/dialogs/dlg_options.h"
 #include "gui/dialogs/dlg_filter.h"
 #include "gui/dialogs/dlg_easy_setup.h"
-#include "gui/dialogs/freedv_reporter.h"
 #include "gui/dialogs/dlg_text_messaging.h"
 #include "pipeline/TextMessagingModem.h"
 #include "pipeline/TextMessagingTransport.h"
@@ -557,17 +555,6 @@ void MainApp::UnitTest_()
     // Wait 5 seconds for FreeDV to stop
     std::this_thread::sleep_for(5s);
     
-    if (frame->m_reporterDialog)
-    {
-        // Force deletion of FreeDV Reporter linkage to avoid spurious asan errors.
-        CallAfter([this]() {
-            frame->m_reporterDialog->setReporter(nullptr);
-            wxGetApp().SafeYield(nullptr, false); // make sure we handle any remaining Reporter messages before dispose
-        });
-        
-        std::this_thread::sleep_for(5s);
-    }
-    
     // Destroy main window to exit application. Must be done in UI thread to avoid problems.
     CallAfter([this]() {
         frame->Destroy();
@@ -586,7 +573,9 @@ void MainApp::OnInitCmdLine(wxCmdLineParser& parser)
     parser.AddOption("txoutfile", wxEmptyString, "In UT mode, records TX output to the given WAV file.");
     parser.AddOption("txtime", "60", "In UT mode, the amount of time to transmit (default 60 seconds)", wxCMD_LINE_VAL_NUMBER);
     parser.AddOption("txattempts", "1", "In UT mode, the number of times to transmit (default 1)", wxCMD_LINE_VAL_NUMBER);
-    parser.AddSwitch("g", "glissando", "Start with the Glissando console in place of the main window.");
+    // The console is always the window now; the switch stays so older
+    // scripts that pass it still start.
+    parser.AddSwitch("g", "glissando", "Accepted for compatibility; the Glissando console always opens.");
 }
 
 bool MainApp::OnCmdLineParsed(wxCmdLineParser& parser)
@@ -604,7 +593,6 @@ bool MainApp::OnCmdLineParsed(wxCmdLineParser& parser)
         return false;
     }
 
-    glissandoAtStartup = parser.Found("g");
 
     wxString configPath;
     if (parser.Found("f", &configPath))
@@ -854,15 +842,13 @@ bool MainApp::OnInit()
     frame = new MainFrame(NULL);
     SetTopWindow(frame);
 
-    frame->Layout();    
-    frame->Show();
+    // The frame keeps the radio, audio and chat running but is never shown:
+    // the Glissando console is the application's window, with the chat
+    // window floating beside it.
+    frame->Layout();
     g_parent = frame;
-
-    // The console reopens if it was open when FreeDV last closed.
-    if (glissandoAtStartup || appConfiguration.glissandoEnabled)
-    {
-        frame->openGlissandoConsole(glissandoAtStartup);
-    }
+    frame->openGlissandoConsole();
+    frame->CallAfter([]() { wxGetApp().frame->glissandoShowChat(); });
 
     // Begin test execution
     if (testName != "")
@@ -1091,21 +1077,6 @@ setDefaultMode:
         m_txtCtrlCallSign->Show();
     }
 
-    // Enable/disable FreeDV Reporter quick options
-    m_reporterHidden->Enable(
-        wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled &&
-        wxGetApp().appConfiguration.reportingConfiguration.freedvReporterEnabled);
-    m_reporterHidden->SetValue(
-        wxGetApp().appConfiguration.reportingConfiguration.freedvReporterForcedOff);
-    if (wxGetApp().appConfiguration.reportingConfiguration.freedvReporterForcedOff)
-    {
-        m_reporterHidden->SetLabel(_("Turn On"));
-    }
-    else
-    {
-        m_reporterHidden->SetLabel(_("Turn Off"));
-    }
-    
     // Ensure that sound card count is correct. Otherwise the Audio Options won't show
     // the correct devices prior to start.
     bool hasSoundCard1InDevice = wxGetApp().appConfiguration.audioConfiguration.soundCard1In.deviceName != "none";
@@ -1165,17 +1136,6 @@ setDefaultMode:
     }
     
     statsBox->Show(wxGetApp().appConfiguration.showDecodeStats);
-    // Initialize FreeDV Reporter as required
-    CallAfter(&MainFrame::initializeFreeDVReporter_);
-    
-    // If the FreeDV Reporter window was open on last execution, reopen it now.
-    CallAfter([&]() {
-        if (wxGetApp().appConfiguration.reporterWindowVisible)
-        {
-            wxCommandEvent event;
-            OnToolsFreeDVReporter(event);
-        }
-    });
 }
 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=--=-=-=-=
@@ -1238,7 +1198,6 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("FreeDV ")
     SetTitle(currentTitle);
 #endif // defined(UNOFFICIAL_RELEASE)
     
-    m_reporterDialog = nullptr;
     m_textMessagingDialog = nullptr;
     m_textMessagingTransport = nullptr;
     m_glissandoConsole = nullptr;
@@ -1582,20 +1541,6 @@ void MainFrame::setConfiguration_(wxConfigBase* config)
     pConfig = config;
     wxConfigBase::Set(pConfig);
         
-    if (wxGetApp().m_sharedReporterObject)
-    {
-        wxGetApp().m_sharedReporterObject = nullptr;
-    }
-
-    if (m_reporterDialog != nullptr)
-    {
-        m_reporterDialog->setReporter(nullptr);
-        wxGetApp().SafeYield(nullptr, false); // make sure we handle any remaining Reporter messages before dispose
-        m_reporterDialog->Close();
-        m_reporterDialog->Destroy();
-        m_reporterDialog = nullptr;
-    }
-    
     // Resets all configuration to defaults.
     loadConfiguration_();
 }
@@ -1802,26 +1747,6 @@ MainFrame::~MainFrame()
     if (m_filterDialog != nullptr)
     {
         m_filterDialog->Close();
-    }
-    
-    if (m_reporterDialog != nullptr)
-    {
-        // Grab and save the final position explicitly rather than relying
-        // solely on OnMove's live tracking -- Close()/Destroy() below
-        // trigger one last stray wxEVT_MOVE reporting a position with the
-        // title bar's height already stripped off, so position tracking
-        // must be stopped first or that stray event silently overwrites
-        // the correct value saved here.
-        auto pos = m_reporterDialog->GetPosition();
-        wxGetApp().appConfiguration.reporterWindowLeft = pos.x;
-        wxGetApp().appConfiguration.reporterWindowTop = pos.y;
-        m_reporterDialog->stopTrackingPosition();
-
-        m_reporterDialog->setReporter(nullptr);
-        wxGetApp().SafeYield(nullptr, false); // make sure we handle any remaining Reporter messages before dispose
-        m_reporterDialog->Close();
-        m_reporterDialog->Destroy();
-        m_reporterDialog = nullptr;
     }
     
 #ifdef FTEST
@@ -2499,46 +2424,21 @@ void MainFrame::OnTimer(wxTimerEvent &evt)
 
 void MainFrame::topFrame_OnClose( wxCloseEvent& event )
 {
-    // The console goes with the main window; remember it was open so it
-    // comes back next time.
-    if (!terminating_ && m_glissandoConsole != nullptr)
-    {
-        closeGlissandoConsole_();
-        wxGetApp().appConfiguration.glissandoEnabled = true;
-    }
+    // The console goes with this frame.
+    if (!terminating_ && m_glissandoConsole != nullptr) closeGlissandoConsole_();
 
     if (terminating_)
     {
         // A previous close request already kicked off the async RX/PTT
         // shutdown below, which calls Destroy() itself once done (see
         // OnTogBtnOnOff()) -- nothing left to do here. This guards more than
-        // just the m_reporterDialog dereference below: m_RxRunning isn't
+        // just the shutdown below: m_RxRunning isn't
         // cleared until deep inside that shutdown (stopRxStream(), called
         // after the rig-disconnect code), so a repeat close request arriving
         // first would otherwise fall into the `if (m_RxRunning)` block again
         // and re-enter OnTogBtnOnOff() a second time concurrently with the
         // shutdown already in progress.
         return;
-    }
-
-    if (m_reporterDialog != nullptr)
-    {
-        // Grab and save the final position explicitly rather than relying
-        // solely on OnMove's live tracking -- Close()/Destroy() below trigger
-        // one last stray wxEVT_MOVE reporting a position with the title bar's
-        // height already stripped off, so position tracking must be stopped
-        // first or that stray event silently overwrites the correct value
-        // saved here.
-        auto pos = m_reporterDialog->GetPosition();
-        wxGetApp().appConfiguration.reporterWindowLeft = pos.x;
-        wxGetApp().appConfiguration.reporterWindowTop = pos.y;
-        m_reporterDialog->stopTrackingPosition();
-
-        m_reporterDialog->setReporter(nullptr);
-        wxGetApp().SafeYield(nullptr, false); // make sure we handle any remaining Reporter messages before dispose
-        m_reporterDialog->Close();
-        m_reporterDialog->Destroy();
-        m_reporterDialog = nullptr;
     }
 
     if (m_RxRunning)
@@ -2894,16 +2794,6 @@ void MainFrame::performFreeDVOn_()
                             wxGetApp().m_reporters.push_back(pskReporter);
                         }
                         
-                        if (wxGetApp().appConfiguration.reportingConfiguration.freedvReporterEnabled)
-                        {
-                            wxGetApp().m_reporters.push_back(wxGetApp().m_sharedReporterObject);
-
-                            if (!m_reporterHidden->GetValue())
-                            {
-                                wxGetApp().m_sharedReporterObject->showOurselves();
-                            }
-                        }
-
                         if (wxGetApp().appConfiguration.reportingConfiguration.udpBroadcastEnabled)
                         {
                             auto udpBroadcastReporter = std::make_shared<UdpReporter>(
@@ -2912,21 +2802,12 @@ void MainFrame::performFreeDVOn_()
                             wxGetApp().m_reporters.push_back(udpBroadcastReporter);
                         }
 
-                        // Enable FreeDV Reporter timer (every 5 minutes).
+                        // Enable PSK Reporter timer (every 5 minutes).
                         executeOnUiThreadAndWait_([&]() 
                         {
                             m_pskReporterTimer.Start(5 * 60 * 1000);
                         });
 
-                        // Make sure QSY button becomes enabled after start.
-                        executeOnUiThreadAndWait_([&]() 
-                        {
-                            if (m_reporterDialog != nullptr)
-                            {
-                                m_reporterDialog->refreshQSYButtonState();
-                            }
-                        });
-                        
                         // Immediately transmit selected TX mode and frequency to avoid UI glitches.
                         for (auto& obj : wxGetApp().m_reporters)
                         {
@@ -3071,10 +2952,6 @@ void MainFrame::performFreeDVOff_()
     stopRxStream();
          
     wxGetApp().m_reporters.clear();
-    if (wxGetApp().m_sharedReporterObject)
-    {
-        wxGetApp().m_sharedReporterObject->hideFromView();
-    }
     
     // FreeDV clean up
     delete[] g_error_hist;
@@ -3099,12 +2976,6 @@ void MainFrame::performFreeDVOff_()
         m_rb700e->Enable();
         
         m_logQSO->Enable(m_lastReportedCallsignListView->GetItemCount() > 0);
-
-        // Make sure QSY button becomes disabled after stop.
-        if (m_reporterDialog != nullptr)
-        {
-            m_reporterDialog->refreshQSYButtonState();
-        }
     });
 }
 
@@ -3142,8 +3013,7 @@ void MainFrame::OnTogBtnOnOff(wxCommandEvent&)
             // On/Off actions complete, re-enable button.
             executeOnUiThreadAndWait_([&]() {
                 bool txEnabled = 
-                    m_RxRunning && 
-                    !wxGetApp().appConfiguration.reportingConfiguration.freedvReporterForceReceiveOnly &&
+                    m_RxRunning &&
                     (g_nSoundCards == 2);
                 
                 m_togBtnAnalog->Enable(m_RxRunning);
@@ -3995,127 +3865,6 @@ bool MainFrame::validateSoundCardSetup(bool silent)
     engine->setOnEngineError(nullptr, nullptr);
     
     return canRun;
-}
-
-void MainFrame::initializeFreeDVReporter_()
-{
-    bool receiveOnly = isReceiveOnly();
-    
-    auto oldReporterObject = wxGetApp().m_sharedReporterObject;
-    wxGetApp().m_sharedReporterObject =
-        std::make_shared<FreeDVReporter>(
-            wxGetApp().appConfiguration.reportingConfiguration.freedvReporterHostname->ToStdString(),
-            wxGetApp().appConfiguration.reportingConfiguration.reportingCallsign->ToStdString(),
-            wxGetApp().appConfiguration.reportingConfiguration.reportingGridSquare->ToStdString(),
-            std::string("FreeDV ") + GetFreeDVVersion(),
-            receiveOnly,
-            false,
-            wxGetApp().appConfiguration.reportingConfiguration.freedvReporterUseTls);
-    assert(wxGetApp().m_sharedReporterObject);
-    
-    // If we're running, remove any existing reporter object.
-    if (oldReporterObject != nullptr)
-    {
-        for (auto& ptr : wxGetApp().m_reporters)
-        {
-            if (ptr == oldReporterObject)
-            {
-                oldReporterObject = nullptr;
-                ptr = wxGetApp().m_sharedReporterObject;
-                break;
-            }
-        }
-    }
-    
-    // Make built in FreeDV Reporter client available.
-    if (m_reporterDialog == nullptr)
-    {
-        m_reporterDialog = new FreeDVReporterDialog(this);
-    }
-        
-    m_reporterDialog->setReporter(wxGetApp().m_sharedReporterObject);
-    m_reporterDialog->refreshLayout();
-    
-    // Set up QSY request handler
-    wxGetApp().m_sharedReporterObject->setOnQSYRequestFn(std::bind(&MainFrame::onQsyRequest_, this, _1, _2, _3));
-    
-    auto txStatus = g_tx.load(std::memory_order_acquire);
-    if (!freedvInterface.isRunning())
-    {
-        wxGetApp().m_sharedReporterObject->hideFromView();
-    }
-    else
-    {
-        wxGetApp().m_sharedReporterObject->transmit(freedvInterface.getCurrentTxModeStr(), txStatus);
-        wxGetApp().m_sharedReporterObject->freqChange(wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency);
-    }
-    wxGetApp().m_sharedReporterObject->connect();
-}
-
-void MainFrame::onQsyRequest_(std::string callsign, uint64_t freqHz, std::string message)
-{
-    // A separate object needs to be created here since wxWidgets doesn't support more
-    // than two arguments for CallAfter().
-    QsyRequestArgs* args = new QsyRequestArgs;
-    assert(args != nullptr);
-    args->callsign = std::move(callsign);
-    args->freqHz = freqHz;
-    args->message = std::move(message);
-
-    CallAfter(&MainFrame::onQsyRequestUIThread_, args);
-}
-
-void MainFrame::onQsyRequestUIThread_(QsyRequestArgs* args)
-{
-    // Copy passed-in args and delete args carrier object.
-    std::string callsign = args->callsign;
-    uint64_t freqHz = args->freqHz;
-    std::string message = args->message;
-    delete args;
-
-    double freqFactor = 1000.0;
-    std::string fmtMsg = "%s has requested that you QSY to %s kHz.";
-        
-    if (!wxGetApp().appConfiguration.reportingConfiguration.reportingFrequencyAsKhz)
-    {
-        freqFactor *= 1000.0;
-        fmtMsg = "%s has requested that you QSY to %s MHz.";
-    }
-        
-    double frequencyReadable = freqHz / freqFactor;
-    wxString freqString;
-    if (wxGetApp().appConfiguration.reportingConfiguration.reportingFrequencyAsKhz)
-    {
-        freqString = wxNumberFormatter::ToString(frequencyReadable, 1);
-    }
-    else
-    {
-        freqString = wxNumberFormatter::ToString(frequencyReadable, 4);
-    }
-    
-    wxString fullMessage = wxString::Format(wxString(fmtMsg), callsign, freqString);
-    int dialogStyle = wxOK | wxICON_INFORMATION | wxCENTRE;
-        
-    if (wxGetApp().rigFrequencyController != nullptr && 
-        (wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqModeChanges || wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqChangesOnly))
-    {
-        fullMessage = wxString::Format(_("%s Would you like to change to that frequency now?"), fullMessage);
-        dialogStyle = wxYES_NO | wxICON_QUESTION | wxCENTRE;
-    }
-        
-    wxMessageDialog messageDialog(this, fullMessage, wxT("FreeDV Reporter"), dialogStyle);
-
-    if (dialogStyle & wxYES_NO)
-    {
-        messageDialog.SetYesNoLabels(_("Change Frequency"), _("Cancel"));
-    }
-
-    auto answer = messageDialog.ShowModal();
-    if (answer == wxID_YES)
-    {
-        // This will implicitly cause Hamlib to change the frequency and mode.
-        m_cboReportFrequency->SetValue(freqString);
-    }
 }
 
 void MainFrame::onAudioEngineError_(IAudioEngine&, std::string const& error, void*)

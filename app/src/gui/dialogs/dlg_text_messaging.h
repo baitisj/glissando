@@ -1,6 +1,6 @@
 //=========================================================================
 // Name:            dlg_text_messaging.h
-// Purpose:         Chat window for FreeDV text messaging.
+// Purpose:         The Glissando chat window, in the console's Chaotica dress.
 //
 // Authors:         FreeDV text messaging contributors
 // License:
@@ -38,8 +38,6 @@
 #include <string>
 #include <vector>
 
-#include <wx/button.h>
-#include <wx/checkbox.h>
 #include <wx/dialog.h>
 #include <wx/html/htmlwin.h>
 #include <wx/listctrl.h>
@@ -50,6 +48,11 @@
 #include "text_messaging/TextMessagingTypes.h"
 #include "text_messaging/TextMessagingProtocol.h"
 
+namespace Chaotica
+{
+class Button;
+}
+
 // The chat window: who has been heard, what has been said, and a place to say
 // something back. All protocol work happens in the session, which keeps
 // running when this window is closed; the dialog only observes it.
@@ -57,7 +60,7 @@ class TextMessagingDialog : public wxDialog, public TextMessaging::ITextMessagin
 {
 public:
     TextMessagingDialog(wxWindow* parent, wxWindowID id = wxID_ANY,
-                        const wxString& title = _("FreeDV Text Chat"),
+                        const wxString& title = _("Glissando Chat"),
                         const wxPoint& pos = wxDefaultPosition,
                         const wxSize& size = wxSize(900, 620),
                         long style = wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER);
@@ -73,7 +76,7 @@ public:
     virtual void onStationsChanged() override;
 
 private:
-    // Colors that work on both a light and a dark desktop.
+    // The console's silver screen greys, as HTML colours for the chat page.
     struct Palette
     {
         wxString page;
@@ -129,12 +132,12 @@ private:
 
     wxListCtrl* m_stationList;
     wxTextCtrl* m_txtAddStation;
-    wxButton* m_btnAddStation;
-    wxButton* m_btnPing;
+    Chaotica::Button* m_btnAddStation;
+    Chaotica::Button* m_btnPing;
     wxHtmlWindow* m_chatWindow;
     wxTextCtrl* m_txtEntry;
-    wxButton* m_btnSend;
-    wxCheckBox* m_chkAutoReply;
+    Chaotica::Button* m_btnSend;
+    Chaotica::Button* m_chkAutoReply;
     wxStaticText* m_txtStatus;
     wxStaticText* m_txtInhibited;
     wxTimer m_refreshTimer;

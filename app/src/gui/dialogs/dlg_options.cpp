@@ -184,13 +184,7 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     m_ckboxPskReporterEnable = new wxCheckBox(sbReporting, wxID_ANY, _("Report to PSK Reporter"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
     sbSizerReportingPSK->Add(m_ckboxPskReporterEnable, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
     sbSizerReportingRows->Add(sbSizerReportingPSK, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
-    
-    // FreeDV Reporter options
-    wxBoxSizer* sbSizerReportingFreeDV = new wxBoxSizer(wxHORIZONTAL);
-    m_ckboxFreeDVReporterEnable = new wxCheckBox(sbReporting, wxID_ANY, _("Report to FreeDV Reporter"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    sbSizerReportingFreeDV->Add(m_ckboxFreeDVReporterEnable, 0,  static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    sbSizerReportingRows->Add(sbSizerReportingFreeDV, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
-    
+
     // UDP reporting options
     wxBoxSizer* sbSizerReportingUDP = new wxBoxSizer(wxHORIZONTAL);
     m_ckboxUDPReportingEnable = new wxCheckBox(sbReporting, wxID_ANY, _("Enable QSO Logging"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
@@ -235,29 +229,6 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     sbSizerReportingRows->Add(sbSizerCsvLog, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
 
     sizerReporting->Add(sbSizerReportingRows, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
-    
-    // FreeDV Reporter options that don't depend on Reporting checkboxes
-    wxStaticBox* sbReportingFreeDV = new wxStaticBox(m_reportingTab, wxID_ANY, _("FreeDV Reporter"));
-    wxStaticBoxSizer* sbSizerReportingFreeDVNoCall = new wxStaticBoxSizer(sbReportingFreeDV, wxHORIZONTAL);
-
-    wxStaticText* labelFreeDVHostName = new wxStaticText(sbReportingFreeDV, wxID_ANY, wxT("Hostname:"), wxDefaultPosition, wxDefaultSize, 0);
-    m_freedvReporterHostname = new wxTextCtrl(sbReportingFreeDV, wxID_ANY,  wxEmptyString, wxDefaultPosition, wxSize(250, -1), 0);
-    sbSizerReportingFreeDVNoCall->Add(labelFreeDVHostName, 0,  static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    sbSizerReportingFreeDVNoCall->Add(m_freedvReporterHostname, 0,  static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-
-    m_ckboxFreeDVReporterUseTls = new wxCheckBox(sbReportingFreeDV, wxID_ANY, _("Secure Connection"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    sbSizerReportingFreeDVNoCall->Add(m_ckboxFreeDVReporterUseTls, 0,  static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-
-    m_useMetricDistances = new wxCheckBox(sbReportingFreeDV, wxID_ANY, _("Distances in km"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    sbSizerReportingFreeDVNoCall->Add(m_useMetricDistances, 0,  static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-
-    m_useCardinalDirections = new wxCheckBox(sbReportingFreeDV, wxID_ANY, _("Show cardinal directions"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    sbSizerReportingFreeDVNoCall->Add(m_useCardinalDirections, 0,  static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-
-    m_ckboxFreeDVReporterForceReceiveOnly = new wxCheckBox(sbReportingFreeDV, wxID_ANY, _("Force RX Only reporting"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    sbSizerReportingFreeDVNoCall->Add(m_ckboxFreeDVReporterForceReceiveOnly, 0,  static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    
-    sizerReporting->Add(sbSizerReportingFreeDVNoCall, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
 
     // Callsign list settings
     wxStaticBoxSizer* sbSizer_callsign_list;
@@ -409,66 +380,6 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     
     sizerDisplay->Add(sbSizer_waterfallColor, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
 
-    //----------------------------------------------------------
-    // FreeDV Reporter colors
-    //----------------------------------------------------------
-    wxStaticBox* sb_reporterColor = new wxStaticBox(m_displayTab, wxID_ANY, _("FreeDV Reporter colors"));
-    wxStaticBoxSizer* sbSizer_reporterColor =  new wxStaticBoxSizer(sb_reporterColor, wxVERTICAL);
-
-    wxFlexGridSizer* reporterColorSizer = new wxFlexGridSizer(5, wxSize(5, 5));
-
-    // TX colors
-    wxStaticText* labelReporterTxStation = new wxStaticText(sb_reporterColor, wxID_ANY, wxT("TX Stations:"), wxDefaultPosition, wxDefaultSize, 0);
-    reporterColorSizer->Add(labelReporterTxStation, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-
-    wxStaticText* labelReporterTxBackgroundColor = new wxStaticText(sb_reporterColor, wxID_ANY, wxT("Background"), wxDefaultPosition, wxDefaultSize, 0);
-    reporterColorSizer->Add(labelReporterTxBackgroundColor, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-
-    m_freedvReporterTxBackgroundColor = new wxColourPickerCtrl(sb_reporterColor, wxID_ANY);
-    reporterColorSizer->Add(m_freedvReporterTxBackgroundColor, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    
-    wxStaticText* labelReporterTxForegroundColor = new wxStaticText(sb_reporterColor, wxID_ANY, wxT("Foreground"), wxDefaultPosition, wxDefaultSize, 0);
-    reporterColorSizer->Add(labelReporterTxForegroundColor, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-
-    m_freedvReporterTxForegroundColor = new wxColourPickerCtrl(sb_reporterColor, wxID_ANY);
-    reporterColorSizer->Add(m_freedvReporterTxForegroundColor, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-
-    // RX colors
-    wxStaticText* labelReporterRxStation = new wxStaticText(sb_reporterColor, wxID_ANY, wxT("RX Stations:"), wxDefaultPosition, wxDefaultSize, 0);
-    reporterColorSizer->Add(labelReporterRxStation, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-
-    wxStaticText* labelReporterRxBackgroundColor = new wxStaticText(sb_reporterColor, wxID_ANY, wxT("Background"), wxDefaultPosition, wxDefaultSize, 0);
-    reporterColorSizer->Add(labelReporterRxBackgroundColor, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-
-    m_freedvReporterRxBackgroundColor = new wxColourPickerCtrl(sb_reporterColor, wxID_ANY);
-    reporterColorSizer->Add(m_freedvReporterRxBackgroundColor, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    
-    wxStaticText* labelReporterRxForegroundColor = new wxStaticText(sb_reporterColor, wxID_ANY, wxT("Foreground"), wxDefaultPosition, wxDefaultSize, 0);
-    reporterColorSizer->Add(labelReporterRxForegroundColor, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-
-    m_freedvReporterRxForegroundColor = new wxColourPickerCtrl(sb_reporterColor, wxID_ANY);
-    reporterColorSizer->Add(m_freedvReporterRxForegroundColor, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-
-    // Message colors
-    wxStaticText* labelReporterMsgStation = new wxStaticText(sb_reporterColor, wxID_ANY, wxT("Message updates:"), wxDefaultPosition, wxDefaultSize, 0);
-    reporterColorSizer->Add(labelReporterMsgStation, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-
-    wxStaticText* labelReporterMsgBackgroundColor = new wxStaticText(sb_reporterColor, wxID_ANY, wxT("Background"), wxDefaultPosition, wxDefaultSize, 0);
-    reporterColorSizer->Add(labelReporterMsgBackgroundColor, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-
-    m_freedvReporterMsgBackgroundColor = new wxColourPickerCtrl(sb_reporterColor, wxID_ANY);
-    reporterColorSizer->Add(m_freedvReporterMsgBackgroundColor, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    
-    wxStaticText* labelReporterMsgForegroundColor = new wxStaticText(sb_reporterColor, wxID_ANY, wxT("Foreground"), wxDefaultPosition, wxDefaultSize, 0);
-    reporterColorSizer->Add(labelReporterMsgForegroundColor, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-
-    m_freedvReporterMsgForegroundColor = new wxColourPickerCtrl(sb_reporterColor, wxID_ANY);
-    reporterColorSizer->Add(m_freedvReporterMsgForegroundColor, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-
-    sbSizer_reporterColor->Add(reporterColorSizer, 0, static_cast<int>(wxALL), 5);
-
-    sizerDisplay->Add(sbSizer_reporterColor, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
-    
     // Plot settings
     wxStaticBox* sb_PlotSettings = new wxStaticBox(m_displayTab, wxID_ANY, _("Plot settings"));
     wxStaticBoxSizer* sbSizer_PlotSettings =  new wxStaticBoxSizer(sb_PlotSettings, wxVERTICAL);
@@ -855,9 +766,6 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     
     m_txt_grid_square->MoveBeforeInTabOrder(m_ckboxManualFrequencyReporting);
     m_ckboxManualFrequencyReporting->MoveBeforeInTabOrder(m_ckboxPskReporterEnable);
-    m_ckboxPskReporterEnable->MoveBeforeInTabOrder(m_ckboxFreeDVReporterEnable);
-    m_ckboxFreeDVReporterEnable->MoveBeforeInTabOrder(m_freedvReporterHostname);
-    m_freedvReporterHostname->MoveBeforeInTabOrder(m_useMetricDistances);
     
     m_waterfallColorScheme1->MoveBeforeInTabOrder(m_waterfallColorScheme2);
     m_waterfallColorScheme2->MoveBeforeInTabOrder(m_waterfallColorScheme3);
@@ -937,7 +845,6 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     m_BtnFifoReset->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(OptionsDlg::OnFifoReset), NULL, this);
 
     m_ckboxReportingEnable->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnReportingEnable), NULL, this);
-    m_ckboxFreeDVReporterEnable->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnReportingEnable), NULL, this);
     m_ckboxUDPReportingEnable->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnReportingEnable), NULL, this);
     m_ckboxUDPBroadcastEnable->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnReportingEnable), NULL, this);
     m_ckboxTone->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnToneStateEnable), NULL, this);
@@ -995,7 +902,6 @@ OptionsDlg::~OptionsDlg()
 #endif
     
     m_ckboxReportingEnable->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnReportingEnable), NULL, this);
-    m_ckboxFreeDVReporterEnable->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnReportingEnable), NULL, this);
     m_ckboxUDPReportingEnable->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnReportingEnable), NULL, this);
     m_ckboxUDPBroadcastEnable->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnReportingEnable), NULL, this);
     m_ckboxTone->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnToneStateEnable), NULL, this);
@@ -1020,7 +926,6 @@ OptionsDlg::~OptionsDlg()
     m_freqListMoveDown->Disconnect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(OptionsDlg::OnReportingFreqMoveDown), NULL, this);
 }
 
-
 //-------------------------------------------------------------------------
 // ExchangeData()
 //-------------------------------------------------------------------------
@@ -1028,21 +933,6 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
 {
     if(inout == EXCHANGE_DATA_IN)
     {
-        // Populate FreeDV Reporter color settings
-        wxColour rxBackgroundColor(wxGetApp().appConfiguration.reportingConfiguration.freedvReporterRxRowBackgroundColor);
-        wxColour rxForegroundColor(wxGetApp().appConfiguration.reportingConfiguration.freedvReporterRxRowForegroundColor);
-        wxColour txBackgroundColor(wxGetApp().appConfiguration.reportingConfiguration.freedvReporterTxRowBackgroundColor);
-        wxColour txForegroundColor(wxGetApp().appConfiguration.reportingConfiguration.freedvReporterTxRowForegroundColor);
-        wxColour msgBackgroundColor(wxGetApp().appConfiguration.reportingConfiguration.freedvReporterMsgRowBackgroundColor);
-        wxColour msgForegroundColor(wxGetApp().appConfiguration.reportingConfiguration.freedvReporterMsgRowForegroundColor);
-
-        m_freedvReporterRxBackgroundColor->SetColour(rxBackgroundColor);
-        m_freedvReporterRxForegroundColor->SetColour(rxForegroundColor);
-        m_freedvReporterTxBackgroundColor->SetColour(txBackgroundColor);
-        m_freedvReporterTxForegroundColor->SetColour(txForegroundColor);
-        m_freedvReporterMsgBackgroundColor->SetColour(msgBackgroundColor);
-        m_freedvReporterMsgForegroundColor->SetColour(msgForegroundColor);
-
         // Populate reporting frequency list.
         for (auto& item : wxGetApp().appConfiguration.reportingConfiguration.reportingFrequencyList.get())
         {
@@ -1113,7 +1003,6 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
 
         m_experimentalFeatures->SetValue(wxGetApp().appConfiguration.experimentalFeatures);
 
-
         m_ckboxFreeDV700txClip->SetValue(wxGetApp().appConfiguration.freedv700Clip);
         m_ckboxFreeDV700txBPF->SetValue(wxGetApp().appConfiguration.freedv700TxBPF);
         m_ckboxAutoStartOnLaunch->SetValue(wxGetApp().appConfiguration.autoStartOnLaunch);
@@ -1130,15 +1019,7 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         
         // PSK Reporter options
         m_ckboxPskReporterEnable->SetValue(wxGetApp().appConfiguration.reportingConfiguration.pskReporterEnabled);
-        
-        // FreeDV Reporter options
-        m_ckboxFreeDVReporterEnable->SetValue(wxGetApp().appConfiguration.reportingConfiguration.freedvReporterEnabled);
-        m_freedvReporterHostname->SetValue(wxGetApp().appConfiguration.reportingConfiguration.freedvReporterHostname);
-        m_ckboxFreeDVReporterUseTls->SetValue(wxGetApp().appConfiguration.reportingConfiguration.freedvReporterUseTls);
-        m_useMetricDistances->SetValue(wxGetApp().appConfiguration.reportingConfiguration.useMetricDistances);
-        m_useCardinalDirections->SetValue(wxGetApp().appConfiguration.reportingConfiguration.reportingDirectionAsCardinal);
-        m_ckboxFreeDVReporterForceReceiveOnly->SetValue(wxGetApp().appConfiguration.reportingConfiguration.freedvReporterForceReceiveOnly);
-        
+
         // UDP reporting options
         m_ckboxUDPReportingEnable->SetValue(wxGetApp().appConfiguration.reportingConfiguration.udpReportingEnabled);
         m_udpHostname->SetValue(wxGetApp().appConfiguration.reportingConfiguration.udpReportingHostname);
@@ -1215,25 +1096,6 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
 
     if(inout == EXCHANGE_DATA_OUT)
     {
-        // Populate FreeDV Reporter color settings
-        wxColour rxBackgroundColor = m_freedvReporterRxBackgroundColor->GetColour();
-        wxGetApp().appConfiguration.reportingConfiguration.freedvReporterRxRowBackgroundColor = rxBackgroundColor.GetAsString(wxC2S_HTML_SYNTAX);
-
-        wxColour rxForegroundColor = m_freedvReporterRxForegroundColor->GetColour();
-        wxGetApp().appConfiguration.reportingConfiguration.freedvReporterRxRowForegroundColor = rxForegroundColor.GetAsString(wxC2S_HTML_SYNTAX);
-
-        wxColour txBackgroundColor = m_freedvReporterTxBackgroundColor->GetColour();
-        wxGetApp().appConfiguration.reportingConfiguration.freedvReporterTxRowBackgroundColor = txBackgroundColor.GetAsString(wxC2S_HTML_SYNTAX);
-
-        wxColour txForegroundColor = m_freedvReporterTxForegroundColor->GetColour();
-        wxGetApp().appConfiguration.reportingConfiguration.freedvReporterTxRowForegroundColor = txForegroundColor.GetAsString(wxC2S_HTML_SYNTAX);
-
-        wxColour msgBackgroundColor = m_freedvReporterMsgBackgroundColor->GetColour();
-        wxGetApp().appConfiguration.reportingConfiguration.freedvReporterMsgRowBackgroundColor = msgBackgroundColor.GetAsString(wxC2S_HTML_SYNTAX);
-
-        wxColour msgForegroundColor = m_freedvReporterMsgForegroundColor->GetColour();
-        wxGetApp().appConfiguration.reportingConfiguration.freedvReporterMsgRowForegroundColor = msgForegroundColor.GetAsString(wxC2S_HTML_SYNTAX);
-
         // Save new reporting frequency list.
         std::vector<wxString> tmpList;
         tmpList.reserve(m_freqList->GetCount());
@@ -1341,15 +1203,7 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         
         // PSK Reporter options
         wxGetApp().appConfiguration.reportingConfiguration.pskReporterEnabled = m_ckboxPskReporterEnable->GetValue();
-        
-        // FreeDV Reporter options
-        wxGetApp().appConfiguration.reportingConfiguration.freedvReporterEnabled = m_ckboxFreeDVReporterEnable->GetValue();
-        wxGetApp().appConfiguration.reportingConfiguration.freedvReporterHostname = m_freedvReporterHostname->GetValue();
-        wxGetApp().appConfiguration.reportingConfiguration.freedvReporterUseTls = m_ckboxFreeDVReporterUseTls->GetValue();
-        wxGetApp().appConfiguration.reportingConfiguration.useMetricDistances = m_useMetricDistances->GetValue();
-        wxGetApp().appConfiguration.reportingConfiguration.freedvReporterForceReceiveOnly = m_ckboxFreeDVReporterForceReceiveOnly->GetValue();
-        wxGetApp().appConfiguration.reportingConfiguration.reportingDirectionAsCardinal = m_useCardinalDirections->GetValue();
-        
+
         // UDP reporting options
         wxGetApp().appConfiguration.reportingConfiguration.udpReportingEnabled = m_ckboxUDPReportingEnable->GetValue();
         wxGetApp().appConfiguration.reportingConfiguration.udpReportingHostname = m_udpHostname->GetValue();
@@ -1487,7 +1341,6 @@ void OptionsDlg::OnChannelNoise(wxScrollEvent&) {
     updateChannelNoiseState();
 }
 
-
 void OptionsDlg::OnChooseVoiceKeyerWaveFilePath(wxCommandEvent&) {
     wxDirDialog pathDialog(
                                 this,
@@ -1560,7 +1413,6 @@ void OptionsDlg::OnDebugConsole(wxScrollEvent&) {
 #endif
 }
 
-
 void OptionsDlg::OnFifoReset(wxCommandEvent&)
 {
     g_infifo1_full.store(0, std::memory_order_relaxed);
@@ -1578,9 +1430,6 @@ void OptionsDlg::updateReportingState()
     {
         m_ckbox_use_utc_time->Enable(true);
         m_ckboxReportingEnable->Enable(true);
-        m_useMetricDistances->Enable(true);
-        m_freedvReporterHostname->Enable(true);
-        m_ckboxFreeDVReporterUseTls->Enable(true);
 
         if (m_ckboxReportingEnable->GetValue())
         {
@@ -1589,9 +1438,6 @@ void OptionsDlg::updateReportingState()
             m_txt_grid_square->Enable(true);
             m_ckboxManualFrequencyReporting->Enable(true);
             m_ckboxPskReporterEnable->Enable(true);
-            m_ckboxFreeDVReporterEnable->Enable(true);
-            m_ckboxFreeDVReporterForceReceiveOnly->Enable(true);
-            m_useCardinalDirections->Enable(true);
             m_ckboxUDPReportingEnable->Enable(true);
 
             if (m_ckboxUDPReportingEnable->GetValue())
@@ -1624,10 +1470,7 @@ void OptionsDlg::updateReportingState()
             m_txt_callsign->Enable(false);
             m_txt_grid_square->Enable(false);
             m_ckboxPskReporterEnable->Enable(false);
-            m_ckboxFreeDVReporterEnable->Enable(false);
             m_ckboxManualFrequencyReporting->Enable(false);
-            m_ckboxFreeDVReporterForceReceiveOnly->Enable(true);
-            m_useCardinalDirections->Enable(true);
             m_udpHostname->Enable(false);
             m_udpPort->Enable(false);
             m_ckboxUDPReportingEnable->Enable(false);
@@ -1645,12 +1488,6 @@ void OptionsDlg::updateReportingState()
         m_txt_grid_square->Enable(false);
         m_ckboxManualFrequencyReporting->Enable(false);
         m_ckboxPskReporterEnable->Enable(false);
-        m_ckboxFreeDVReporterEnable->Enable(false);
-        m_useMetricDistances->Enable(false);
-        m_freedvReporterHostname->Enable(false);
-        m_ckboxFreeDVReporterUseTls->Enable(false);
-        m_ckboxFreeDVReporterForceReceiveOnly->Enable(false);
-        m_useCardinalDirections->Enable(false);
         m_udpHostname->Enable(false);
         m_udpPort->Enable(false);
         m_ckboxUDPReportingEnable->Enable(false);

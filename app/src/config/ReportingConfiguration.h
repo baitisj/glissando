@@ -45,28 +45,6 @@ public:
     ConfigurationDataElement<bool> manualFrequencyReporting;
     
     ConfigurationDataElement<bool> pskReporterEnabled;
-    
-    ConfigurationDataElement<bool> freedvReporterEnabled;
-    ConfigurationDataElement<bool> freedvReporterForcedOff;
-    ConfigurationDataElement<wxString> freedvReporterHostname;
-    ConfigurationDataElement<bool> freedvReporterUseTls;
-    ConfigurationDataElement<int> freedvReporterBandFilter;
-    ConfigurationDataElement<bool> useMetricDistances;
-    ConfigurationDataElement<bool> freedvReporterBandFilterTracksFrequency;
-    ConfigurationDataElement<bool> freedvReporterForceReceiveOnly;
-    ConfigurationDataElement<bool> freedvReporterBandFilterTracksFreqBand;
-    ConfigurationDataElement<bool> freedvReporterBandFilterTracksExactFreq;
-    ConfigurationDataElement<wxString> freedvReporterStatusText;
-    ConfigurationDataElement<std::vector<wxString> > freedvReporterRecentStatusTexts;
-    
-    ConfigurationDataElement<std::vector<int> > freedvReporterColumnOrder;
-    ConfigurationDataElement<std::vector<bool> > freedvReporterColumnVisibility;
-
-    ConfigurationDataElement<bool> freedvReporterEnableMaxIdleFilter;
-    ConfigurationDataElement<int> freedvReporterMaxIdleMinutes;
-
-    ConfigurationDataElement<std::vector<int> > freedvReporterColumnFilterOperators;
-    ConfigurationDataElement<std::vector<wxString> > freedvReporterColumnFilterValues;
 
     ConfigurationDataElement<bool> udpReportingEnabled;
     ConfigurationDataElement<wxString> udpReportingHostname;
@@ -80,15 +58,7 @@ public:
     
     ConfigurationDataElement<std::vector<wxString> > reportingFrequencyList;
 
-    ConfigurationDataElement<wxString> freedvReporterTxRowBackgroundColor;
-    ConfigurationDataElement<wxString> freedvReporterTxRowForegroundColor;
-    ConfigurationDataElement<wxString> freedvReporterRxRowBackgroundColor;
-    ConfigurationDataElement<wxString> freedvReporterRxRowForegroundColor;
-    ConfigurationDataElement<wxString> freedvReporterMsgRowBackgroundColor;
-    ConfigurationDataElement<wxString> freedvReporterMsgRowForegroundColor;
-    
     ConfigurationDataElement<bool> reportingFrequencyAsKhz;
-    ConfigurationDataElement<bool> reportingDirectionAsCardinal;
 
     ConfigurationDataElement<wxString> csvLogFilePath;
 
