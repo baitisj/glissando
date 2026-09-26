@@ -28,9 +28,9 @@ def snr_grid(gi, chan):
 
 
 def trial(args):
-    gi, chan, snr, seed = args
+    gi, chan, snr, seed, scale = args
     rng = np.random.default_rng(seed)
-    gear = g.GEARS[gi]
+    gear = g.GEARS[gi].with_scale(scale)
     payloads = [rng.integers(0, 2, 77) for _ in range(gear.voices)]
     x = g.transmit(payloads, gear)
     lead = int(rng.uniform(0.3, 1.2) * g.FS)
@@ -50,9 +50,10 @@ def main():
     ap.add_argument("--gears", type=int, nargs="+", default=[1, 2, 3, 4, 5])
     ap.add_argument("--channels", nargs="+", default=["awgn", "moderate", "poor"])
     ap.add_argument("--trials", type=int, default=40)
+    ap.add_argument("--scale", default="pentatonic", choices=list(g.SCALES))
     ap.add_argument("--out", default="sim_results.json")
     a = ap.parse_args()
-    jobs = [(gi, c, snr, zlib.crc32(f"{gi}/{c}/{snr}/{t}".encode()))
+    jobs = [(gi, c, snr, zlib.crc32(f"{gi}/{c}/{snr}/{t}".encode()), a.scale)
             for gi in a.gears for c in a.channels for snr in snr_grid(gi, c) for t in range(a.trials)]
     with Pool() as pool:
         rows = pool.map(trial, jobs, chunksize=4)

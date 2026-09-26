@@ -38,6 +38,15 @@ def main():
         write_wav(os.path.join(SAMPLES, name + ".wav"), x)
         # Only the gear's own decoder can hear it through noise; check that.
         assert g.receive(x, gear)[0][0] is not None
+    # The tritone scales: Allegro solo in each, and the duet a tritone apart.
+    devil = np.random.default_rng(666)  # its own stream keeps the samples above byte-identical
+    for scale in [k for k in g.SCALES if k != "pentatonic"]:
+        for gi in (3, 5):
+            gear = g.GEARS[gi].with_scale(scale)
+            payloads = [devil.integers(0, 2, 77) for _ in range(gear.voices)]
+            x = np.concatenate([pad, g.transmit(payloads, gear), pad])
+            write_wav(os.path.join(SAMPLES, f"g{gi}-{gear.tempo.lower().replace(' ', '-')}-{scale}.wav"), x)
+            assert all(p is not None for p, _ in g.receive(x, gear))
     # What it sounds like on the air: Allegro through a moderate HF path at -10 dB.
     x = ch.hf_channel(clips[3], "moderate", rng)
     y = ch.add_noise(x, -10, rng, 0.5)

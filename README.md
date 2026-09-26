@@ -22,6 +22,9 @@ consonant. It shifts gears (tempo) to match the HF path.
 - Design and trade-offs: [docs/DESIGN.md](docs/DESIGN.md)
 - Listen: [samples/](samples/) (8 kHz WAV; `g3-allegro-moderate-hf-minus10db.wav`
   is what it sounds like through a fading HF path at -10 dB SNR)
+- The devil's interval: `--scale wholetone|diminished|diabolus` swaps the
+  pentatonic alphabet for a tritone-built one (`samples/*-wholetone.wav` etc.;
+  DESIGN.md 3.1a has the notes and what they cost)
 - Prototype: [prototype/](prototype/) (Python 3 + NumPy)
 
 ```sh
@@ -29,6 +32,11 @@ cd prototype
 python3 -m pip install numpy matplotlib
 python3 render.py                    # listening samples + spectrogram
 python3 sim.py --gears 3 --trials 20 # decode-probability sweep
+python3 bench.py --backend pulse --null-sink --gears 4 --snr -16 -14 -12
+                                     # same sweep through PulseAudio (Linux):
+                                     # a null-sink loopback, or --sink/--source
+                                     # for a rig's sound card
+python3 -m pytest                    # tests (the PulseAudio test skips without a server)
 ```
 
 ![Spectrogram](docs/spectrogram.png)

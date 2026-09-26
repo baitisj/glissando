@@ -9,6 +9,7 @@ correlations double as a channel sounder for gear shifting.
 
 See docs/DESIGN.md for the reasoning behind every number here.
 """
+import dataclasses
 from dataclasses import dataclass
 
 import numpy as np
@@ -20,6 +21,29 @@ FS = 8000  # audio sample rate, Hz
 # A minor pentatonic (equal temperament, A4 = 440 Hz).
 VOICE_LOW = np.array([329.63, 392.00, 440.00, 523.25, 587.33, 659.26, 783.99, 880.00])  # E4..A5
 VOICE_HIGH = np.array([1046.50, 1174.66, 1318.51, 1567.98, 1760.00, 2093.00, 2349.32, 2637.02])  # C6..E7
+
+
+
+def _midi(*nums):
+    return 440.0 * 2.0 ** ((np.array(nums, dtype=float) - 69) / 12)
+
+
+# Alternative scales, for the ear more than for the link budget. Each is a
+# (low voice, high voice) pair of 8 notes; the high voice of every tritone
+# scale is the low voice a tritone plus an octave up, which maps these
+# symmetric scales onto themselves, so a duet is a tritone apart too.
+#   wholetone   E4..F#5 in whole tones: notes 3 steps apart are a tritone,
+#               so the Costas motif and most data glides land on one.
+#   diminished  half-whole octatonic on E: every note has its tritone in
+#               the scale; the semitones cost no sensitivity at G3 (DESIGN 3.1a).
+#   diabolus    E major and Bb major triads a tritone apart (the Petrushka
+#               chord), plus the octave of each root.
+SCALES = {
+    "pentatonic": (VOICE_LOW, VOICE_HIGH),
+    "wholetone": (_midi(64, 66, 68, 70, 72, 74, 76, 78), _midi(82, 84, 86, 88, 90, 92, 94, 96)),
+    "diminished": (_midi(64, 65, 67, 68, 70, 71, 73, 74), _midi(82, 83, 85, 86, 88, 89, 91, 92)),
+    "diabolus": (_midi(64, 68, 70, 71, 74, 76, 77, 80), _midi(82, 86, 88, 89, 92, 94, 95, 98)),
+}
 
 N_NOTES = 8
 BITS_PER_SYMBOL = 3
@@ -44,6 +68,7 @@ class Gear:
     T: float  # symbol duration, seconds
     voices: int  # 1 = solo (low voice), 2 = duet (low + high voice)
     glide: float = 0.4  # fraction of each symbol spent gliding
+    scale: str = "pentatonic"  # key of SCALES
 
     @property
     def L(self):
@@ -56,6 +81,13 @@ class Gear:
     @property
     def payload_bits(self):
         return fec.PAYLOAD_BITS * self.voices
+
+    @property
+    def voice_notes(self):
+        return list(SCALES[self.scale])[: self.voices]
+
+    def with_scale(self, scale):
+        return dataclasses.replace(self, scale=scale)
 
 
 GEARS = {
@@ -136,9 +168,8 @@ def modulate_voice(notes, voice_notes, gear):
 
 def transmit(payloads, gear, ramp=0.01):
     """Real audio for one transmission (peak amplitude 1, constant envelope)."""
-    voices = [VOICE_LOW, VOICE_HIGH][: gear.voices]
     x = 0
-    for p, vn in zip(payloads, voices):
+    for p, vn in zip(payloads, gear.voice_notes):
         x = x + modulate_voice(frame_notes(fec.encode_frame(p)), vn, gear)
     x = x / gear.voices
     r = int(ramp * FS)  # short fade in/out, keeps the key-down click off the air
@@ -440,7 +471,7 @@ def receive(audio, gear, t_range=None, f_max=25.0, top=3):
     if t_range is None:
         t_range = (0, len(z))
     results = []
-    for vn in [VOICE_LOW, VOICE_HIGH][: gear.voices]:
+    for vn in gear.voice_notes:
         voice = _voice_cache(tuple(vn), gear)
         best = (None, None)
         for s in sync_search(z, gear, voice, t_range, f_max, top):
