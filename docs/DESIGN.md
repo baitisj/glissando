@@ -198,9 +198,14 @@ profiles. A gear cannot measure Doppler faster than about 1/(2T), so a
 slow gear reports "at least this much" and the rule steps up.
 
 **The rule** (`recommend_gear` in the prototype): choose the fastest gear
-whose threshold, plus a 3 dB margin, is below the measured SNR and whose
-symbol length times Doppler spread is at most 0.25. If none fits, choose
-the slowest gear the Doppler spread allows.
+whose 90 % threshold on a moderate path, plus a 2 dB margin, is below the
+measured SNR and whose symbol length times Doppler spread is at most 1.
+If none fits, choose the slowest gear the Doppler spread allows. The
+simulations (section 7) showed the Doppler limit matters less than
+expected: on the CCIR "poor" path (1 Hz spread) the 640 ms gear still
+decodes 2 dB deeper than the 320 ms gear, because 58 to 121 Hz note
+spacing leaves a 1 Hz smear harmless. The limit is there for flutter and
+auroral paths (10 Hz and up), where it pushes the mode to faster tempos.
 
 **The protocol.** Stations exchange the measurement in the report they
 already send. A proposed message field: the usual SNR report plus a 3-bit
@@ -225,7 +230,51 @@ audio -> analytic signal -> sync search (dechirp + FFT, all gears)
 
 ## 7. Measured performance
 
-MEASURED_PLACEHOLDER
+Blind receive: random start time (0.3 to 1.2 s), random frequency offset
+(+/-15 Hz), searched over 1.5 s and +/-25 Hz. 40 trials per point, 7000
+trials in all (`prototype/sim.py`, raw data in
+`prototype/sim_results.json`). SNR is average signal power over noise in
+2500 Hz, the WSJT-X convention. Numbers are the SNR (dB) for 50 % and 90 %
+of messages decoded with a correct CRC. Fading paths are the Watterson
+two-path model: moderate = 1 ms delay, 0.5 Hz Doppler spread; poor = 2 ms,
+1 Hz (ITU-R F.1487 mid-latitude profiles).
+
+| Gear | Length | AWGN 50 % / 90 % | Moderate 50 % / 90 % | Poor 50 % / 90 % |
+|---|---|---|---|---|
+| G1 Adagio | 55.0 s | **-26.5** / -25.2 | -24.0 / -22.2 | -23.0 / -21.2 |
+| G2 Andante | 27.5 s | -23.6 / -22.7 | -21.0 / -19.1 | -20.8 / -18.8 |
+| G3 Allegro | 13.8 s | -20.4 / -18.6 | -18.4 / -15.5 | -17.6 / -15.5 |
+| G4 Presto | 6.9 s | -17.4 / -16.2 | -15.2 / -13.0 | -14.2 / -12.1 |
+| G5 Presto duet | 6.9 s, 2 msgs | -14.1 / -13.1 | -10.5 / -7.8 | -10.8 / -9.3 |
+
+For comparison, the published 50 % sensitivities in the WSJT-X
+documentation are about -21 dB for FT8 (12.6 s) and -25 dB for JT65
+(about 47 s), and WSPR reaches about -31 dB in 110 s with a much smaller
+payload. Glissando's G3 sits about 0.5 dB behind FT8 at similar length,
+and G1 matches JT65 territory, with the prototype's convolutional code and
+without FT8's a-priori decoding or averaging. Each doubling of tempo costs
+2.9 to 3.1 dB in AWGN, as it should.
+
+Fading costs 2 to 4 dB at the 90 % point. The duet loses most on fading
+paths because each voice fades independently and both must decode.
+
+**False decodes:** 1 in 7000 (G1, moderate path, -25 dB), a wrong message
+that passed the 14-bit CRC after the receiver tried three sync candidates.
+FT8 handles this with extra plausibility checks on decoded messages; the
+real-time decoder should do the same.
+
+**Path sounding** (median over 40 decodes at high SNR, Doppler spread in Hz):
+
+| Gear | AWGN (0) | Moderate (0.5) | Poor (1.0) |
+|---|---|---|---|
+| G1 | 0.03 | 0.42 | 0.97 |
+| G2 | 0.04 | 0.42 | 0.78 |
+| G3 | 0.04 | 0.49 | 1.04 |
+| G4 | 0.04 | 0.57 | 1.06 |
+
+The SNR estimate reads within about 1 dB of the truth from threshold up to
+about -10 dB and reads low above that. That is fine for gear decisions,
+which happen near threshold.
 
 ## 8. Multiple stations
 
@@ -249,10 +298,9 @@ The default is A for everyone and time sharing; keys are for busy bands.
 | glides (40 %) | neighbouring glides correlate up to 0.21 at 80 ms | audible glissandi, continuous phase, compact spectrum |
 | constant envelope | none versus FT8 | full-power operation |
 
-The honest headline: at equal transmission time Glissando's solo gears
-land within a couple of dB of FT8 (G3 against FT8's 12.6 s) and the slow
-gear gets into WSPR/JT65 territory, while sounding like music. Most of the
-remaining gap closes with the LDPC code.
+The honest headline: at a similar transmission length G3 lands about
+0.5 dB behind FT8 and G1 matches JT65, while sounding like music. The LDPC
+code should more than close that gap (an estimate, not yet measured).
 
 ## 10. Roadmap
 

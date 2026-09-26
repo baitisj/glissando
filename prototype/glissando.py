@@ -472,12 +472,14 @@ def _voice_cache(notes, gear):
 
 # ---------------------------------------------------------------- gear shifting
 
-# Required SNR (2500 Hz) for 90 % decode on a moderate channel, and the
-# largest symbol-duration x Doppler-spread product each gear tolerates,
-# from the prototype's measurements (docs/DESIGN.md, "Measured performance").
-GEAR_TABLE = {1: -26.0, 2: -23.5, 3: -20.5, 4: -17.5, 5: -14.0}
-MAX_T_FD = 0.25
-MARGIN_DB = 3.0
+# SNR (2500 Hz) for 90 % decode on the CCIR "moderate" path, from the
+# prototype's sweeps (docs/DESIGN.md, "Measured performance"), and the
+# largest symbol-duration x Doppler-spread product a gear is used at. The
+# sweeps show G1 still beats G2 on the CCIR "poor" path (T x fd = 0.64),
+# so the Doppler limit only bites on flutter / auroral paths.
+GEAR_TABLE = {1: -22.2, 2: -19.1, 3: -15.5, 4: -13.0, 5: -7.8}
+MAX_T_FD = 1.0
+MARGIN_DB = 2.0
 
 
 def recommend_gear(snr_db, doppler_hz):
