@@ -22,9 +22,8 @@ consonant. It shifts gears (tempo) to match the HF path.
 - Design and trade-offs: [docs/DESIGN.md](docs/DESIGN.md)
 - Listen: [samples/](samples/) (8 kHz WAV; `g3-allegro-moderate-hf-minus10db.wav`
   is what it sounds like through a fading HF path at -10 dB SNR)
-- The devil's interval: `--scale wholetone|diminished|diabolus` swaps the
-  pentatonic alphabet for a tritone-built one (`samples/*-wholetone.wav` etc.;
-  DESIGN.md 3.1a has the notes and what they cost)
+- Modes: see [Scales](#scales) below for the pentatonic default and the
+  three tritone modes
 - Prototype: [prototype/](prototype/) (Python 3 + NumPy)
 
 ```sh
@@ -38,5 +37,36 @@ python3 bench.py --backend pulse --null-sink --gears 4 --snr -16 -14 -12
                                      # for a rig's sound card
 python3 -m pytest                    # tests (the PulseAudio test skips without a server)
 ```
+
+## Scales
+
+The alphabet of eight notes is a parameter (`--scale` on `sim.py` and
+`bench.py`, `SCALES` in `glissando.py`). Two families are included.
+
+**Pentatonic** (the default, `pentatonic`): A minor pentatonic, E4 to A5. It
+has no semitones and no tritone, so every pair of notes is consonant. Any
+data sequence is a tune, and whatever overlaps the signal on an HF band, a
+multipath echo, the duet's second voice, or another Glissando station in
+the same key, lands on it as harmony. Its interference with itself is
+pleasant, which is the point of the mode.
+
+**Tritone** modes (`wholetone`, `diminished`, `diabolus`): the same modem
+gliding between notes built on the devil's interval. They sound like the
+bleeping computers of an evil mastermind's lair in *The Adventures of
+Captain Proton*: whole-tone runs, diminished scurries, and two major triads
+a tritone apart. Each scale maps onto itself under a tritone, so the duet's
+two voices are a tritone apart as well.
+
+| scale | low voice | flavour |
+|---|---|---|
+| `pentatonic` | E4 G4 A4 C5 D5 E5 G5 A5 | whistled folk tune; overlaps are harmony |
+| `wholetone` | E4 F#4 G#4 A#4 C5 D5 E5 F#5 | dreamlike, no centre; notes 3 steps apart are a tritone |
+| `diminished` | E4 F4 G4 G#4 A#4 B4 C#5 D5 | half-whole octatonic; every note has its tritone in the scale |
+| `diabolus` | E4 G#4 A#4 B4 D5 E5 F5 G#5 | E major and Bb major triads a tritone apart |
+
+They cost nothing in sensitivity: at G3 Allegro all four scales decode at
+the same SNR within 0.5 dB (DESIGN.md 3.1a has the table). Listen in
+`samples/`: `g3-allegro-<scale>.wav` for a solo and
+`g5-presto-duet-<scale>.wav` for the duet.
 
 ![Spectrogram](docs/spectrogram.png)
