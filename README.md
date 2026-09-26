@@ -26,6 +26,13 @@ consonant. It shifts gears (tempo) to match the HF path.
 - Modes: see [Scales](#scales) below for the pentatonic default and the
   three tritone modes
 - Prototype: [prototype/](prototype/) (Python 3 + NumPy)
+- Modem in C++: [modem/](modem/), a real-time port of the prototype
+  (streaming receiver, all gears at once), tested against it
+- App: [app/](app/), a desktop console dressed as Chaotica's control room,
+  with a visi-scope waterfall, tuning and gear controls, and text chat
+  carried as Glissando melodies. Build and run notes:
+  [docs/APP.md](docs/APP.md). It started from FreeDV and keeps FreeDV's
+  LGPL 2.1 licence (`app/COPYING`); the rest of the repository is MIT.
 
 ```sh
 cd prototype

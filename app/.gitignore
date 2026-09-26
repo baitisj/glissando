@@ -1,0 +1,17 @@
+/build/
+/build_linux/
+/build_osx/
+/codec2/
+/hamlib/
+/hamlib-code/
+/LPCNet/
+/macdylibbundler/
+/text_chat_loopback/
+
+a.out
+*.o
+*.make
+*.log
+*.marks
+*.AppDir
+*.AppImage

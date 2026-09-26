@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# build_linux.sh
+#
+# Build script for Ubuntu and Fedora Linux, git pulls codec2 and
+# lpcnet repos so they are available for parallel development.
+
+# Echo what you are doing, and fail if any of the steps fail:
+set -x -e
+
+UT_ENABLE=${UT_ENABLE:-0}
+USE_NATIVE_AUDIO=${USE_NATIVE_AUDIO:-1}
+BUILD_TYPE=${BUILD_TYPE:-Debug}
+WITH_ASAN=${WITH_ASAN:-0}
+WITH_RTSAN=${WITH_RTSAN:-0}
+WITH_TSAN=${WITH_TSAN:-0}
+WITH_UBSAN=${WITH_UBSAN:-0}
+STATIC_LIBGCC=${STATIC_LIBGCC:-0}
+ENABLE_LTO=${ENABLE_LTO:-0}
+PGO_INSTRUMENT=${PGO_INSTRUMENT:-0}
+PGO_USE_PROFILE=${PGO_USE_PROFILE:-}
+USE_CCACHE=${USE_CCACHE:-0}
+
+export FREEDVGUIDIR=${PWD}
+
+if [ $USE_CCACHE == 1 ]; then
+    CCACHE_ARGS="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
+else
+    CCACHE_ARGS=""
+fi
+
+# Finally, build freedv-gui
+cd $FREEDVGUIDIR
+if [ -d .git ]; then
+     git pull
+fi
+mkdir  -p build_linux && cd build_linux && rm -Rf *
+cmake ${CCACHE_ARGS} -DPGO_INSTRUMENT=${PGO_INSTRUMENT} -DPGO_USE_PROFILE=${PGO_USE_PROFILE} -DENABLE_LTO=${ENABLE_LTO} -DSTATIC_LIBGCC=${STATIC_LIBGCC} -DENABLE_UBSAN=${WITH_UBSAN} -DENABLE_TSAN=${WITH_TSAN} -DENABLE_RTSAN=${WITH_RTSAN} -DENABLE_ASAN=${WITH_ASAN} -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DUSE_NATIVE_AUDIO=$USE_NATIVE_AUDIO -DUNITTEST=$UT_ENABLE ..
+make -j$(nproc)

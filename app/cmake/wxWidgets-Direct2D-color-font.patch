@@ -1,0 +1,112 @@
+diff --git a/include/wx/msw/setup.h b/include/wx/msw/setup.h
+index be0f273ea..b8de9dbfe 100644
+--- a/include/wx/msw/setup.h
++++ b/include/wx/msw/setup.h
+@@ -1538,7 +1538,7 @@
+ #if defined(_MSC_VER)
+     #define wxUSE_GRAPHICS_DIRECT2D wxUSE_GRAPHICS_CONTEXT
+ #else
+-    #define wxUSE_GRAPHICS_DIRECT2D 0
++    #define wxUSE_GRAPHICS_DIRECT2D wxUSE_GRAPHICS_CONTEXT
+ #endif
+ 
+ // wxWebRequest backend based on WinHTTP.
+diff --git a/src/generic/tipwin.cpp b/src/generic/tipwin.cpp
+index 97139f054..66858dfd0 100644
+--- a/src/generic/tipwin.cpp
++++ b/src/generic/tipwin.cpp
+@@ -32,6 +32,10 @@
+ #include "wx/display.h"
+ #include "wx/vector.h"
+ 
++#if defined(WIN32)
++#include "wx/graphics.h"
++#endif // defined(WIN32)
++
+ // ----------------------------------------------------------------------------
+ // constants
+ // ----------------------------------------------------------------------------
+@@ -375,22 +379,65 @@ void wxTipWindowView::OnPaint(wxPaintEvent& WXUNUSED(event))
+     rect.width = size.x;
+     rect.height = size.y;
+ 
+-    // first filll the background
+-    dc.SetBrush(wxBrush(GetBackgroundColour(), wxBRUSHSTYLE_SOLID));
+-    dc.SetPen(wxPen(GetForegroundColour(), 1, wxPENSTYLE_SOLID));
+-    dc.DrawRectangle(rect);
++#if defined(WIN32)
++    // Tooltips should be rendered with Direct2D if at all possible.
++    wxGraphicsRenderer* renderer = wxGraphicsRenderer::GetDirect2DRenderer();
++    wxGraphicsContext* context = nullptr;
++    if (renderer != nullptr)
++    {
++        context = renderer->CreateContextFromUnknownDC(dc);
++        if (context != nullptr)
++        {
++            // first fill the background
++            context->SetBrush(wxBrush(GetBackgroundColour(), wxBRUSHSTYLE_SOLID));
++            context->SetPen(wxPen(GetForegroundColour(), 1, wxPENSTYLE_SOLID));
++            context->DrawRectangle(0, 0, rect.width - 1, rect.height - 1);
++
++            // and then draw the text line by line
++            context->SetFont(GetFont(), GetForegroundColour());
++        }
++    }
++
++    if (context == nullptr)
++#endif // defined(WIN32)
++    {
++        // first filll the background
++        dc.SetBrush(wxBrush(GetBackgroundColour(), wxBRUSHSTYLE_SOLID));
++        dc.SetPen(wxPen(GetForegroundColour(), 1, wxPENSTYLE_SOLID));
++        dc.DrawRectangle(rect);
++
++        // and then draw the text line by line
++        dc.SetTextBackground(GetBackgroundColour());
++        dc.SetTextForeground(GetForegroundColour());
++        dc.SetFont(GetFont());
++    }
+ 
+-    // and then draw the text line by line
+     wxPoint pt;
+     pt.x = TEXT_MARGIN_X;
+     pt.y = TEXT_MARGIN_Y;
+     const size_t count = m_textLines.size();
+     for ( size_t n = 0; n < count; n++ )
+     {
+-        dc.DrawText(m_textLines[n], pt);
++#if defined(WIN32)
++        if (context != nullptr)
++        {
++            context->DrawText(m_textLines[n], pt.x, pt.y);
++        }
++        else
++#endif // defined(WIN32)
++        {
++            dc.DrawText(m_textLines[n], pt);
++        }
+ 
+         pt.y += m_heightLine;
+     }
++
++#if defined(WIN32)
++    if (context != nullptr)
++    {
++        delete context;
++    }
++#endif // defined(WIN32)
+ }
+ 
+ void wxTipWindowView::OnMouseClick(wxMouseEvent& WXUNUSED(event))
+diff --git a/src/osx/cocoa/dataview.mm b/src/osx/cocoa/dataview.mm
+index 65b49a57b..ebc46a951 100644
+--- a/src/osx/cocoa/dataview.mm
++++ b/src/osx/cocoa/dataview.mm
+@@ -1570,6 +1570,7 @@ outlineView:(NSOutlineView*)outlineView
+         [self setDraggingSourceOperationMask:NSDragOperationEvery forLocal:NO];
+         [self setDraggingSourceOperationMask:NSDragOperationEvery forLocal:YES];
+         [self setTarget:self];
++        self.intercellSpacing = NSZeroSize;
+     }
+     return self;
+ }
