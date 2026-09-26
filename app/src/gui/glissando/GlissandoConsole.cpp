@@ -170,6 +170,7 @@ GlissandoConsole::GlissandoConsole(wxWindow* parent, IGlissandoHost* host,
               wxDEFAULT_FRAME_STYLE)
     , host_(host)
     , settings_(settings)
+    , sendingGear_(settings.gear)
     , timer_(this)
 {
     SetBackgroundColour(Colour::Void);
@@ -289,8 +290,8 @@ void GlissandoConsole::buildControls()
     tempoRow->AddSpacer(10);
     autoButton_ = new Button(modulationPlate, wxID_ANY, _("Auto shift"), true, wxSize(110, 34));
     autoButton_->SetToolTip(_("Pick the tempo from the signal and fading measured on the last "
-                              "frame heard. The lit tempo is the one chosen by hand, used until "
-                              "something has been heard."));
+                              "frame heard. The lit tempo is the one being sent; the one chosen "
+                              "by hand glows faintly and is used until something has been heard."));
     tempoRow->Add(autoButton_, 0);
     modulationPlate->GetContentSizer()->Add(tempoRow, 0, wxBOTTOM, 8);
 
@@ -468,10 +469,7 @@ void GlissandoConsole::setTuning(double hz)
 void GlissandoConsole::applySettings(bool notifyHost)
 {
     // Radio button behaviour for the tempo and scale rows.
-    for (size_t i = 0; i < gearButtons_.size(); i++)
-    {
-        gearButtons_[i]->SetChecked((int)i + Glissando::MIN_GEAR == settings_.gear);
-    }
+    updateGearButtons();
     const Glissando::Scale scales[] = {Glissando::Scale::Pentatonic, Glissando::Scale::WholeTone,
                                        Glissando::Scale::Diminished, Glissando::Scale::Diabolus};
     for (size_t i = 0; i < scaleButtons_.size(); i++)
@@ -491,11 +489,26 @@ void GlissandoConsole::applySettings(bool notifyHost)
     if (notifyHost) host_->glissandoSettingsChanged(settings_);
 }
 
+void GlissandoConsole::updateGearButtons()
+{
+    // The lit tempo is the one going out. In automatic that is the one the
+    // measurements chose, and the tempo picked by hand, which automatic
+    // falls back to when nothing has been heard, glows faintly beside it.
+    int lit = settings_.autoGear ? sendingGear_ : settings_.gear;
+    for (size_t i = 0; i < gearButtons_.size(); i++)
+    {
+        int gear = (int)i + Glissando::MIN_GEAR;
+        gearButtons_[i]->SetChecked(gear == lit);
+        gearButtons_[i]->SetHinted(settings_.autoGear && gear == settings_.gear && gear != lit);
+    }
+}
+
 void GlissandoConsole::updateStaff()
 {
     std::vector<double> notes;
     std::vector<wxString> names;
-    bool duet = settings_.wideScope || (!settings_.autoGear && settings_.gear == 5);
+    int sending = settings_.autoGear ? sendingGear_ : settings_.gear;
+    bool duet = settings_.wideScope || Glissando::gearInfo(sending).voices > 1;
     for (int voice = 0; voice < (duet ? 2 : 1); voice++)
     {
         auto scaleNotes = Glissando::scaleNotes(settings_.scale, voice);
@@ -541,12 +554,11 @@ void GlissandoConsole::refreshTelemetry()
     tempoReadout_->SetText(gearLabel(t.transmitGear));
     frameReadout_->SetText(wxString::Format("%.1f s", Glissando::gearInfo(t.transmitGear).frameSeconds()));
 
-    // In automatic, the tempo chosen by hand stays lit and the one the
-    // measurements chose glows faintly beside it.
-    for (size_t i = 0; i < gearButtons_.size(); i++)
+    if (sendingGear_ != t.transmitGear)
     {
-        int gear = (int)i + Glissando::MIN_GEAR;
-        gearButtons_[i]->SetHinted(settings_.autoGear && gear == t.transmitGear && gear != settings_.gear);
+        sendingGear_ = t.transmitGear;
+        updateGearButtons();
+        updateStaff();
     }
 
     rigReadout_->SetText(t.rigFrequencyKnown ? wxString::Format("%.3f kHz", t.rigFrequencyHz / 1000.0)

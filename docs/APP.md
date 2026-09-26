@@ -70,7 +70,7 @@ longer changes anything.
 | Melody offset | Moves every note by up to +/-250 Hz, on transmit and receive: the audio equivalent of the tuning dial. |
 | Radio dial | Shows the rig frequency. `Presets` drops down the frequency list (edited in Preferences, Options) and `Set` takes a typed one. Rig control and the US data segment check follow it. |
 | Tempo | Adagio (640 ms notes, 55 s frame), Andante, Allegro, Presto (80 ms, 7 s), Duet (two voices, two payloads per frame). |
-| Auto shift | Picks the fastest gear the SNR and Doppler spread measured on the last frame heard support (`recommendGear`, the prototype's table with 2 dB margin). The hand-picked tempo stays lit and is used until something is heard, and again 15 minutes after the last frame. |
+| Auto shift | Picks the fastest gear the SNR and Doppler spread measured on the last frame heard support (`recommendGear`, the prototype's table with 2 dB margin). The tempo being sent lights up; the hand-picked one glows faintly beside it, and is used until something is heard, and again 15 minutes after the last frame. |
 | Scale | Pentatonic (default, harmonious when stations overlap), whole tone, diminished, diabolus (tritones). The scale costs nothing in sensitivity (DESIGN.md 3.1a). |
 | Telemetry | SNR meter, Doppler spread, tempo of the last frame and how long ago, tempo we would send at, and that tempo's frame length. |
 | Engage | Starts and stops audio. |
