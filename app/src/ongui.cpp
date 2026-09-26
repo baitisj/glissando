@@ -138,7 +138,7 @@ void MainFrame::OnToolsTextMessaging(wxCommandEvent&)
     // Picks up history, the current callsign and anything heard while the
     // window was closed.
     m_textMessagingDialog->refreshFromSession();
-    m_textMessagingDialog->SetTitle(m_glissandoConsole != nullptr ? _("Glissando Chat") : _("FreeDV Text Chat"));
+    m_textMessagingDialog->SetTitle(_("Glissando Chat"));
     m_textMessagingDialog->Show();
     m_textMessagingDialog->Iconize(false);
     m_textMessagingDialog->Raise();

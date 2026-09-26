@@ -85,11 +85,9 @@ public:
     // default: an operator elsewhere turns it off.
     ConfigurationDataElement<bool> textChatUsDataSegmentsOnly;
 
-    // The Glissando console and the melodic chirp mode it drives. When
-    // glissandoEnabled is set, text chat goes out as Glissando instead of
-    // over the codec2 data modes. Tuning offset and scan rate are stored in
-    // tenths (Hz, rows per second) so they fit the integer config type.
-    ConfigurationDataElement<bool> glissandoEnabled;
+    // The Glissando console and the melodic chirp mode it drives. Tuning
+    // offset and scan rate are stored in tenths (Hz, rows per second) so
+    // they fit the integer config type.
     ConfigurationDataElement<int> glissandoGear;
     ConfigurationDataElement<bool> glissandoAutoGear;
     ConfigurationDataElement<wxString> glissandoScale;

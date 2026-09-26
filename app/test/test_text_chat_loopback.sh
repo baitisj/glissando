@@ -99,8 +99,7 @@ writeStationConfig () {
 # FREEDV_TEXT_CHAT_UI_LOG makes the chat window report what it is showing, so
 # a refresh bug can be found in the log rather than over someone's shoulder.
 # FREEDV_TEXT_CHAT_RX_LOG reports every frame decoded and every burst lost.
-# FREEDV_EXTRA_ARGS is passed to both stations; --glissando puts each on the
-# Glissando console, so chat runs over the Glissando mode instead.
+# FREEDV_EXTRA_ARGS is passed to both stations.
 startStation () {
     local name=$1 dir=$2
     ( HOME="$dir" FREEDV_TEXT_CHAT_UI_LOG=1 FREEDV_TEXT_CHAT_TX_LOG=1 FREEDV_TEXT_CHAT_RX_LOG=1 \
@@ -147,15 +146,14 @@ doUp () {
 
     cat <<EOF
 
-Both windows are on your desktop. To run the test:
+Each station opens a Glissando console and a chat window. To run the test:
 
-  1. Press Start in BOTH windows. Text chat cannot transmit until FreeDV is
+  1. Press Engage on BOTH consoles. Text chat cannot transmit until audio is
      running, because it borrows the transmit thread from the mic pipeline.
-  2. Open Tools -> Text Chat... in both.
-  3. From A, Send as Broadcast. B should list A under Heard Stations.
-  4. Select the other station in Heard Stations and Ping it, then Send an
+  2. From A's chat window, send a Broadcast. B should list A under Heard Stations.
+  3. Select the other station in Heard Stations and Ping it, then Send an
      addressed message and watch the delivery chip go SENDING -> OK.
-  5. Send something over $((39 * 2)) characters to exercise fragmentation, and
+  4. Send something over $((39 * 2)) characters to exercise fragmentation, and
      close B mid-message to watch A go RETRY 1..3 and then FAILED.
 
   tail -f $WORKDIR/station{A,B}/freedv.log

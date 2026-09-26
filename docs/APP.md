@@ -15,9 +15,11 @@ that the modem's tests are checked against.
 `app/COPYING` (LGPL 2.1) covers everything under `app/`. The rest of this
 repository, `modem/` included, is MIT (`LICENSE`).
 
-It is the Glissando app, not a FreeDV release, and it does not carry RADE. The FreeDV voice modes left are the codec2 ones (700D, 700E and
-1600), always shown in the main window's Mode box, and text chat runs over
-either codec2's DATAC13/DATAC4 data modes or Glissando. The shared
+It is the Glissando app, not a FreeDV release. Voice is outside its scope:
+it has no voice controls, no FreeDV main window, no FreeDV Reporter and no
+FreeDV Help menu, and text chat runs over Glissando. It does not carry RADE
+either. The codec2 code is still built in underneath, since the audio
+pipeline it came with is organised around it. The shared
 [freedv-backend](https://github.com/tmiw/freedv-backend) library is no
 longer fetched at configure time: `app/backend/` holds a copy of it with RADE,
 RADE text, FARGAN and the Opus bandwidth expander taken out (see
@@ -36,7 +38,7 @@ Then, from the top of the repository:
 
     cmake -S app -B build -DUSE_NATIVE_AUDIO=1 -DUNITTEST=ON
     cmake --build build -j
-    ./build/src/freedv --glissando
+    ./build/src/freedv
 
 The first configure fetches libsamplerate and RNNoise (from GitHub, and the
 RNNoise model from media.xiph.org). `ctest --test-dir build -R
@@ -44,19 +46,18 @@ RNNoise model from media.xiph.org). `ctest --test-dir build -R
 
 ## Two floating windows
 
-* **The console** (`Tools -> Glissando Console...`, or start FreeDV with
-  `--glissando`). The visi-scope waterfall, tuning, and the mode's
-  modulation options, dressed as Chaotica's control room from the Captain
-  Proton holonovel.
-* **The chat window** (`Transmission log` on the console, or
-  `Tools -> Text Chat...`). The existing text chat UI, unchanged, in its own
-  window.
+Both open at launch:
 
-While the console is open, text chat goes out as Glissando instead of over
-the codec2 DATAC13/DATAC4 modes. Closing the console puts chat back on
-codec2. With `--glissando` the console stands in for FreeDV's main window,
-which is hidden (the `FreeDV panel` button brings it back for audio and rig
-setup), and closing the console quits.
+* **The console**, the application's window: the visi-scope waterfall,
+  tuning, the mode's modulation options, the radio's dial and the setup
+  dialogs, dressed as Chaotica's control room from the Captain Proton
+  holonovel. Closing it quits.
+* **The chat window** ("Glissando Chat"): heard stations, the transmission
+  log and the transmitter, in the same dress. Closing it only hides it;
+  `Transmission log` on the console brings it back.
+
+`--glissando` is still accepted, so older scripts keep working, but it no
+longer changes anything.
 
 ## Controls
 
@@ -67,12 +68,14 @@ setup), and closing the console quits.
 | Duet voice | Widens the scope to show the duet gear's high voice (C6..E7). |
 | All tempos | Decode every gear at once, so a station that shifts gear is still heard. Off: only the chosen gear (and the one automatic shifting picked). |
 | Melody offset | Moves every note by up to +/-250 Hz, on transmit and receive: the audio equivalent of the tuning dial. |
-| Radio dial | Shows and sets the rig frequency through FreeDV's own frequency box, so rig control and the US data segment check follow it. |
+| Radio dial | Shows the rig frequency. `Presets` drops down the frequency list (edited in Preferences, Options) and `Set` takes a typed one. Rig control and the US data segment check follow it. |
 | Tempo | Adagio (640 ms notes, 55 s frame), Andante, Allegro, Presto (80 ms, 7 s), Duet (two voices, two payloads per frame). |
 | Auto shift | Picks the fastest gear the SNR and Doppler spread measured on the last frame heard support (`recommendGear`, the prototype's table with 2 dB margin). The hand-picked tempo stays lit and is used until something is heard, and again 15 minutes after the last frame. |
 | Scale | Pentatonic (default, harmonious when stations overlap), whole tone, diminished, diabolus (tritones). The scale costs nothing in sensitivity (DESIGN.md 3.1a). |
 | Telemetry | SNR meter, Doppler spread, tempo of the last frame and how long ago, tempo we would send at, and that tempo's frame length. |
-| Engage | Starts and stops audio, as the main window's Start button does. |
+| Engage | Starts and stops audio. |
+| Transmission log | Brings the chat window back if it was closed. |
+| Preferences | Drops down Options, Sound cards, Rig control (CAT and PTT), Audio filters and Easy setup. Sound cards, rig control and easy setup only change while disengaged. |
 
 Settings live in the FreeDV config under `[Glissando]`.
 
@@ -118,14 +121,14 @@ scales and tuning offsets in noise.
 
 The text chat loopback bench runs Glissando too:
 
-    FREEDV_EXTRA_ARGS=--glissando app/test/test_text_chat_loopback.sh up
+    app/test/test_text_chat_loopback.sh up
 
-Press Engage in both consoles, open both Transmission logs and send.
+Press Engage in both consoles and send from either chat window.
 
-![Two stations on the loopback bench: A (left) hearing B's broadcast at Presto on the visi-scope, both chat windows below](images/glissando-bench.png)
+![Two stations on the loopback bench: B (right) hearing A's reply at Presto on the visi-scope, both chat windows below with the conversation both ways](images/glissando-bench.png)
 
 ## Packaging
 
 `app/appimage/make-appimage.sh` already carries the console, since it is
 part of the `freedv` binary. A Glissando-first AppImage needs a desktop
-entry that runs `freedv --glissando`, an icon, and a CI job to build it.
+entry that runs `freedv`, an icon, and a CI job to build it.
