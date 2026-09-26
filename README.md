@@ -22,6 +22,9 @@ consonant. It shifts gears (tempo) to match the HF path.
 - Design and trade-offs: [docs/DESIGN.md](docs/DESIGN.md)
 - Listen: [samples/](samples/) (8 kHz WAV; `g3-allegro-moderate-hf-minus10db.wav`
   is what it sounds like through a fading HF path at -10 dB SNR)
+- The devil's interval: `--scale wholetone|diminished|diabolus` swaps the
+  pentatonic alphabet for a tritone-built one (`samples/*-wholetone.wav` etc.;
+  DESIGN.md 3.1a has the notes and what they cost)
 - Prototype: [prototype/](prototype/) (Python 3 + NumPy)
 
 ```sh

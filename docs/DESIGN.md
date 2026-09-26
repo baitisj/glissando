@@ -64,6 +64,41 @@ the signal in time, and with a pentatonic alphabet they overlap as harmony.
 The thirds, fourths and fifths Jeff asked for are all here: E-G and A-C are
 minor thirds, C-E is a major third, E-A a fourth, A-E a fifth.
 
+### 3.1a Other scales: the devil's interval
+
+The modem does not care which eight frequencies it glides between, only
+that the receiver knows them, so the scale is a parameter (`SCALES` in
+`glissando.py`, `--scale` on `sim.py` and `bench.py`). Three tritone-heavy
+scales are included for contrast with the pentatonic default. All three are
+symmetric under transposition by a tritone, so the duet's high voice is the
+low voice a tritone plus an octave up and the two voices are the devil's
+interval apart.
+
+| scale | low voice | high voice | tritones |
+|---|---|---|---|
+| `wholetone` | E4 F#4 G#4 A#4 C5 D5 E5 F#5 | A#5 .. C7 | notes 3 steps apart; the Costas motif has two |
+| `diminished` | E4 F4 G4 G#4 A#4 B4 C#5 D5 (half-whole octatonic) | A#5 .. G#6 | every note has its tritone in the scale |
+| `diabolus` | E4 G#4 A#4 B4 D5 E5 F5 G#5 (E major + Bb major triads) | A#5 .. D7 | the two triads are a tritone apart |
+
+What they cost: nothing measurable. The receiver separates symbols by
+their whole frequency trajectory over a symbol, and at G3 a semitone
+(about 20 Hz at E4) is still three times the 6 Hz resolution of a 160 ms
+symbol, so even the diminished scale's templates stay nearly orthogonal.
+Measured 50 % / 90 % decode thresholds at G3 Allegro, 20 trials per point,
+no false decodes in 2080 trials:
+
+| scale | AWGN | CCIR poor |
+|---|---|---|
+| `pentatonic` | -20.4 / -18.5 | -17.7 / -15.6 |
+| `wholetone` | -20.5 / -20.0 | -17.7 / -15.0 |
+| `diminished` | -20.5 / -19.3 | -18.2 / -15.8 |
+| `diabolus` | -20.2 / -19.1 | -17.6 / -15.3 |
+
+The pentatonic scale stays the default for the reason in 3.1: it is the
+one whose overlaps (echoes, the duet, a neighbour in the same key) are
+harmony rather than dissonance. The others are there for the ear, and for
+anyone who wants a mode that sounds like it is up to something.
+
 ### 3.2 A symbol is a glide, then a sustain
 
 Symbol n carries one of the eight notes as its target. It starts on the

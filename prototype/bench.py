@@ -33,9 +33,8 @@ import pulse
 from sim import SNR_SPAN, snr_grid
 
 
-def impair(gi, chan, snr, rng, lead_range=(0.3, 1.2), df_max=15.0):
-    """Transmission plus impairments; returns (buffer, payloads, clean power)."""
-    gear = g.GEARS[gi]
+def impair(gear, chan, snr, rng, lead_range=(0.3, 1.2), df_max=15.0):
+    """Transmission plus impairments; returns (buffer, payloads)."""
     payloads = [rng.integers(0, 2, 77) for _ in range(gear.voices)]
     x = g.transmit(payloads, gear)
     lead = int(rng.uniform(*lead_range) * g.FS)
@@ -55,27 +54,29 @@ def judge(res, payloads):
 
 
 def trial_sim(job):
-    gi, chan, snr, seed = job
+    gi, chan, snr, seed, scale = job
+    gear = g.GEARS[gi].with_scale(scale)
     rng = np.random.default_rng(seed)
-    buf, payloads = impair(gi, chan, snr, rng)
-    return job, judge(g.receive(buf, g.GEARS[gi]), payloads)
+    buf, payloads = impair(gear, chan, snr, rng)
+    return job, judge(g.receive(buf, gear), payloads)
 
 
 def trial_pulse(job, sink, source, peak=0.9):
-    gi, chan, snr, seed = job
+    gi, chan, snr, seed, scale = job
+    gear = g.GEARS[gi].with_scale(scale)
     rng = np.random.default_rng(seed)
-    buf, payloads = impair(gi, chan, snr, rng)
-    scale = peak / np.max(np.abs(buf))  # keep noise peaks inside the DAC's range
-    y = pulse.play_and_record(buf * scale, g.FS, sink, source)
-    r = judge(g.receive(y, g.GEARS[gi]), payloads)
+    buf, payloads = impair(gear, chan, snr, rng)
+    gain = peak / np.max(np.abs(buf))  # keep noise peaks inside the DAC's range
+    y = pulse.play_and_record(buf * gain, g.FS, sink, source)
+    r = judge(g.receive(y, gear), payloads)
     r.update(rx_peak=float(np.max(np.abs(y))), rx_rms=float(np.sqrt(np.mean(y ** 2))),
-             rx_seconds=len(y) / g.FS, tx_scale=float(scale))
+             rx_seconds=len(y) / g.FS, tx_gain=float(gain))
     return job, r
 
 
 def summarize(rows):
     table = {}
-    for (gi, c, snr, _), r in rows:
+    for (gi, c, snr, _, _), r in rows:
         key = f"{gi}/{c}/{'none' if snr is None else snr}"
         d = table.setdefault(key, {"n": 0, "ok": 0, "false": 0, "snr_est": [], "doppler_est": []})
         d["n"] += 1
@@ -115,6 +116,7 @@ def main(argv=None):
     ap.add_argument("--channels", nargs="+", default=["awgn"], choices=list(ch.PROFILES))
     ap.add_argument("--snr", nargs="+", help="SNR values in dB, 'none' for no added noise; default: sim.py's grid")
     ap.add_argument("--trials", type=int, default=10)
+    ap.add_argument("--scale", default="pentatonic", choices=list(g.SCALES))
     ap.add_argument("--seed", default="bench", help="salt for the per-trial seeds")
     ap.add_argument("--out", default="bench_results.json")
     ap.add_argument("--sink", help="pulse: sink to play on (default: the server's default sink)")
@@ -131,7 +133,7 @@ def main(argv=None):
         print("sinks:\n  " + "\n  ".join(sinks) + "\nsources:\n  " + "\n  ".join(sources))
         return
 
-    jobs = [(gi, c, snr, zlib.crc32(f"{a.seed}/{gi}/{c}/{snr}/{t}".encode()))
+    jobs = [(gi, c, snr, zlib.crc32(f"{a.seed}/{gi}/{c}/{snr}/{t}".encode()), a.scale)
             for gi in a.gears for c in a.channels for snr in parse_snr(a.snr, gi, c) for t in range(a.trials)]
     t0 = time.time()
     if a.backend == "sim":
