@@ -170,6 +170,7 @@ GlissandoConsole::GlissandoConsole(wxWindow* parent, IGlissandoHost* host,
               wxDEFAULT_FRAME_STYLE)
     , host_(host)
     , settings_(settings)
+    , sendingGear_(settings.gear)
     , timer_(this)
 {
     SetBackgroundColour(Colour::Void);
@@ -178,7 +179,7 @@ GlissandoConsole::GlissandoConsole(wxWindow* parent, IGlissandoHost* host,
 
     if (position.GetWidth() <= 0 || position.GetHeight() <= 0)
     {
-        SetSize(wxSize(1060, 790));
+        SetSize(wxSize(1100, 790));
         Centre();
     }
 
@@ -249,14 +250,6 @@ void GlissandoConsole::buildControls()
                            0.1, settings_.tuningOffsetHz, wxSize(170, 150));
     tuningDial_->SetFormatter([](double v) { return wxString::Format("%+.1f Hz", v); });
     tuningPlate->GetContentSizer()->Add(tuningDial_, 0, wxALIGN_CENTER_HORIZONTAL);
-
-    auto* rigRow = row();
-    rigReadout_ = new Readout(tuningPlate, _("Radio dial"), wxSize(140, 46));
-    rigRow->Add(rigReadout_, 1, wxRIGHT, 6);
-    rigButton_ = new Button(tuningPlate, wxID_ANY, _("Set"), false, wxSize(56, 32));
-    rigButton_->SetToolTip(_("Tune the radio (needs rig control set up in FreeDV)."));
-    rigRow->Add(rigButton_, 0, wxALIGN_BOTTOM);
-    tuningPlate->GetContentSizer()->Add(rigRow, 0, wxEXPAND | wxTOP, 6);
     column->Add(tuningPlate, 0, wxEXPAND | wxBOTTOM, 6);
 
     auto* telemetryPlate = new Panel(page, _("Telemetry"));
@@ -297,8 +290,8 @@ void GlissandoConsole::buildControls()
     tempoRow->AddSpacer(10);
     autoButton_ = new Button(modulationPlate, wxID_ANY, _("Auto shift"), true, wxSize(110, 34));
     autoButton_->SetToolTip(_("Pick the tempo from the signal and fading measured on the last "
-                              "frame heard. The lit tempo is the one chosen by hand, used until "
-                              "something has been heard."));
+                              "frame heard. The lit tempo is the one being sent; the one chosen "
+                              "by hand glows faintly and is used until something has been heard."));
     tempoRow->Add(autoButton_, 0);
     modulationPlate->GetContentSizer()->Add(tempoRow, 0, wxBOTTOM, 8);
 
@@ -316,17 +309,37 @@ void GlissandoConsole::buildControls()
     modulationPlate->GetContentSizer()->Add(scaleRow, 0);
     bottom->Add(modulationPlate, 1, wxEXPAND | wxRIGHT, 6);
 
-    auto* mastersPlate = new Panel(page, _("Command"));
-    engageButton_ = new Button(mastersPlate, wxID_ANY, _("Engage"), true, wxSize(170, 34));
-    engageButton_->SetToolTip(_("Start or stop the audio, as FreeDV's Start button does."));
-    chatButton_ = new Button(mastersPlate, wxID_ANY, _("Transmission log"), false, wxSize(170, 34));
+    // Command: the master switches beside the radio's dial.
+    auto* commandPlate = new Panel(page, _("Command"));
+    auto* commandRow = row();
+
+    auto* switches = new wxBoxSizer(wxVERTICAL);
+    engageButton_ = new Button(commandPlate, wxID_ANY, _("Engage"), true, wxSize(170, 34));
+    engageButton_->SetToolTip(_("Start or stop the audio."));
+    chatButton_ = new Button(commandPlate, wxID_ANY, _("Transmission log"), false, wxSize(170, 34));
     chatButton_->SetToolTip(_("Open the chat window."));
-    mainWindowButton_ = new Button(mastersPlate, wxID_ANY, _("FreeDV panel"), true, wxSize(170, 34));
-    mainWindowButton_->SetToolTip(_("Show or hide FreeDV's own window (audio and rig setup live there)."));
-    mastersPlate->GetContentSizer()->Add(engageButton_, 0, wxBOTTOM, 4);
-    mastersPlate->GetContentSizer()->Add(chatButton_, 0, wxBOTTOM, 4);
-    mastersPlate->GetContentSizer()->Add(mainWindowButton_, 0);
-    bottom->Add(mastersPlate, 0, wxEXPAND);
+    preferencesButton_ = new Button(commandPlate, wxID_ANY, _("Preferences"), false, wxSize(170, 34));
+    preferencesButton_->SetToolTip(_("Options, sound cards, rig control and audio filters."));
+    switches->Add(engageButton_, 0, wxBOTTOM, 4);
+    switches->Add(chatButton_, 0, wxBOTTOM, 4);
+    switches->Add(preferencesButton_, 0);
+    commandRow->Add(switches, 0, wxRIGHT, 10);
+
+    auto* dial = new wxBoxSizer(wxVERTICAL);
+    rigReadout_ = new Readout(commandPlate, _("Radio dial"), wxSize(190, 46));
+    dial->Add(rigReadout_, 0, wxEXPAND | wxBOTTOM, 6);
+    auto* dialButtons = row();
+    presetsButton_ = new Button(commandPlate, wxID_ANY, _("Presets"), false, wxSize(92, 32));
+    presetsButton_->SetToolTip(_("Pick a frequency from your list (edited in Preferences, Options)."));
+    dialButtons->Add(presetsButton_, 0, wxRIGHT, 6);
+    rigButton_ = new Button(commandPlate, wxID_ANY, _("Set"), false, wxSize(92, 32));
+    rigButton_->SetToolTip(_("Type in a dial frequency. With rig control set up, the radio tunes to it."));
+    dialButtons->Add(rigButton_, 0);
+    dial->Add(dialButtons, 0);
+    commandRow->Add(dial, 0);
+
+    commandPlate->GetContentSizer()->Add(commandRow, 0);
+    bottom->Add(commandPlate, 0, wxEXPAND);
 
     pageSizer->Add(bottom, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
     page->SetSizer(pageSizer);
@@ -334,7 +347,7 @@ void GlissandoConsole::buildControls()
     auto* frameSizer = new wxBoxSizer(wxVERTICAL);
     frameSizer->Add(page, 1, wxEXPAND);
     SetSizer(frameSizer);
-    SetMinSize(wxSize(1000, 770));
+    SetMinSize(wxSize(1060, 770));
     Layout();
 
     // --- Events.
@@ -372,18 +385,64 @@ void GlissandoConsole::buildControls()
         refreshTelemetry();
     });
     chatButton_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { host_->glissandoShowChat(); });
-    mainWindowButton_->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& event) {
-        host_->glissandoShowMainWindow(event.GetInt() != 0);
+    preferencesButton_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { showPreferences(); });
+    presetsButton_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { showFrequencyPresets(); });
+    rigButton_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { enterRigFrequency(); });
+}
+
+void GlissandoConsole::enterRigFrequency()
+{
+    GlissandoTelemetry telemetry = host_->glissandoTelemetry();
+    wxString current = telemetry.rigFrequencyKnown
+                           ? wxString::Format("%.3f", telemetry.rigFrequencyHz / 1000.0)
+                           : wxString();
+    wxTextEntryDialog entry(this, _("Radio dial frequency in kHz:"), _("Tune the radio"), current);
+    if (entry.ShowModal() != wxID_OK) return;
+    double khz = 0.0;
+    if (entry.GetValue().ToDouble(&khz) && khz > 0.0) host_->glissandoSetRigFrequency(khz * 1000.0);
+}
+
+void GlissandoConsole::showFrequencyPresets()
+{
+    std::vector<double> presets = host_->glissandoFrequencyPresets();
+    std::vector<Choice> choices;
+    for (double hz : presets) choices.push_back({wxString::Format("%.1f kHz", hz / 1000.0), true, wxString()});
+    choices.push_back({_("Other..."), true, _("Type in a dial frequency.")});
+
+    ShowChoices(presetsButton_, choices, [this, presets](int index) {
+        if (index < (int)presets.size())
+            host_->glissandoSetRigFrequency(presets[index]);
+        else
+            enterRigFrequency();
     });
-    rigButton_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
-        GlissandoTelemetry telemetry = host_->glissandoTelemetry();
-        wxString current = telemetry.rigFrequencyKnown
-                               ? wxString::Format("%.3f", telemetry.rigFrequencyHz / 1000.0)
-                               : wxString();
-        wxTextEntryDialog entry(this, _("Radio dial frequency in kHz:"), _("Tune the radio"), current);
-        if (entry.ShowModal() != wxID_OK) return;
-        double khz = 0.0;
-        if (entry.GetValue().ToDouble(&khz) && khz > 0.0) host_->glissandoSetRigFrequency(khz * 1000.0);
+}
+
+void GlissandoConsole::showPreferences()
+{
+    struct Entry
+    {
+        GlissandoSetup setup;
+        wxString label;
+        wxString tooltip;
+    };
+    const std::vector<Entry> entries = {
+        {GlissandoSetup::Options, _("Options"), _("Callsign, frequency list, chat and other options.")},
+        {GlissandoSetup::AudioDevices, _("Sound cards"), _("Which sound cards talk to the radio.")},
+        {GlissandoSetup::RigControl, _("Rig control"), _("CAT and PTT: how the radio is keyed and tuned.")},
+        {GlissandoSetup::Filters, _("Audio filters"), _("Microphone and speaker filtering.")},
+        {GlissandoSetup::EasySetup, _("Easy setup"), _("Sound cards, rig control and callsign on one page.")},
+    };
+
+    std::vector<Choice> choices;
+    for (const Entry& entry : entries)
+    {
+        bool available = host_->glissandoSetupAvailable(entry.setup);
+        choices.push_back({entry.label, available,
+                           available ? entry.tooltip : _("Disengage first: this can't change while audio runs.")});
+    }
+
+    ShowChoices(preferencesButton_, choices, [this, entries](int index) {
+        host_->glissandoOpenSetup(entries[index].setup);
     });
 }
 
@@ -410,10 +469,7 @@ void GlissandoConsole::setTuning(double hz)
 void GlissandoConsole::applySettings(bool notifyHost)
 {
     // Radio button behaviour for the tempo and scale rows.
-    for (size_t i = 0; i < gearButtons_.size(); i++)
-    {
-        gearButtons_[i]->SetChecked((int)i + Glissando::MIN_GEAR == settings_.gear);
-    }
+    updateGearButtons();
     const Glissando::Scale scales[] = {Glissando::Scale::Pentatonic, Glissando::Scale::WholeTone,
                                        Glissando::Scale::Diminished, Glissando::Scale::Diabolus};
     for (size_t i = 0; i < scaleButtons_.size(); i++)
@@ -433,11 +489,26 @@ void GlissandoConsole::applySettings(bool notifyHost)
     if (notifyHost) host_->glissandoSettingsChanged(settings_);
 }
 
+void GlissandoConsole::updateGearButtons()
+{
+    // The lit tempo is the one going out. In automatic that is the one the
+    // measurements chose, and the tempo picked by hand, which automatic
+    // falls back to when nothing has been heard, glows faintly beside it.
+    int lit = settings_.autoGear ? sendingGear_ : settings_.gear;
+    for (size_t i = 0; i < gearButtons_.size(); i++)
+    {
+        int gear = (int)i + Glissando::MIN_GEAR;
+        gearButtons_[i]->SetChecked(gear == lit);
+        gearButtons_[i]->SetHinted(settings_.autoGear && gear == settings_.gear && gear != lit);
+    }
+}
+
 void GlissandoConsole::updateStaff()
 {
     std::vector<double> notes;
     std::vector<wxString> names;
-    bool duet = settings_.wideScope || (!settings_.autoGear && settings_.gear == 5);
+    int sending = settings_.autoGear ? sendingGear_ : settings_.gear;
+    bool duet = settings_.wideScope || Glissando::gearInfo(sending).voices > 1;
     for (int voice = 0; voice < (duet ? 2 : 1); voice++)
     {
         auto scaleNotes = Glissando::scaleNotes(settings_.scale, voice);
@@ -460,7 +531,6 @@ void GlissandoConsole::refreshTelemetry()
 
     engageButton_->SetChecked(t.audioRunning);
     engageButton_->SetLabel(t.audioRunning ? _("Disengage") : _("Engage"));
-    mainWindowButton_->SetChecked(host_->glissandoMainWindowShown());
     engagedLamp_->SetLit(t.audioRunning);
     receivingLamp_->SetLit(t.receiving);
     transmittingLamp_->SetLit(t.transmitting);
@@ -484,12 +554,11 @@ void GlissandoConsole::refreshTelemetry()
     tempoReadout_->SetText(gearLabel(t.transmitGear));
     frameReadout_->SetText(wxString::Format("%.1f s", Glissando::gearInfo(t.transmitGear).frameSeconds()));
 
-    // In automatic, the tempo chosen by hand stays lit and the one the
-    // measurements chose glows faintly beside it.
-    for (size_t i = 0; i < gearButtons_.size(); i++)
+    if (sendingGear_ != t.transmitGear)
     {
-        int gear = (int)i + Glissando::MIN_GEAR;
-        gearButtons_[i]->SetHinted(settings_.autoGear && gear == t.transmitGear && gear != settings_.gear);
+        sendingGear_ = t.transmitGear;
+        updateGearButtons();
+        updateStaff();
     }
 
     rigReadout_->SetText(t.rigFrequencyKnown ? wxString::Format("%.3f kHz", t.rigFrequencyHz / 1000.0)

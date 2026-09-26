@@ -12,6 +12,7 @@
 #define GUI_GLISSANDO__CHAOTICA_CONTROLS_H
 
 #include <functional>
+#include <vector>
 
 #include <wx/control.h>
 #include <wx/panel.h>
@@ -61,6 +62,7 @@ public:
            const wxSize& size = wxSize(96, 34));
 
     void SetLabel(const wxString& label) override;
+    wxString GetLabel() const override { return label_; }
     bool IsChecked() const { return checked_; }
     void SetChecked(bool checked);
 
@@ -174,6 +176,21 @@ private:
     wxString caption_;
     wxString text_;
 };
+
+// One entry in a drop-down of choices; see ShowChoices().
+struct Choice
+{
+    wxString label;
+    bool enabled = true;
+    wxString tooltip;
+};
+
+// Drops a column of plate buttons down from under the anchor, the way a
+// switchboard's patch list folds out. Choosing one closes the column and
+// calls chosen with its index, from the event loop, so chosen may open a
+// dialog; clicking anywhere else closes it without a choice.
+void ShowChoices(wxWindow* anchor, const std::vector<Choice>& choices,
+                 std::function<void(int)> chosen);
 
 } // namespace Chaotica
 

@@ -31,7 +31,7 @@
 #include "audio/IAudioDevice.h"
 
 #include "../../main.h"
-#include "../../pipeline/ResampleStep.h"
+#include "ResampleStep.h"
 
 using namespace std::chrono_literals;
 

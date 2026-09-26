@@ -41,17 +41,7 @@ FreeDVConfiguration::FreeDVConfiguration()
     , audioConfigWindowTop("/Windows/AudioConfig/top", -1)
     , audioConfigWindowWidth("/Windows/AudioConfig/width", -1)
     , audioConfigWindowHeight("/Windows/AudioConfig/height", -1)
-        
-    /* Position and size of FreeDV Reporter */
-    , reporterWindowLeft("/Windows/FreeDVReporter/left", 20)
-    , reporterWindowTop("/Windows/FreeDVReporter/top", 20)
-    , reporterWindowWidth("/Windows/FreeDVReporter/width", -1)
-    , reporterWindowHeight("/Windows/FreeDVReporter/height", -1)
-    , reporterWindowVisible("/Windows/FreeDVReporter/visible", false)
-    , msgEditDialogWidth("/Windows/FreeDVReporter/msgEditDialogWidth", -1)
-    , reporterWindowCurrentSort("/Windows/FreeDVReporter/currentSort", 5) /* FREQUENCY_COL */
-    , reporterWindowCurrentSortDirection("/Windows/FreeDVReporter/currentSortDirection", true)
-        
+
     /* Current tab view */
     , currentNotebookTab("/MainFrame/rxNbookCtrl", 0)
         
@@ -82,7 +72,6 @@ FreeDVConfiguration::FreeDVConfiguration()
     , halfDuplexMode("/Rig/HalfDuplex", true)
     , multipleReceiveEnabled("/Rig/MultipleRx", true)
     , textChatUsDataSegmentsOnly("/TextChat/UsDataSegmentsOnly", true)
-    , glissandoEnabled("/Glissando/Enabled", false)
     , glissandoGear("/Glissando/Gear", 3)
     , glissandoAutoGear("/Glissando/AutoGear", true)
     , glissandoScale("/Glissando/Scale", "pentatonic")
@@ -127,8 +116,6 @@ FreeDVConfiguration::FreeDVConfiguration()
 
     , txRxDelayMilliseconds("/Audio/TxRxDelayMilliseconds", 0)
 
-    , reportingUserMsgColWidth("/Windows/FreeDVReporter/reportingUserMsgColWidth", 130)
-        
     , showDecodeStats("/Debug/showDecodeStats", false)
     , autoStartOnLaunch("/Modem/autoStartOnLaunch", false)
 {
@@ -153,16 +140,7 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     load_(config, audioConfigWindowTop);
     load_(config, audioConfigWindowWidth);
     load_(config, audioConfigWindowHeight);
-    
-    load_(config, reporterWindowLeft);
-    load_(config, reporterWindowTop);
-    load_(config, reporterWindowWidth);
-    load_(config, reporterWindowHeight);
-    load_(config, reporterWindowVisible);
-    load_(config, msgEditDialogWidth);
-    load_(config, reporterWindowCurrentSort);
-    load_(config, reporterWindowCurrentSortDirection);
-    
+
     load_(config, currentNotebookTab);
     
     load_(config, squelchActive);
@@ -223,7 +201,6 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     load_(config, halfDuplexMode);
     load_(config, multipleReceiveEnabled);
     load_(config, textChatUsDataSegmentsOnly);
-    load_(config, glissandoEnabled);
     load_(config, glissandoGear);
     load_(config, glissandoAutoGear);
     load_(config, glissandoScale);
@@ -270,8 +247,6 @@ void FreeDVConfiguration::load(wxConfigBase* config)
 
     load_(config, txRxDelayMilliseconds);
 
-    load_(config, reportingUserMsgColWidth);
-    
     load_(config, showDecodeStats);
     load_(config, autoStartOnLaunch);
 
@@ -297,16 +272,7 @@ void FreeDVConfiguration::save(wxConfigBase* config)
     save_(config, audioConfigWindowTop);
     save_(config, audioConfigWindowWidth);
     save_(config, audioConfigWindowHeight);
-    
-    save_(config, reporterWindowLeft);
-    save_(config, reporterWindowTop);
-    save_(config, reporterWindowWidth);
-    save_(config, reporterWindowHeight);
-    save_(config, reporterWindowVisible);
-    save_(config, msgEditDialogWidth);
-    save_(config, reporterWindowCurrentSort);
-    save_(config, reporterWindowCurrentSortDirection);
-    
+
     save_(config, currentNotebookTab);
     
     save_(config, squelchActive);
@@ -331,7 +297,6 @@ void FreeDVConfiguration::save(wxConfigBase* config)
     save_(config, halfDuplexMode);
     save_(config, multipleReceiveEnabled);
     save_(config, textChatUsDataSegmentsOnly);
-    save_(config, glissandoEnabled);
     save_(config, glissandoGear);
     save_(config, glissandoAutoGear);
     save_(config, glissandoScale);
@@ -376,8 +341,6 @@ void FreeDVConfiguration::save(wxConfigBase* config)
 
     save_(config, txRxDelayMilliseconds);
 
-    save_(config, reportingUserMsgColWidth);
-    
     save_(config, showDecodeStats);
     save_(config, autoStartOnLaunch);
 
