@@ -116,6 +116,7 @@ private:
     void buildControls();
     void applySettings(bool notifyHost);
     void updateStaff();
+    void updateGearButtons();
     void refreshTelemetry();
     void selectGear(int gear);
     void selectScale(Glissando::Scale scale);
@@ -129,6 +130,7 @@ private:
 
     IGlissandoHost* host_;
     GlissandoConsoleSettings settings_;
+    int sendingGear_;               // the tempo transmitting now, from telemetry
     wxTimer timer_;
 
     wxPanel* marquee_;
