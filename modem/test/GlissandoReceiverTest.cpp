@@ -2,7 +2,8 @@
 // Name:            GlissandoReceiverTest.cpp
 // Purpose:         The streaming receiver on continuous audio pushed in
 //                  20 ms chunks: frames reported once each, in voice order,
-//                  carrier sense, reset, and silence.
+//                  carrier sense, reset, silence, and listening for every
+//                  scale at once.
 //=========================================================================
 
 #include <algorithm>
@@ -47,6 +48,7 @@ struct Placed
     int gear;
     long long start;
     std::vector<Payload> payloads;
+    Scale scale = Scale::Pentatonic;
 };
 
 // Adds a transmission to the stream at `start`, at the given SNR relative to
@@ -55,6 +57,7 @@ void place(std::vector<float>& stream, const Placed& p, double snrDb, double sig
 {
     ModemSettings tx;
     tx.gear = p.gear;
+    tx.scale = p.scale;
     std::vector<float> x = modulate(p.payloads, tx);
     // Invert channel.add_noise(): the signal power that puts sigma at snrDb.
     double n0 = sigma * sigma / (SAMPLE_RATE_HZ / 2.0);
@@ -275,11 +278,78 @@ void testSilence()
 
 } // namespace
 
+// Frames in all four scales, listened for by a pentatonic station with
+// anyScale on: each reported once, in the scale it was sung in. (Without
+// anyScale a strong frame in another scale can still decode, sung out of
+// tune: the data is which note of eight, and several notes are shared or a
+// semitone apart. It is only reported as pentatonic, and weak ones are lost.)
+void testAnyScale()
+{
+    Random rng(0x5CA1);
+    const double sigma = 0.02;
+    const long long f4 = gearInfo(4).frameSamples();
+    const long long gap = SAMPLE_RATE_HZ / 2;
+
+    std::vector<Placed> frames;
+    long long t = SAMPLE_RATE_HZ;
+    frames.push_back({4, t, {rng.payload()}, Scale::Diabolus});
+    t += f4 + gap;
+    frames.push_back({4, t, {rng.payload()}, Scale::Pentatonic});
+    t += f4 + gap;
+    frames.push_back({5, t, {rng.payload(), rng.payload()}, Scale::Diminished});
+    t += f4 + gap;
+    frames.push_back({3, t, {rng.payload()}, Scale::WholeTone});
+    t += gearInfo(3).frameSamples();
+    long long total = t + (long long)(2.5 * SAMPLE_RATE_HZ);
+
+    std::vector<float> stream((size_t)total);
+    for (float& v : stream) v = (float)(sigma * rng.gaussian());
+    for (const Placed& p : frames) place(stream, p, -10.0, sigma);
+    std::vector<short> audio = toShort(stream);
+
+    for (bool anyScale : {true, false})
+    {
+        StreamingReceiver receiver;
+        Collector collector;
+        collector.attach(receiver);
+        receiver.configure({3, 4, 5}, Scale::Pentatonic, 0.0, anyScale);
+        receiver.start();
+        pushAll(receiver, audio);
+        receiver.flush();
+        receiver.stop();
+
+        std::vector<StreamDecode> decodes = collector.decodes();
+        printf("any scale %s: %zu decodes\n", anyScale ? "on" : "off", decodes.size());
+        size_t expected = 0;
+        for (const Placed& p : frames)
+        {
+            if (!anyScale && p.scale != Scale::Pentatonic) continue;
+            for (int voice = 0; voice < (int)p.payloads.size(); voice++)
+            {
+                expected++;
+                int found = 0;
+                for (const StreamDecode& d : decodes)
+                {
+                    if (matches(d, p, voice))
+                    {
+                        found++;
+                        CHECK(d.decode.scale == p.scale);
+                    }
+                }
+                CHECK(found == 1);
+            }
+        }
+        if (anyScale) CHECK(decodes.size() == expected);
+        for (const StreamDecode& d : decodes) CHECK(anyScale || d.decode.scale == Scale::Pentatonic);
+    }
+}
+
 int main()
 {
     auto start = std::chrono::steady_clock::now();
     testFramesReportedOnce();
     testDuet();
+    testAnyScale();
     testReset();
     testSilence();
     printf("receiver tests took %.1f s\n", secondsSince(start));

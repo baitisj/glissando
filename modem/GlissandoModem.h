@@ -77,6 +77,12 @@ struct ModemSettings
     int gear = 3;
     Scale scale = Scale::Pentatonic;
 
+    // Receive only: listen for every scale, not just `scale`, and say in
+    // Decode::scale which one each frame was sung in. A pentatonic station
+    // and a diabolus station can then talk to each other, each sending in
+    // its own scale. Transmit always uses `scale`.
+    bool anyScale = false;
+
     // Added to every note, in Hz, on transmit and on receive: the audio
     // equivalent of moving the tuning dial.
     double tuningOffsetHz = 0.0;
@@ -99,6 +105,7 @@ struct Decode
 {
     bool ok = false;            // CRC passed
     int voice = 0;
+    Scale scale = Scale::Pentatonic;    // the scale the frame was heard in
     Payload payload{};
     long long startSample = 0;  // of symbol 0, in the buffer's (or stream's) sample count
     double frequencyOffsetHz = 0.0;
@@ -108,11 +115,16 @@ struct Decode
 // Batch receiver: decodes every voice of a frame of the given settings that
 // starts within [searchFrom, searchTo) samples of audio. Mirrors prototype
 // glissando.receive(); frequency search is +/- maxOffsetHz around the tuned
-// notes. Returns one Decode per voice (ok false when nothing decoded; the
+// notes, in settings.scale or, with settings.anyScale, in every scale.
+// Returns one Decode per voice (ok false when nothing decoded; the
 // report is then still the best candidate's).
 std::vector<Decode> receive(const float* audio, size_t numSamples, const ModemSettings& settings,
                             long long searchFrom = 0, long long searchTo = -1,
                             double maxOffsetHz = 25.0, int candidates = 3);
+
+// The scales a receiver with these settings listens for: `scale` alone, or
+// with anyScale every scale, `scale` first.
+std::vector<Scale> listenedScales(Scale scale, bool anyScale);
 
 // Pick the fastest gear the measured path supports (prototype
 // recommend_gear()).

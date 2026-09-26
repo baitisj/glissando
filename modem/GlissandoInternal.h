@@ -112,6 +112,7 @@ struct VoiceDecode
     Decode decode;              // startSample in z's sample numbering
     double syncScore = 0.0;     // sync peak over the median sync score
     double esOverN0 = 0.0;      // signal to noise ratio per symbol, measured on the sync symbols
+    int hypothesis = 0;         // index into the voices searched: which scale the frame was heard in
 };
 
 // Searches z for a frame of one voice starting in [searchFrom, searchTo) and
@@ -119,6 +120,13 @@ struct VoiceDecode
 // then for each of the best `candidates` sync peaks: refine, soft
 // demodulation, Viterbi and CRC, and channel sounding once a CRC passes.
 VoiceDecode receiveVoice(const ComplexSignal& z, const GearInfo& gear, const VoiceTemplates& voice,
+                         long long searchFrom, long long searchTo, double maxOffsetHz, int candidates);
+
+// The same, listening for several scales at once: `voices` holds the
+// templates of one voice in each scale (same gear and voice). The best
+// `candidates` sync peaks are taken from all of them together, so this
+// decodes no more candidates than a one-scale search.
+VoiceDecode receiveVoice(const ComplexSignal& z, const GearInfo& gear, const std::vector<const VoiceTemplates*>& voices,
                          long long searchFrom, long long searchTo, double maxOffsetHz, int candidates);
 
 } // namespace detail

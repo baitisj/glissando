@@ -225,8 +225,8 @@ def _sync_templates(voice):
     return np.array(t)
 
 
-def sync_search(z, gear, voice, t_range, f_max=25.0, top=3):
-    """Coarse-to-fine search over start time and frequency offset.
+def _sync_scores(z, gear, voice, starts, f_max):
+    """Sync score of every (start, frequency offset) for one voice.
 
     Each sync symbol is multiplied by the conjugate of its known glide
     ("dechirping"): a correctly timed symbol collapses to a tone at the
@@ -239,42 +239,58 @@ def sync_search(z, gear, voice, t_range, f_max=25.0, top=3):
     nfft = 4 * L
     freqs = np.fft.fftfreq(nfft, 1 / FS)
     keep = np.abs(freqs) <= f_max
-    fk = freqs[keep]
+    res = []
+    for s in starts:
+        seg = np.stack([z[s + o: s + o + L] for o in offs])
+        P = np.abs(np.fft.fft(seg * tmpl, nfft, axis=1)) ** 2
+        res.append(P.sum(axis=0)[keep])
+    return np.array(res), freqs[keep]
 
-    def score(starts):
-        res = []
-        for s in starts:
-            seg = np.stack([z[s + o: s + o + L] for o in offs])
-            P = np.abs(np.fft.fft(seg * tmpl, nfft, axis=1)) ** 2
-            res.append(P.sum(axis=0)[keep])
-        return np.array(res)
 
+def sync_search(z, gear, voices, t_range, f_max=25.0, top=3):
+    """Coarse-to-fine search over start time, frequency offset and scale.
+
+    `voices` holds one Voice per scale hypothesis (a single Voice is one
+    hypothesis). Each scale's scores are normalised by their own median,
+    so they are comparable, and the best `top` peaks are taken from all of
+    them together: listening for four scales costs four coarse searches
+    but no more candidates to refine and decode, so no more chances for a
+    CRC to pass by luck than listening for one. Returns (SyncResult, index
+    of the voice) pairs.
+    """
+    if isinstance(voices, Voice):
+        voices = [voices]
+    L = gear.L
     step = max(1, L // 8)
     t0, t1 = t_range
     t1 = min(t1, len(z) - N_SYMBOLS * L)
     starts = np.arange(max(0, t0), t1, step)
-    S = score(starts)
-    # noise-normalise: typical (median) score across the search space
-    S = S / np.median(S)
+    grids = []
+    for voice in voices:
+        S, fk = _sync_scores(z, gear, voice, starts, f_max)
+        # noise-normalise: typical (median) score across the search space
+        grids.append(S / np.median(S))
+    S = np.stack(grids)  # (scale, start, offset)
     cands = []
     flat = np.argsort(S, axis=None)[::-1]
     for idx in flat:
-        i, j = np.unravel_index(idx, S.shape)
+        v, i, j = np.unravel_index(idx, S.shape)
+        # a peak near one already taken, in any scale, is its sidelobe
         if any(abs(starts[i] - c[0]) < L and abs(fk[j] - c[1]) < 4 / gear.T for c in cands):
             continue
-        cands.append((starts[i], fk[j], S[i, j]))
+        cands.append((starts[i], fk[j], S[v, i, j], v))
         if len(cands) >= top:
             break
     out = []
-    for s0, f0, sc in cands:
+    for s0, f0, sc, v in cands:
         fine = np.arange(max(0, s0 - step), min(t1, s0 + step + 1), max(1, L // 256))
-        Sf = score(fine)
+        Sf, _ = _sync_scores(z, gear, voices[v], fine, f_max)
         i, j = np.unravel_index(np.argmax(Sf), Sf.shape)
         df = fk[j]
         if 0 < j < len(fk) - 1:  # parabolic peak interpolation
             a, b, c = np.log(Sf[i, j - 1:j + 2] + 1e-30)
             df += 0.5 * (a - c) / (a - 2 * b + c) * (fk[1] - fk[0])
-        out.append(SyncResult(int(fine[i]), float(df), float(sc)))
+        out.append((SyncResult(int(fine[i]), float(df), float(sc)), int(v)))
     return out
 
 
@@ -465,20 +481,32 @@ def sound_channel(z, gear, voice, sync, payload):
     return float(2 * np.sqrt(max(s2, 0.0)))
 
 
-def receive(audio, gear, t_range=None, f_max=25.0, top=3):
-    """Decode every voice of a transmission. Returns list of (payload|None, report)."""
+def receive(audio, gear, t_range=None, f_max=25.0, top=3, scales=None):
+    """Decode every voice of a transmission. Returns list of (payload|None, report).
+
+    `scales` lists the scales to listen for (keys of SCALES, or "auto" for
+    all of them); by default only gear.scale. The report's "scale" says
+    which one a frame was heard in.
+    """
+    if scales is None:
+        scales = [gear.scale]
+    elif scales == "auto":
+        scales = list(SCALES)
+    elif isinstance(scales, str):
+        scales = [scales]
     z = analytic(np.asarray(audio, dtype=float))
     if t_range is None:
         t_range = (0, len(z))
     results = []
-    for vn in gear.voice_notes:
-        voice = _voice_cache(tuple(vn), gear)
+    for vi in range(gear.voices):
+        voices = [_voice_cache(tuple(SCALES[s][vi]), gear) for s in scales]
         best = (None, None)
-        for s in sync_search(z, gear, voice, t_range, f_max, top):
+        for s, v in sync_search(z, gear, voices, t_range, f_max, top):
+            voice = voices[v]
             s = refine_sync(z, gear, voice, s)
             llr, rep = demod_voice(z, gear, voice, s)
             payload, ok = fec.decode_frame(llr)
-            rep.update(start=s.start, df=s.df)
+            rep.update(start=s.start, df=s.df, scale=scales[v])
             if best[1] is None:
                 best = (None, rep)
             if ok:

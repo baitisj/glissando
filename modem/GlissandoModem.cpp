@@ -245,15 +245,35 @@ std::vector<Decode> receive(const float* audio, size_t numSamples, const ModemSe
     detail::analyticSignal(audio, numSamples, z);
     if (searchTo < 0) searchTo = (long long)numSamples;
 
+    std::vector<Scale> scales = listenedScales(settings.scale, settings.anyScale);
     for (int voice = 0; voice < gear.voices; voice++)
     {
-        auto templates = detail::voiceTemplates(settings.scale, voice, gear.number, settings.tuningOffsetHz);
+        std::vector<std::shared_ptr<const detail::VoiceTemplates>> held;
+        std::vector<const detail::VoiceTemplates*> hypotheses;
+        for (Scale scale : scales)
+        {
+            held.push_back(detail::voiceTemplates(scale, voice, gear.number, settings.tuningOffsetHz));
+            hypotheses.push_back(held.back().get());
+        }
         detail::VoiceDecode result =
-            detail::receiveVoice(z, gear, *templates, searchFrom, searchTo, maxOffsetHz, candidates);
+            detail::receiveVoice(z, gear, hypotheses, searchFrom, searchTo, maxOffsetHz, candidates);
         decodes[(size_t)voice] = result.decode;
         decodes[(size_t)voice].voice = voice;
+        decodes[(size_t)voice].scale = scales[(size_t)result.hypothesis];
     }
     return decodes;
+}
+
+std::vector<Scale> listenedScales(Scale scale, bool anyScale)
+{
+    std::vector<Scale> scales{scale};
+    if (anyScale)
+    {
+        // The configured scale first, so a tie goes its way.
+        for (int i = 0; i < SCALE_COUNT; i++)
+            if ((Scale)i != scale) scales.push_back((Scale)i);
+    }
+    return scales;
 }
 
 int recommendGear(double snrDb, double dopplerHz)

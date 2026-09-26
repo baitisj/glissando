@@ -41,9 +41,11 @@ public:
     StreamingReceiver(const StreamingReceiver&) = delete;
     StreamingReceiver& operator=(const StreamingReceiver&) = delete;
 
-    // Which gears to listen for (any of 1..5), in which scale and at which
-    // tuning offset. Takes effect at the next search; buffered audio is kept.
-    void configure(const std::vector<int>& gears, Scale scale, double tuningOffsetHz);
+    // Which gears to listen for (any of 1..5), in which scale (or, with
+    // anyScale, in every scale; StreamDecode::decode.scale says which) and
+    // at which tuning offset. Takes effect at the next search; buffered
+    // audio is kept.
+    void configure(const std::vector<int>& gears, Scale scale, double tuningOffsetHz, bool anyScale = false);
 
     // Called on the worker thread for every CRC-valid frame.
     void setDecodeCallback(DecodeCallback callback);

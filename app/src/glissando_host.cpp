@@ -160,6 +160,7 @@ GlissandoTelemetry MainFrame::glissandoTelemetry()
     telemetry.snrDb = status.report.snrDb;
     telemetry.dopplerHz = status.report.dopplerHz;
     telemetry.heardGear = status.heardGear;
+    telemetry.heardScale = status.heardScale;
     telemetry.secondsSinceHeard = status.haveReport ? (steadyNowMs() - status.heardAtMs) / 1000.0 : 0.0;
     telemetry.transmitGear = status.transmitGear;
     telemetry.advisedGear = status.advisedGear;

@@ -264,7 +264,12 @@ void GlissandoConsole::buildControls()
     grid->Add(heardReadout_, 0, wxEXPAND);
     grid->Add(tempoReadout_, 0, wxEXPAND);
     grid->Add(frameReadout_, 0, wxEXPAND);
-    telemetryPlate->GetContentSizer()->Add(grid, 0, wxEXPAND);
+    telemetryPlate->GetContentSizer()->Add(grid, 0, wxEXPAND | wxBOTTOM, 4);
+    // The receiver hears every scale, whichever one we sing in.
+    heardScaleReadout_ = new Readout(telemetryPlate, _("Heard singing in"), wxSize(196, 44));
+    heardScaleReadout_->SetToolTip(_("The scale of the last frame heard. Every scale is heard, "
+                                     "whichever one this station sends in."));
+    telemetryPlate->GetContentSizer()->Add(heardScaleReadout_, 0, wxEXPAND);
     column->Add(telemetryPlate, 1, wxEXPAND);
 
     middle->Add(column, 0, wxEXPAND);
@@ -545,10 +550,12 @@ void GlissandoConsole::refreshTelemetry()
         wxString ago = s < 90 ? wxString::Format("%.0fs", s)
                               : s < 5400 ? wxString::Format("%.0fm", s / 60) : wxString::Format("%.0fh", s / 3600);
         heardReadout_->SetText(wxString::Format("%s %s", gearLabel(t.heardGear).Left(4), ago));
+        heardScaleReadout_->SetText(scaleLabel(t.heardScale));
     }
     else
     {
         heardReadout_->SetText("---");
+        heardScaleReadout_->SetText("---");
     }
 
     tempoReadout_->SetText(gearLabel(t.transmitGear));

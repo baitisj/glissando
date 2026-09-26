@@ -494,7 +494,11 @@ void TextMessagingModem::setGlissando(const GlissandoConfig& config)
     {
         std::lock_guard<std::mutex> lock(glissandoMutex_);
         wasOn = glissando_.enabled;
-        bool retuned = config.scale != glissando_.scale ||
+        // A frame half heard in the old scale or tuning will not be
+        // finished in the new one. Listening for every scale, our own scale
+        // only changes what we send.
+        bool rescaled = config.scale != glissando_.scale && !(config.listenAllScales && glissando_.listenAllScales);
+        bool retuned = rescaled || config.listenAllScales != glissando_.listenAllScales ||
                        config.tuningOffsetHz != glissando_.tuningOffsetHz;
         glissando_ = config;
         glissandoStatus_.transmitGear = transmitGearLocked();
@@ -559,7 +563,7 @@ void TextMessagingModem::configureGlissandoReceiverLocked()
         int current = transmitGearLocked();
         if (current != glissando_.gear) gears.push_back(current);
     }
-    glissandoRx_->configure(gears, glissando_.scale, glissando_.tuningOffsetHz);
+    glissandoRx_->configure(gears, glissando_.scale, glissando_.tuningOffsetHz, glissando_.listenAllScales);
 }
 
 void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode)
@@ -573,6 +577,7 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
         glissandoStatus_.haveReport = true;
         glissandoStatus_.report = d.report;
         glissandoStatus_.heardGear = decode.gear;
+        glissandoStatus_.heardScale = d.scale;
         glissandoStatus_.heardAtMs = steadyMs();
         glissandoStatus_.advisedGear = Glissando::recommendGear(d.report.snrDb, d.report.dopplerHz);
 
@@ -585,8 +590,8 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
 
     if (rxLogEnabled())
     {
-        log_info("RX: Glissando %s voice %d, %.1f dB, %.2f Hz Doppler, offset %+.1f Hz%s",
-                 Glissando::gearInfo(decode.gear).tempo, d.voice, d.report.snrDb,
+        log_info("RX: Glissando %s %s voice %d, %.1f dB, %.2f Hz Doppler, offset %+.1f Hz%s",
+                 Glissando::gearInfo(decode.gear).tempo, Glissando::scaleName(d.scale), d.voice, d.report.snrDb,
                  d.report.dopplerHz, d.frequencyOffsetHz, complete ? ", burst complete" : "");
     }
     if (!complete) return;
