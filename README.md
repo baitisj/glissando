@@ -29,6 +29,11 @@ cd prototype
 python3 -m pip install numpy matplotlib
 python3 render.py                    # listening samples + spectrogram
 python3 sim.py --gears 3 --trials 20 # decode-probability sweep
+python3 bench.py --backend pulse --null-sink --gears 4 --snr -16 -14 -12
+                                     # same sweep through PulseAudio (Linux):
+                                     # a null-sink loopback, or --sink/--source
+                                     # for a rig's sound card
+python3 -m pytest                    # tests (the PulseAudio test skips without a server)
 ```
 
 ![Spectrogram](docs/spectrogram.png)
