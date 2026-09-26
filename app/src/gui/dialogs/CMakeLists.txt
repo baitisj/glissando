@@ -6,7 +6,6 @@ add_library(fdv_gui_dialogs STATIC
     dlg_options.cpp
     dlg_ptt.cpp
     dlg_text_messaging.cpp
-    freedv_reporter.cpp
     log_entry.cpp
     monitor_volume_adj.cpp
     tot_warning.cpp)

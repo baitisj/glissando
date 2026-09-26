@@ -21,7 +21,6 @@
 #include "gui/dialogs/dlg_audiooptions.h"
 #include "gui/dialogs/dlg_options.h"
 #include "gui/dialogs/dlg_ptt.h"
-#include "gui/dialogs/freedv_reporter.h"
 #include "gui/dialogs/monitor_volume_adj.h"
 #include "gui/dialogs/log_entry.h"
 #include "gui/util/FrequencyOps.h"
@@ -113,9 +112,6 @@ void MainFrame::OnToolsEasySetup(wxCommandEvent&)
             m_txtCtrlCallSign->Show();
         }
 
-        // Initialize FreeDV Reporter if required.
-        initializeFreeDVReporter_();
-        
         // Relayout window so that the changes can take effect.
         m_panel->Layout();
     }
@@ -127,40 +123,6 @@ void MainFrame::OnToolsEasySetup(wxCommandEvent&)
 void MainFrame::OnToolsEasySetupUI(wxUpdateUIEvent& event)
 {
     event.Enable(!m_RxRunning);
-}
-
-void MainFrame::OnActivateWindow(wxActivateEvent& event)
-{
-    if (m_reporterDialog != nullptr)
-    {
-        m_reporterDialog->closeTooltip();
-    }
-    
-    event.Skip();
-}
-
-//-------------------------------------------------------------------------
-// OnToolsFreeDVReporter()
-//-------------------------------------------------------------------------
-void MainFrame::OnToolsFreeDVReporter(wxCommandEvent&)
-{
-    if (m_reporterDialog == nullptr)
-    {
-        m_reporterDialog = new FreeDVReporterDialog(this);
-    }
-
-    m_reporterDialog->refreshLayout();
-    m_reporterDialog->Show();
-    m_reporterDialog->Iconize(false); // undo minimize if required
-    m_reporterDialog->Raise(); // brings from background to foreground if required
-}
-
-//-------------------------------------------------------------------------
-// OnToolsFreeDVReporterUI()
-//-------------------------------------------------------------------------
-void MainFrame::OnToolsFreeDVReporterUI(wxUpdateUIEvent& event)
-{
-    event.Enable(wxGetApp().appConfiguration.reportingConfiguration.freedvReporterHostname->ToStdString() != "");
 }
 
 //-------------------------------------------------------------------------
@@ -197,8 +159,6 @@ void MainFrame::OnToolsTextMessagingUI(wxUpdateUIEvent& event)
 //-------------------------------------------------------------------------
 void MainFrame::OnToolsAudio(wxCommandEvent& event)
 {
-    bool oldRxOnly = g_nSoundCards <= 1 ? true : false;
-
     wxUnusedVar(event);
     int rv = 0;
     AudioOptsDialog *dlg = new AudioOptsDialog(NULL);
@@ -206,14 +166,6 @@ void MainFrame::OnToolsAudio(wxCommandEvent& event)
     if(rv == wxOK)
     {
         dlg->ExchangeData(EXCHANGE_DATA_OUT);
-
-        bool newRxOnly = g_nSoundCards <= 1 ? true : false;
-        if (oldRxOnly != newRxOnly &&
-            wxGetApp().m_sharedReporterObject->isValidForReporting())
-        {
-            // Receive Only status has changed, refresh FreeDV Reporter
-            initializeFreeDVReporter_();
-        }
     }
     delete dlg;
 }
@@ -257,11 +209,6 @@ void MainFrame::OnToolsOptions(wxCommandEvent& event)
     wxUnusedVar(event);
     if (optionsDlg->ShowModal() == wxOK)
     {
-        // Enable/disable FreeDV Reporter quick options
-        m_reporterHidden->Enable(
-            wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled &&
-            wxGetApp().appConfiguration.reportingConfiguration.freedvReporterEnabled);
-
         // Update reporting list.
         updateReportingFreqList_();
 
@@ -358,18 +305,6 @@ void MainFrame::OnToolsOptions(wxCommandEvent& event)
             }
         }
 
-        // Initialize FreeDV Reporter if required.
-        if (!m_RxRunning)
-        {
-            initializeFreeDVReporter_();
-        }
-        
-        // Refresh distance column label in case setting was changed.
-        if (m_reporterDialog != nullptr)
-        {
-            m_reporterDialog->refreshLayout();
-        }
-
         // Relayout window so that the changes can take effect.
         m_panel->Layout();
     }
@@ -395,9 +330,6 @@ void MainFrame::OnToolsComCfg(wxCommandEvent& event)
     {
         // Show/hide frequency box based on CAT control configuration.
         m_freqBox->Show(isFrequencyControlEnabled_());
-        
-        // Reinitialize FreeDV Reporter again in case we changed PTT method.
-        initializeFreeDVReporter_();
     }
 
     delete dlg;
@@ -409,62 +341,6 @@ void MainFrame::OnToolsComCfg(wxCommandEvent& event)
 void MainFrame::OnToolsComCfgUI(wxUpdateUIEvent& event)
 {
     event.Enable(!m_RxRunning);
-}
-
-//-------------------------------------------------------------------------
-// OnHelpCheckUpdates()
-//-------------------------------------------------------------------------
-void MainFrame::OnHelpCheckUpdates(wxCommandEvent&)
-{
-    wxLaunchDefaultBrowser("https://github.com/drowe67/freedv-gui/releases");
-}
-
-//-------------------------------------------------------------------------
-// OnHelpCheckUpdatesUI()
-//-------------------------------------------------------------------------
-void MainFrame::OnHelpCheckUpdatesUI(wxUpdateUIEvent& event)
-{
-    event.Enable(!m_RxRunning);
-}
-
-//-------------------------------------------------------------------------
-// OnHelpManual()
-//-------------------------------------------------------------------------
-void MainFrame::OnHelpManual( wxCommandEvent& )
-{
-    wxLaunchDefaultBrowser("https://github.com/drowe67/freedv-gui/blob/master/USER_MANUAL.pdf");
-}
-
-//-------------------------------------------------------------------------
-// OnHelp()
-//-------------------------------------------------------------------------
-void MainFrame::OnHelp( wxCommandEvent& )
-{
-    wxLaunchDefaultBrowser("https://freedv.org/#getting-help");
-}
-
-//-------------------------------------------------------------------------
-//OnHelpAbout()
-//-------------------------------------------------------------------------
-void MainFrame::OnHelpAbout(wxCommandEvent& event)
-{
-    wxUnusedVar(event);
-    wxString msg;
-    wxString version = wxString::FromUTF8(GetFreeDVVersion().c_str());
-
-    msg.Printf( wxT("FreeDV GUI %s\n\n")
-                wxT("For Help and Support visit: http://freedv.org\n\n")
-
-                wxT("GNU Public License V2.1\n\n")
-                wxT("Created by David Witten KD0EAG and David Rowe VK5DGR (2012).  ")
-                wxT("Currently maintained by Mooneer Salem K6AQ and David Rowe VK5DGR.\n\n")
-                wxT("freedv-gui version: %s\n")
-                wxT("freedv-gui git hash: %s\n")
-                wxT("Using %s\n")
-                , version, version, FREEDV_GIT_HASH, hamlib_version
-                );
-
-    wxMessageBox(msg, wxT("About"), wxOK | wxICON_INFORMATION, this);
 }
 
 void MainFrame::onFrequencyModeChange_(IRigFrequencyController*, uint64_t freq, IRigFrequencyController::Mode mode)
@@ -581,7 +457,7 @@ void MainFrame::onFrequencyModeChange_(IRigFrequencyController*, uint64_t freq, 
         m_txtModeStatus->Refresh();
 
         // Auto-save outgoing band levels, then load the new band's levels
-        auto newBandEnum = FreeDVReporterDialog::getFilterForFrequency_(newFreq);
+        auto newBandEnum = getFilterForFrequency(newFreq);
         if (newBandEnum != BAND_OTHER && newBandEnum != lastBand_)
         {
             autoSaveCurrentBandLevels_();
@@ -772,21 +648,7 @@ void MainFrame::OnDeleteConfig(wxCommandEvent&)
         if(pConfig->DeleteAll())
         {
             wxLogMessage(wxT("Config file/registry key successfully deleted."));
-            
-            if (wxGetApp().m_sharedReporterObject)
-            {
-                wxGetApp().m_sharedReporterObject = nullptr;
-            }
 
-            if (m_reporterDialog != nullptr)
-            {
-                m_reporterDialog->setReporter(nullptr);
-                wxGetApp().SafeYield(nullptr, false); // make sure we handle any remaining Reporter messages before dispose
-                m_reporterDialog->Close();
-                m_reporterDialog->Destroy();
-                m_reporterDialog = nullptr;
-            }
-            
             // Resets all configuration to defaults.
             loadConfiguration_();
         }
@@ -930,7 +792,7 @@ void MainFrame::applyTxLevel()
     // override, so that per-band values don't contaminate the global default.
     // Use the current reporting frequency directly rather than lastBand_ to
     // avoid stale state before the first band-change event fires.
-    wxString bandName = bandNameForFilter(FreeDVReporterDialog::getFilterForFrequency_(
+    wxString bandName = bandNameForFilter(getFilterForFrequency(
         wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency));
     if (isTuning)
     {
@@ -959,7 +821,7 @@ void MainFrame::OnTxLevelMouseWheel( wxMouseEvent& event )
 void MainFrame::OnTxLevelContextMenu( wxContextMenuEvent& )
 {
     uint64_t freq = wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency;
-    FilterFrequency bandEnum = FreeDVReporterDialog::getFilterForFrequency_(freq);
+    FilterFrequency bandEnum = getFilterForFrequency(freq);
     wxString bandName = bandNameForFilter(bandEnum); // string used for display labels and map keys
 
     if (bandName.IsEmpty())
@@ -1011,7 +873,7 @@ void MainFrame::OnTuneAttenContextMenu( wxContextMenuEvent& )
     }, minItem->GetId());
 
     uint64_t freq = wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency;
-    FilterFrequency bandEnum = FreeDVReporterDialog::getFilterForFrequency_(freq);
+    FilterFrequency bandEnum = getFilterForFrequency(freq);
     wxString bandName = bandNameForFilter(bandEnum);
 
     if (!bandName.IsEmpty())
@@ -1115,16 +977,13 @@ int MainApp::FilterEvent(wxEvent& event)
 
             // only use space to toggle PTT if we are running and no modal dialogs (like options) up
             bool mainWindowActive = frame->IsActive();
-            bool reporterActiveButNotUpdatingTextMessage =
-                frame->m_reporterDialog != nullptr && frame->m_reporterDialog->IsActive() &&
-                !frame->m_reporterDialog->isTextMessageFieldInFocus();
             bool totWarningActive = frame->m_totWarningDialog_ != nullptr && frame->m_totWarningDialog_->IsActive();
             bool tuneActive = frame->m_btnTogTune->GetValue();
 
             // m_pttKeyRequireRelease_ blocks a key held through a forced TX stop
             // (e.g. TOT) from immediately restarting TX -- see main.h.
             if (frame->m_RxRunning && !tuneActive && !frame->m_pttKeyRequireRelease_ &&
-                (mainWindowActive || totWarningActive || reporterActiveButNotUpdatingTextMessage) &&
+                (mainWindowActive || totWarningActive) &&
                 wxGetApp().appConfiguration.enableSpaceBarForPTT && !frame->isReceiveOnly()) {
 
                 // space bar controls tx/rx if keyer not running
@@ -1161,11 +1020,8 @@ int MainApp::FilterEvent(wxEvent& event)
             PttKeyDown_ = false;
 
             bool mainWindowActive = frame->IsActive();
-            bool reporterActiveButNotUpdatingTextMessage =
-                frame->m_reporterDialog != nullptr && frame->m_reporterDialog->IsActive() &&
-                !frame->m_reporterDialog->isTextMessageFieldInFocus();
             bool totWarningActive = frame->m_totWarningDialog_ != nullptr && frame->m_totWarningDialog_->IsActive();
-            if (frame->m_RxRunning && (mainWindowActive || totWarningActive || reporterActiveButNotUpdatingTextMessage) &&
+            if (frame->m_RxRunning && (mainWindowActive || totWarningActive) &&
                 wxGetApp().appConfiguration.enableSpaceBarForPTT && !frame->isReceiveOnly() &&
                 wxGetApp().appConfiguration.pttMomentaryMode) {
 
@@ -1859,10 +1715,7 @@ void MainFrame::OnTogBtnAnalogClick (wxCommandEvent& event)
     // Report analog change to registered reporters
     for (auto& obj : wxGetApp().m_reporters)
     {
-        if (obj != wxGetApp().m_sharedReporterObject || !m_reporterHidden->GetValue())
-        {
-            obj->inAnalogMode(g_analog.load(std::memory_order_relaxed));
-        }
+        obj->inAnalogMode(g_analog.load(std::memory_order_relaxed));
     }
     
     if (wxGetApp().rigFrequencyController != nullptr && 
@@ -1934,22 +1787,9 @@ void MainFrame::OnLogQSO(wxCommandEvent&)
             dxFreqDouble *= 1000000;
         }
         
-        // If connected to FreeDV Reporter, get DX grid
-        if (m_reporterDialog != nullptr && dxFreq != "")
-        {
-            dxGrid = m_reporterDialog->getGridSquareForCallsign(dxCall);
-        }
-        
         dxFreqHz = (uint64_t)dxFreqDouble;
         
         log_info("Logging %s/%s at %" PRIu64 " Hz from main window drop-down list", (const char*)dxCall.ToUTF8(), (const char*)dxGrid.ToUTF8(), dxFreqHz);
-    }
-    else if (
-        m_reporterDialog != nullptr && 
-        wxGetApp().lastSelectedLoggingRow == MainApp::FREEDV_REPORTER &&
-        m_reporterDialog->getSelectedCallsignInfo(dxCall, dxGrid, dxFreqHz))
-    {
-        log_info("Logging %s/%s at %" PRIu64 " Hz from FreeDV Reporter", (const char*)dxCall.ToUTF8(), (const char*)dxGrid.ToUTF8(), dxFreqHz);
     }
     else
     {
@@ -1998,8 +1838,7 @@ void MainFrame::OnRightClickCallsignList(wxMouseEvent&)
         m_lastReportedCallsignListView->Select(index, false);
         index = m_lastReportedCallsignListView->GetFirstSelected();
     }
-    // Deselect only -- leave the displayed callsign text alone, consistent
-    // with how the FreeDV Reporter list's right-click-to-deselect behaves.
+    // Deselect only -- leave the displayed callsign text alone.
     // See OnCloseCallsignList() for why this is deferred and followed by a
     // forced repaint.
     CallAfter([this]() {
@@ -2156,15 +1995,10 @@ void MainFrame::OnChangeReportFrequency( wxCommandEvent& event )
         }
     }
 
-    if (m_reporterDialog != nullptr)
-    {
-        m_reporterDialog->refreshQSYButtonState();
-    }
-
     // Auto-save outgoing band levels, then load the new band's levels
     if (wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency > 0)
     {
-        auto newBandEnum = FreeDVReporterDialog::getFilterForFrequency_(
+        auto newBandEnum = getFilterForFrequency(
             wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency);
         if (newBandEnum != BAND_OTHER && newBandEnum != lastBand_)
         {
@@ -2275,32 +2109,6 @@ void MainFrame::OnResetMicSpkrLevel(wxMouseEvent&)
     wxString fmtString = wxString::Format(MIC_SPKR_LEVEL_FORMAT_STR, wxNumberFormatter::ToString((double)sliderLevel, 1), DECIBEL_STR);
     m_txtMicSpkrLevelNum->SetLabel(fmtString);
     m_sliderMicSpkrLevel->SetValue(sliderLevel);
-}
-
-void MainFrame::OnToggleReporterVisibility (wxCommandEvent&)
-{
-    if (m_RxRunning && !g_analog.load(std::memory_order_relaxed) && wxGetApp().appConfiguration.reportingConfiguration.freedvReporterEnabled)
-    {
-        if (m_reporterHidden->GetValue())
-        {
-            wxGetApp().m_sharedReporterObject->hideFromView();
-        }
-        else
-        {
-            wxGetApp().m_sharedReporterObject->showOurselves();
-        }
-    }
-
-    if (m_reporterHidden->GetValue())
-    {
-        m_reporterHidden->SetLabel("Turn On");
-    }
-    else
-    {
-        m_reporterHidden->SetLabel("Turn Off");
-    }
-    
-    wxGetApp().appConfiguration.reportingConfiguration.freedvReporterForcedOff = m_reporterHidden->GetValue();
 }
 
 void MainFrame::OnToolsExportConfigUI(wxUpdateUIEvent& event)

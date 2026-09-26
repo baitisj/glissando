@@ -50,37 +50,6 @@ include(cmake/IsMacOSUniversalBinary.cmake)
 # Compile backend dependencies
 include(cmake/BuildRNNoise.cmake)
 
-if(NOT DISABLE_TLS_SUPPORT)
-    message(STATUS "Enabling TLS support for FreeDV Reporter")
-
-    # ENABLE_TLS_SUPPORT is applied via target_compile_definitions() on fdv_util/
-    # fdv_reporting (not add_definitions() here) so it also propagates to
-    # consumers outside this subproject, like FlexTcpTask in freedv-integrations.
-    # TcpConnectionHandler's layout depends on this macro, so every TU that sees
-    # it must agree, or subclasses silently corrupt adjacent members at runtime.
-
-    if(NOT USE_STATIC_LIBRESSL)
-        find_package(OpenSSL)
-        if(OpenSSL_FOUND)
-            IsMacOSUniversalBinary(${OPENSSL_CRYPTO_LIBRARY} CRYPTO_USABLE)
-            IsMacOSUniversalBinary(${OPENSSL_SSL_LIBRARY} SSL_USABLE)
-            if (CRYPTO_USABLE AND SSL_USABLE)
-                message(STATUS "Using OpenSSL for TLS support.")
-                include_directories(${OPENSSL_INCLUDE_DIR})
-            else()
-                message(STATUS "OpenSSL is not a universal binary, ignoring found library")
-                set(OpenSSL_FOUND 0)
-            endif()
-        endif(OpenSSL_FOUND)
-    endif(NOT USE_STATIC_LIBRESSL)
-    if(USE_STATIC_LIBRESSL OR NOT OpenSSL_FOUND)
-        message(STATUS "Will attempt static build of LibreSSL.")
-        include(cmake/BuildLibreSSL.cmake)
-    endif(USE_STATIC_LIBRESSL OR NOT OpenSSL_FOUND)
-else(NOT DISABLE_TLS_SUPPORT)
-    message(STATUS "Disabling TLS support; FreeDV Reporter will connect via non-TLS only.")
-endif(NOT DISABLE_TLS_SUPPORT)
-
 # Look for libebur128 (loudness measurement) 
 if(NOT USE_STATIC_EBUR128)
     message(STATUS "Looking for ebur128...")

@@ -459,11 +459,7 @@ TopFrame::TopFrame(wxWindow* parent, wxWindowID id, const wxString& title, const
     wxMenuItem* m_menuItemEasySetup;
     m_menuItemEasySetup = new wxMenuItem(tools, wxID_ANY, wxString(_("&Easy Setup...")) , _("Simplified setup of FreeDV"), wxITEM_NORMAL);
     tools->Append(m_menuItemEasySetup);
-    
-    wxMenuItem* m_menuItemFreeDVReporter;
-    m_menuItemFreeDVReporter = new wxMenuItem(tools, wxID_ANY, wxString(_("FreeDV R&eporter")) , _("Opens browser window and displays FreeDV Reporter service."), wxITEM_NORMAL);
-    tools->Append(m_menuItemFreeDVReporter);
-    
+
     wxMenuItem* m_menuItemTextMessaging;
     m_menuItemTextMessaging = new wxMenuItem(tools, wxID_ANY, wxString(_("&Text Chat...")) , _("Opens the text chat window."), wxITEM_NORMAL);
     tools->Append(m_menuItemTextMessaging);
@@ -512,26 +508,6 @@ TopFrame::TopFrame(wxWindow* parent, wxWindowID id, const wxString& title, const
     tools->Append(m_menuItemLoadDefaultConfig);
 
     m_menubarMain->Append(tools, _("&Tools"));
-
-    help = new wxMenu();
-    wxMenuItem* m_menuItemHelpUpdates;
-    m_menuItemHelpUpdates = new wxMenuItem(help, wxID_ANY, wxString(_("&Check for Updates")) , _("Checks for updates to FreeDV"), wxITEM_NORMAL);
-    help->Append(m_menuItemHelpUpdates);
-    m_menuItemHelpUpdates->Enable(false);
-    
-    wxMenuItem* m_menuItemAbout;
-    m_menuItemAbout = new wxMenuItem(help, wxID_ABOUT, wxString(_("&About FreeDV")) , _("About this program"), wxITEM_NORMAL);
-    help->Append(m_menuItemAbout);
-
-    wxMenuItem* m_menuItemHelpManual;
-    m_menuItemHelpManual = new wxMenuItem(help, wxID_ANY, wxString(_("&User Manual...")), _("Loads the user manual"), wxITEM_NORMAL);
-    help->Append(m_menuItemHelpManual);
-
-    wxMenuItem* m_menuItemHelpGetAssistance;
-    m_menuItemHelpGetAssistance = new wxMenuItem(help, wxID_ANY, wxString(_("&Get Assistance")), _("Gets assistance with FreeDV setup"), wxITEM_NORMAL);
-    help->Append(m_menuItemHelpGetAssistance);
-        
-    m_menubarMain->Append(help, _("&Help"));
 
     this->SetMenuBar(m_menubarMain);
 
@@ -634,18 +610,6 @@ TopFrame::TopFrame(wxWindow* parent, wxWindowID id, const wxString& title, const
     
     leftSizer->Add(sbSizerLogging, 0, static_cast<int>(wxALL)|static_cast<int>(wxEXPAND), 2);
 
-    //------------------------------
-    // FreeDV Reporter quick options
-    //------------------------------
-    wxStaticBox* reporterBox = new wxStaticBox(m_panel, wxID_ANY, _("FDV Reporting"), wxDefaultPosition, wxSize(100,-1));
-    wxStaticBoxSizer* sbSizerReporterBox = new wxStaticBoxSizer(reporterBox, wxVERTICAL);
-
-    m_reporterHidden = new wxToggleButton(reporterBox, wxID_ANY, _("Turn Off"), wxDefaultPosition, wxDefaultSize, 0);
-    m_reporterHidden->SetToolTip(_("Quick ON/OFF for FreeDV Reporting, when enabled in Tools->Options->Reporting."));
-    sbSizerReporterBox->Add(m_reporterHidden, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_HORIZONTAL, 5);
-
-    leftSizer->Add(sbSizerReporterBox, 0, static_cast<int>(wxALL)|static_cast<int>(wxEXPAND), 2);
-    
     //------------------------------
     // BER Frames box
     //------------------------------
@@ -951,14 +915,11 @@ TopFrame::TopFrame(wxWindow* parent, wxWindowID id, const wxString& title, const
     this->Connect(wxEVT_PAINT, wxPaintEventHandler(TopFrame::topFrame_OnPaint));
     this->Connect(wxEVT_SIZE, wxSizeEventHandler(TopFrame::topFrame_OnSize));
     this->Connect(wxEVT_UPDATE_UI, wxUpdateUIEventHandler(TopFrame::topFrame_OnUpdateUI));
-    this->Connect(wxEVT_ACTIVATE, wxActivateEventHandler(TopFrame::OnActivateWindow));
     this->Connect(wxEVT_SYS_COLOUR_CHANGED, wxSysColourChangedEventHandler(TopFrame::OnSystemColorChanged));
     this->Connect(m_menuItemExit->GetId(), wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TopFrame::OnExit));
 
     this->Connect(m_menuItemEasySetup->GetId(), wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TopFrame::OnToolsEasySetup));
     this->Connect(m_menuItemEasySetup->GetId(), wxEVT_UPDATE_UI, wxUpdateUIEventHandler(TopFrame::OnToolsEasySetupUI));
-    this->Connect(m_menuItemFreeDVReporter->GetId(), wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TopFrame::OnToolsFreeDVReporter));
-    this->Connect(m_menuItemFreeDVReporter->GetId(), wxEVT_UPDATE_UI, wxUpdateUIEventHandler(TopFrame::OnToolsFreeDVReporterUI));
     this->Connect(m_menuItemTextMessaging->GetId(), wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TopFrame::OnToolsTextMessaging));
     this->Connect(m_menuItemTextMessaging->GetId(), wxEVT_UPDATE_UI, wxUpdateUIEventHandler(TopFrame::OnToolsTextMessagingUI));
     this->Connect(m_menuItemGlissando->GetId(), wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TopFrame::OnToolsGlissando));
@@ -980,11 +941,6 @@ TopFrame::TopFrame(wxWindow* parent, wxWindowID id, const wxString& title, const
     this->Connect(m_menuItemLoadDefaultConfig->GetId(), wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TopFrame::OnToolsLoadDefaultConfig));
     this->Connect(m_menuItemLoadDefaultConfig->GetId(), wxEVT_UPDATE_UI, wxUpdateUIEventHandler(TopFrame::OnToolsLoadDefaultConfigUI));
 
-    this->Connect(m_menuItemHelpUpdates->GetId(), wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TopFrame::OnHelpCheckUpdates));
-    this->Connect(m_menuItemHelpUpdates->GetId(), wxEVT_UPDATE_UI, wxUpdateUIEventHandler(TopFrame::OnHelpCheckUpdatesUI));
-    this->Connect(m_menuItemAbout->GetId(), wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TopFrame::OnHelpAbout));
-    this->Connect(m_menuItemHelpManual->GetId(), wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TopFrame::OnHelpManual));
-    this->Connect(m_menuItemHelpGetAssistance->GetId(), wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TopFrame::OnHelp));
     m_sliderSQ->Connect(wxEVT_SCROLL_TOP, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
     m_sliderSQ->Connect(wxEVT_SCROLL_BOTTOM, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
     m_sliderSQ->Connect(wxEVT_SCROLL_LINEUP, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
@@ -1084,8 +1040,6 @@ TopFrame::TopFrame(wxWindow* parent, wxWindowID id, const wxString& title, const
     m_cboLastReportedCallsigns->Connect(wxEVT_COMBOBOX_CLOSEUP, wxCommandEventHandler(TopFrame::OnCloseCallsignList), NULL, this);
     m_cboLastReportedCallsigns->Connect(wxEVT_RIGHT_DOWN, wxMouseEventHandler(TopFrame::OnRightClickCallsignList), NULL, this);
 
-    m_reporterHidden->Connect(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnToggleReporterVisibility), NULL, this);
-
     m_btnTogTune->Connect(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTogBtnTune), NULL, this);
 }
 
@@ -1098,7 +1052,6 @@ TopFrame::~TopFrame()
     this->Disconnect(wxEVT_PAINT, wxPaintEventHandler(TopFrame::topFrame_OnPaint));
     this->Disconnect(wxEVT_SIZE, wxSizeEventHandler(TopFrame::topFrame_OnSize));
     this->Disconnect(wxEVT_UPDATE_UI, wxUpdateUIEventHandler(TopFrame::topFrame_OnUpdateUI));
-    this->Disconnect(wxEVT_ACTIVATE, wxActivateEventHandler(TopFrame::OnActivateWindow));
     this->Disconnect(ID_EXIT, wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TopFrame::OnExit));
     this->Disconnect(wxID_ANY, wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TopFrame::OnToolsEasySetup));
     this->Disconnect(wxID_ANY, wxEVT_UPDATE_UI, wxUpdateUIEventHandler(TopFrame::OnToolsEasySetupUI));
@@ -1120,11 +1073,6 @@ TopFrame::~TopFrame()
     this->Disconnect(wxID_ANY, wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TopFrame::OnToolsLoadDefaultConfig));
     this->Disconnect(wxID_ANY, wxEVT_UPDATE_UI, wxUpdateUIEventHandler(TopFrame::OnToolsLoadDefaultConfigUI));
 
-    this->Disconnect(wxID_ANY, wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TopFrame::OnHelpCheckUpdates));
-    this->Disconnect(wxID_ANY, wxEVT_UPDATE_UI, wxUpdateUIEventHandler(TopFrame::OnHelpCheckUpdatesUI));
-    this->Disconnect(ID_ABOUT, wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TopFrame::OnHelpAbout));
-    this->Disconnect(wxID_ANY, wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TopFrame::OnHelpManual));
-    
     m_sliderSQ->Disconnect(wxEVT_SCROLL_TOP, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
     m_sliderSQ->Disconnect(wxEVT_SCROLL_BOTTOM, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
     m_sliderSQ->Disconnect(wxEVT_SCROLL_LINEUP, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
@@ -1189,8 +1137,6 @@ TopFrame::~TopFrame()
     m_cboLastReportedCallsigns->Disconnect(wxEVT_RIGHT_DOWN, wxMouseEventHandler(TopFrame::OnRightClickCallsignList), NULL, this);
     m_cboLastReportedCallsigns->Disconnect(wxEVT_COMBOBOX_DROPDOWN, wxCommandEventHandler(TopFrame::OnOpenCallsignList), NULL, this);
     m_cboLastReportedCallsigns->Disconnect(wxEVT_COMBOBOX_CLOSEUP, wxCommandEventHandler(TopFrame::OnCloseCallsignList), NULL, this);
-
-    m_reporterHidden->Disconnect(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnToggleReporterVisibility), NULL, this);
 
     m_btnTogTune->Disconnect(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTogBtnTune), NULL, this);
 }

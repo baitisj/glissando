@@ -656,14 +656,8 @@ void EasySetupDialog::ExchangeReportingData(int inout)
             wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled = m_ckbox_psk_enable->GetValue();
             if (wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled)
             {
-                // Enable both PSK Reporter and FreeDV Reporter by default.
+                // Enable PSK Reporter by default.
                 wxGetApp().appConfiguration.reportingConfiguration.pskReporterEnabled = wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled;
-                wxGetApp().appConfiguration.reportingConfiguration.freedvReporterEnabled = wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled;
-                
-                if (wxGetApp().appConfiguration.reportingConfiguration.freedvReporterHostname == "")
-                {
-                    wxGetApp().appConfiguration.reportingConfiguration.freedvReporterHostname = FREEDV_REPORTER_DEFAULT_HOSTNAME;
-                }
             }
         }
         

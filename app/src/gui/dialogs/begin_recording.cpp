@@ -25,8 +25,8 @@
 namespace
 {
     // The recording suffix is used verbatim as part of a filename, and its value
-    // may come from another user's callsign via FreeDV Reporter as well as from
-    // manual entry. Restrict it to a safe whitelist rather than chasing individual
+    // may come from another station's callsign (the heard-callsign list) as well
+    // as from manual entry. Restrict it to a safe whitelist rather than chasing individual
     // characters (e.g. '/' and '\' are path separators on various platforms, ':'
     // has special meaning to NTFS, etc.) so it can't affect where the file ends up.
     bool IsAllowedRecordingSuffixChar(int ch)

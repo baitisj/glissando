@@ -118,9 +118,7 @@ bool MainApp::CanAccessSerialPort(std::string const& portName)
 
 bool MainFrame::isReceiveOnly()
 {
-    return 
-        wxGetApp().appConfiguration.reportingConfiguration.freedvReporterForceReceiveOnly || 
-        g_nSoundCards <= 1;
+    return g_nSoundCards <= 1;
 }
 
 //----------------------------------------------------------------

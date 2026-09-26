@@ -158,11 +158,6 @@ Both windows are on your desktop. To run the test:
   5. Send something over $((39 * 2)) characters to exercise fragmentation, and
      close B mid-message to watch A go RETRY 1..3 and then FAILED.
 
-The reporter hostname is pointed at 127.0.0.1 in both configs. FreeDV builds
-its reporter client regardless of the Reporting/Enable setting, so disabling
-reporting alone is not enough to keep these test callsigns off the live
-FreeDV Reporter list -- the hostname is what actually stops it.
-
   tail -f $WORKDIR/station{A,B}/freedv.log
   $0 down
 
