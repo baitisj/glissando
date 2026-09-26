@@ -1,7 +1,8 @@
 # Glissando
 
-A weak-signal amateur radio digital mode that sounds like someone whistling
-a pentatonic tune -- or, alternatively, murderous bleeping robot minions. 
+A weak-signal amateur radio digital mode that sounds like someone 
+whistling a bright and warm tune -- or, alternatively, 
+murderous bleeping robot minions. 
 
 Every symbol is a glide (a chirp) from one note of the selected scales
 to the next, followed by a short sustain. The data is the melody. The
