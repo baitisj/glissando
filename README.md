@@ -1,10 +1,10 @@
 # Glissando
 
 A weak-signal amateur radio digital mode that sounds like someone whistling
-a pentatonic tune.
+a pentatonic tune -- or, alternatively, murderous bleeping robot minions. 
 
-Every symbol is a glide (a chirp) from one note of the A minor pentatonic
-scale to the next, followed by a short sustain. The data is the melody. The
+Every symbol is a glide (a chirp) from one note of the selected scales
+to the next, followed by a short sustain. The data is the melody. The
 signal is constant-envelope, phase-continuous and fits inside an ordinary
 SSB passband. Like LoRa, it reaches below the noise by using a large set of
 orthogonal chirps, long integration and strong FEC; unlike LoRa, the chirps
@@ -68,5 +68,10 @@ They cost nothing in sensitivity: at G3 Allegro all four scales decode at
 the same SNR within 0.5 dB (DESIGN.md 3.1a has the table). Listen in
 `samples/`: `g3-allegro-<scale>.wav` for a solo and
 `g5-presto-duet-<scale>.wav` for the duet.
+
+## Intention
+
+This work represents a long-standing dream of the inventor: to make amateur radio
+bands sound better, and to encourage harmonious interoperability.
 
 ![Spectrogram](docs/spectrogram.png)
