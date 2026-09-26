@@ -1,0 +1,37 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  modem:
+    name: C++ modem
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build
+      run: |
+        cmake -S modem -B build-modem -DUNITTEST=ON
+        cmake --build build-modem -j$(nproc)
+    - name: Test
+      run: ctest --test-dir build-modem --output-on-failure
+
+  app:
+    name: App (Linux, PulseAudio)
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install packages
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential cmake git autoconf automake libtool \
+          libwxgtk3.2-dev libpulse-dev libspeexdsp-dev libsndfile1-dev libhamlib-dev \
+          libasound2-dev libao-dev libgsm1-dev libebur128-dev libssl-dev sox
+    - name: Build
+      run: |
+        cmake -S app -B build -DCMAKE_BUILD_TYPE=Release -DUSE_NATIVE_AUDIO=1 -DUNITTEST=ON
+        cmake --build build -j$(nproc)
+    - name: Test
+      run: ctest --test-dir build -R "glissando|text_messaging" --output-on-failure
