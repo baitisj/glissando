@@ -190,6 +190,12 @@ class OptionsDlg : public wxDialog
         wxCheckBox*  m_ckboxMultipleRx;
         wxCheckBox*  m_ckboxSingleRxThread;
         wxCheckBox*  m_ckboxTextChatUsDataSegmentsOnly;
+        wxCheckBox*  m_ckboxData2G;
+        wxTextCtrl*  m_txtData2GHost;
+        wxTextCtrl*  m_txtData2GKissPort;
+        wxCheckBox*  m_ckboxData2GCommandPort;
+        wxTextCtrl*  m_txtData2GCommandPort;
+        void updateData2GControls_();
         wxTextCtrl*  m_statsResetTime;
         
         wxCheckBox*  m_ckbox_use_utc_time;

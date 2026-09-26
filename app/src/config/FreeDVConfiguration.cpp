@@ -72,6 +72,11 @@ FreeDVConfiguration::FreeDVConfiguration()
     , halfDuplexMode("/Rig/HalfDuplex", true)
     , multipleReceiveEnabled("/Rig/MultipleRx", true)
     , textChatUsDataSegmentsOnly("/TextChat/UsDataSegmentsOnly", true)
+    , data2gEnabled("/Data2G/Enabled", false)
+    , data2gHost("/Data2G/Host", "127.0.0.1")
+    , data2gKissPort("/Data2G/KissPort", 8100)
+    , data2gUseCommandPort("/Data2G/UseCommandPort", true)
+    , data2gCommandPort("/Data2G/CommandPort", 8300)
     , glissandoGear("/Glissando/Gear", 3)
     , glissandoAutoGear("/Glissando/AutoGear", true)
     , glissandoScale("/Glissando/Scale", "pentatonic")
@@ -201,6 +206,11 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     load_(config, halfDuplexMode);
     load_(config, multipleReceiveEnabled);
     load_(config, textChatUsDataSegmentsOnly);
+    load_(config, data2gEnabled);
+    load_(config, data2gHost);
+    load_(config, data2gKissPort);
+    load_(config, data2gUseCommandPort);
+    load_(config, data2gCommandPort);
     load_(config, glissandoGear);
     load_(config, glissandoAutoGear);
     load_(config, glissandoScale);
@@ -297,6 +307,11 @@ void FreeDVConfiguration::save(wxConfigBase* config)
     save_(config, halfDuplexMode);
     save_(config, multipleReceiveEnabled);
     save_(config, textChatUsDataSegmentsOnly);
+    save_(config, data2gEnabled);
+    save_(config, data2gHost);
+    save_(config, data2gKissPort);
+    save_(config, data2gUseCommandPort);
+    save_(config, data2gCommandPort);
     save_(config, glissandoGear);
     save_(config, glissandoAutoGear);
     save_(config, glissandoScale);

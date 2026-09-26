@@ -212,7 +212,8 @@ void MainFrame::OnToolsOptions(wxCommandEvent& event)
         // Update reporting list.
         updateReportingFreqList_();
 
-        // The text chat preference may have changed.
+        // The text chat preferences may have changed.
+        applyChatModem_();
         updateTextChatTransmitPermission_();
     
         // Show/hide frequency box based on CAT control configuration.

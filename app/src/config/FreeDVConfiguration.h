@@ -85,6 +85,15 @@ public:
     // default: an operator elsewhere turns it off.
     ConfigurationDataElement<bool> textChatUsDataSegmentsOnly;
 
+    // Text chat through a separately running data2g-host instead of our own
+    // modem (docs/DATA2G.md): KISS for the frames, and the command port for
+    // PTT and BUSY unless another client needs it.
+    ConfigurationDataElement<bool> data2gEnabled;
+    ConfigurationDataElement<wxString> data2gHost;
+    ConfigurationDataElement<int> data2gKissPort;
+    ConfigurationDataElement<bool> data2gUseCommandPort;
+    ConfigurationDataElement<int> data2gCommandPort;
+
     // The Glissando console and the melodic chirp mode it drives. Tuning
     // offset and scan rate are stored in tenths (Hz, rows per second) so
     // they fit the integer config type.

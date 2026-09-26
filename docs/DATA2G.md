@@ -1,6 +1,8 @@
-# Data2G as a chat modem: integration plan
+# Data2G as a chat modem
 
-Status: proposal, for Jeff to approve before any app code is written.
+Status: Jeff chose KISS plus the command port (2026-09-26), and the
+operator starts `data2g-host`, never the app. Phase 1 below is built;
+it has been tested against a fake host, not yet against a real one.
 
 [Data2G](https://github.com/arodland/Data2G) is an OFDM/CPM HF data modem
 with its own gear shifter. This plan adds it to the Glissando app as a
@@ -49,7 +51,7 @@ Things that shape the design:
   connects. A station running VarAC or Pat against the same host would
   lose its command connection to us.
 
-## Recommended interface: KISS for frames, the command port for status
+## Interface: KISS for frames, the command port for status
 
 The chat layer already has the right seam:
 `TextMessaging::ITextMessagingTransport` (`transmit`, `isTransmitting`,
@@ -62,43 +64,53 @@ unchanged.
 **Frames (port 8100).** Each chat frame the protocol emits is wrapped in
 an AX.25 UI frame and written as one KISS data frame:
 
-- Source: our callsign. Destination: the addressee, or `GLISS` for a
-  broadcast. PID `0xF0` (no layer 3).
-- Info field: the chat frame exactly as `FrameCodec::encode` builds it
-  today, with a leading tag byte so we can tell our frames from APRS or
-  other KISS traffic the host passes up.
+- Source: the callsign the chat frame carries (six characters and an
+  SSID, as far as AX.25 allows). Destination: always `GLISS`. Chat frames
+  address stations by a callsign CRC inside the frame, and the transport
+  only sees encoded frames, so it has no addressee to put here; Data2G
+  sends UI frames in its broadcast mode whoever they are for anyway.
+  PID `0xF0` (no layer 3).
+- Info field: the tag `GLS` and a version byte (1), then the chat frame
+  exactly as `FrameCodec::encode` builds it, so our frames are told apart
+  from APRS or other KISS traffic the host passes up.
 - A keying's fragments go in together, so Data2G combines them into one
   burst.
 - Received KISS frames that are AX.25 UI with our tag go to
-  `onFrameReceived`; anything else is dropped (and counted, for the log).
-- Data2G reports no SNR over KISS, so received frames carry "unknown";
-  the heard list shows a dash instead of a number.
+  `onFrameReceived`; anything else is dropped.
+- Data2G reports no SNR over KISS, so received frames carry NaN and the
+  chat window shows a dash. History keeps it as 0, which it leaves blank.
 
-Real AX.25 addressing is what lets Data2G see stations at all: its link
-layer reads callsigns from the frame, and every burst we send carries
+Real AX.25 source callsigns are what let Data2G see stations at all: its
+link layer reads them from the frame, and every burst we send carries
 its reception reports.
 
 **Status (port 8300, optional, on by default).** The transport also keeps
-a command connection open, sends `MYCALL` and nothing else that changes
-state, and reads:
+a command connection open, sends nothing on it, and reads:
 
 - `PTT ON/OFF` into `isTransmitting()`, which is what starts the
   acknowledgement timer at the true end of our burst.
 - `BUSY ON/OFF` into `isChannelBusy()`, which freezes the protocol while
   somebody else's burst is being received.
-- `MODE submode` for the console's telemetry line.
+- `MODE submode` for the chat window's Data2G line.
+
+A keying is "transmitting" from the KISS write until PTT goes on and off
+again. If data2g-host never keys for it (it holds KISS traffic during an
+ARQ session), the keying is given up after 60 s. PTT for anybody else's
+traffic on the host also counts, so chat does not queue behind it.
 
 With the command port turned off (for a station that also runs VarAC on
-the host), the transport falls back to timing from `AirTiming`: it treats
-itself as transmitting for an estimated burst length after each write,
-and never reports the channel busy (Data2G still listens before talking
+the host), the transport treats itself as transmitting for 14 s after
+each write, and never reports the channel busy (Data2G still listens before talking
 on its own side).
 
 **Timers.** Data2G plans broadcast bursts in its longest size class
 (12 s, `kisslink.BROADCAST_S`), and a burst grows past it when a frame
-needs more room; its own turnaround estimate is 1.3 s. A `Data2GTransport` supplies its own
-`AirTiming`, sized from measured burst lengths on the loopback bench
-rather than guessed; Glissando's `forFrameSeconds` is the model.
+needs more room; its own turnaround estimate is 1.3 s.
+`Data2G::airTiming()` treats a whole keying as one 12 s burst decoded
+within 4 s (`AirTiming::forFrameSeconds`), giving an acknowledgement
+timeout of about 45 s. These are estimates to tune on a real two-host
+bench; with the command port on, PTT and BUSY keep the protocol from
+leaning on them in the usual case.
 
 **Frame size.** Phase 1 keeps the current 14 and 54 byte frames, so the
 protocol and its tests need no change. Data2G would happily carry a whole
@@ -130,42 +142,46 @@ AX.25 connection (which misuses AX.25 on the air), or a Data2G option to
 shift UI frames addressed to a station with a fresh report. The second
 is a change for Data2G's author to consider; we would ask, not patch.
 
-## App changes
+## What was built
 
-All in `app/`, after the UI rework in the thread "Glissando front end,
-Chaotica style" has landed:
-
-1. `app/src/pipeline/Data2GTransport.{h,cpp}`: KISS encoder and decoder,
-   AX.25 UI header, VARA command reader, reconnect with backoff, all on a
-   socket thread that hands frames to the protocol.
-2. The console's mode choice gets **Data2G (external)**. Selecting it
-   stops the app keying the radio and sending audio. Receive audio can
-   still feed the waterfall where PulseAudio lets both programs open the
-   same capture device.
-3. Preferences: Data2G host (default `127.0.0.1`), KISS port (8100),
-   command port (8300) with an on/off switch, and a note that bandwidth
-   (`--kiss-bw`) is set when starting `data2g-host`.
-4. Chat window: a connection indicator (connected, reconnecting, not
-   running) and the last `MODE` heard.
-5. PTT: when Data2G is selected, the app's own rig control must not key
-   the radio. Running rigctld and pointing both programs at it keeps the
-   app's frequency display working without a serial-port fight.
+- `app/src/text_messaging/Data2GLink.{h,cpp}`: KISS framing, AX.25 UI
+  frames, the chat payload tag, command-line parsing and the timers. No
+  sockets, so it is all unit tested.
+- `app/src/text_messaging/Data2GTransport.{h,cpp}`: the
+  `ITextMessagingTransport` over TCP, on its own thread, reconnecting
+  every 2 s (backing off to 30 s) while data2g-host is not there.
+- Preferences, Modem tab, Text Chat: **Send chat through Data2G**, host
+  (default `127.0.0.1`), KISS port (8100), and the command port (8300)
+  with a switch to leave it alone. Bandwidth (`--kiss-bw`) is set when
+  starting data2g-host.
+- With Data2G chosen, chat's transport, timers and received frames all
+  come from data2g-host: the app does not key the radio for chat, and
+  frames its own modem decodes are left out of the conversation (their
+  replies would go out on the other modem). Audio can still run for the
+  waterfall where PulseAudio lets both programs open the capture device.
+- The chat window shows a line naming the Data2G host, whether it is
+  reachable, and the submode it last sent in.
+- PTT: run rigctld and point both data2g-host and the app at it, so the
+  app keeps the frequency display without a serial-port fight.
 
 ## Tests
 
-- **Unit** (in the existing `text_messaging` test binary): KISS escaping
-  round trips, AX.25 header build and parse, foreign frames ignored, and
-  the protocol driven through `Data2GTransport` against a fake in-process
-  KISS and command server (including PTT/BUSY sequencing and the
-  no-command-port fallback).
-- **Bench** (manual, on Jeff's Linux box): two `data2g-host` instances on
-  PulseAudio null sinks, as `prototype/bench.py --null-sink` already sets
-  up, each with a Glissando app attached; chat both ways, a broadcast,
-  and a ping. Data2G needs PyTorch, so this stays out of CI.
+- **Unit** (`fdv_text_messaging_data2g_test`, in CI with the other
+  `text_messaging` tests): KISS escaping, AX.25 addresses and UI frames,
+  foreign frames ignored, command lines, and two chat protocols
+  exchanging a message and its acknowledgement through a fake pair of
+  data2g-hosts on localhost (PTT, BUSY and MODE included), plus the
+  no-command-port estimate, a keying that never airs, and a lost command
+  connection. Clean under ThreadSanitizer.
+- **Bench** (manual, on Jeff's Linux box, not yet run): two `data2g-host`
+  instances on PulseAudio null sinks, each with a Glissando app attached;
+  chat both ways, a broadcast, and a ping. Data2G needs PyTorch, so this
+  stays out of CI.
 
-## Decisions for Jeff
+## Next
 
-1. KISS for frames plus the command port for status, as above
-   (recommended), or the VARA ARQ session.
-2. Whether the app should ever start `data2g-host` itself. The plan says
-   no: the operator starts it, and the app connects wherever it runs.
+- Run the two-host bench and tune `Data2G::airTiming()` from measured
+  burst lengths.
+- Larger frames: a whole 312-byte message fits one Data2G frame.
+- Per-station gear shifting needs a Data2G option to shift UI frames
+  (see above); to ask Data2G's author about.

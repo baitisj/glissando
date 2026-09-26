@@ -35,6 +35,7 @@
 #include "dlg_text_messaging.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 
 #include <memory>
@@ -106,6 +107,8 @@ wxString formatTime(std::time_t when)
 
 wxString formatSnr(float snr)
 {
+    // Data2G does not report one.
+    if (!std::isfinite(snr)) return wxString::FromUTF8("\u2014");
     return wxString::Format("%.1f dB", (double)snr);
 }
 
@@ -236,6 +239,7 @@ TextMessagingDialog::TextMessagingDialog(wxWindow* parent, wxWindowID id, const 
     , m_chkAutoReply(nullptr)
     , m_txtStatus(nullptr)
     , m_txtInhibited(nullptr)
+    , m_txtModem(nullptr)
     , m_refreshTimer(this, ID_REFRESH_TIMER)
     , m_transmitting(false)
     , m_transmitControlsDisabled(false)
@@ -462,6 +466,12 @@ void TextMessagingDialog::buildControls()
     m_txtInhibited->Hide();
     transmitPlate->GetContentSizer()->Add(m_txtInhibited, 0, wxEXPAND | wxBOTTOM, 4);
 
+    // Which external modem chat goes through, and whether it is there.
+    m_txtModem = new wxStaticText(transmitPlate, wxID_ANY, wxEmptyString);
+    m_txtModem->SetForegroundColour(Colour::Bone);
+    m_txtModem->Hide();
+    transmitPlate->GetContentSizer()->Add(m_txtModem, 0, wxEXPAND | wxBOTTOM, 4);
+
     wxBoxSizer* bottomSizer = new wxBoxSizer(wxHORIZONTAL);
     m_chkAutoReply = new Button(transmitPlate, ID_AUTO_REPLY, _("Auto acknowledge"), true, wxSize(190, 30));
     m_chkAutoReply->SetChecked(TextMessagingSession::instance().protocol().autoReplyEnabled());
@@ -591,7 +601,7 @@ void TextMessagingDialog::renderChat()
         {
             right = statusChip(message);
         }
-        else if (message.snr != 0.0f)
+        else if (message.snr != 0.0f && std::isfinite(message.snr))
         {
             right = "<font size=\"-2\" color=\"" + colors.subdued + "\">" +
                     formatSnr(message.snr) + "</font>";
@@ -980,6 +990,18 @@ void TextMessagingDialog::OnTimer(wxTimerEvent&)
     refreshStations();
     updateTransmitControls();
     updateAckWaitStatus();
+    updateModemStatus();
+}
+
+void TextMessagingDialog::updateModemStatus()
+{
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    wxString line = frame != nullptr ? frame->chatModemStatus() : wxString();
+    if (line == m_txtModem->GetLabel() && m_txtModem->IsShown() == !line.IsEmpty()) return;
+
+    m_txtModem->SetLabel(line);
+    m_txtModem->Show(!line.IsEmpty());
+    Layout();
 }
 
 // Nothing may be queued while a burst is on the air: the operator gets the

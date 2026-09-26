@@ -101,6 +101,16 @@ header, three segments):
 about 20 s at Presto, 41 s at Allegro, 2.8 minutes at Adagio. A full 54 byte
 text fragment is six frames. Watch the transmit time-out timer at slow tempos.
 
+## Chat through Data2G
+
+Chat can also go out through [Data2G](https://github.com/arodland/Data2G), a
+separate HF data modem program. The app does not start it or include any of
+it: run `data2g-host` yourself (with its own sound card and rigctld PTT
+settings), then tick **Send chat through Data2G** under Preferences, Modem,
+Text Chat, and give its host and ports (KISS 8100, command 8300). The chat
+window shows whether data2g-host is reachable. Turn the command port off if
+VarAC or Pat also use the same data2g-host. docs/DATA2G.md has the details.
+
 ## Modem
 
 `modem/` is a C++17 port of `prototype/glissando.py` and `fec.py`
