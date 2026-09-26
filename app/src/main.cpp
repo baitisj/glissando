@@ -1771,13 +1771,15 @@ void MainFrame::stopTextMessaging_()
 {
     if (m_textMessagingTransport != nullptr) m_textMessagingTransport->abort();
 
+    // Its thread hands frames to the protocol, so it goes first.
+    if (m_data2gTransport != nullptr) m_data2gTransport->stop();
+    data2gChatActive_.store(false, std::memory_order_release);
+
     TextMessaging::TextMessagingSession::instance().stop();
 
     textMessagingModem().setFrameCallback(nullptr);
     textMessagingModem().close();
 
-    if (m_data2gTransport != nullptr) m_data2gTransport->stop();
-    data2gChatActive_.store(false, std::memory_order_release);
     delete m_data2gTransport;
     m_data2gTransport = nullptr;
 
