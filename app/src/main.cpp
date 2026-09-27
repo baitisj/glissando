@@ -1019,9 +1019,10 @@ void MainFrame::loadConfiguration_()
         m_cboReportFrequency->SetValue(sVal);
     }
 
-    int defaultMode = wxGetApp().appConfiguration.currentFreeDVMode.getDefaultVal();
+    // The saved mode is the radio button's index (0, 4 or 5), not a
+    // FREEDV_MODE_* value, so the configuration's default (FREEDV_MODE_700D)
+    // matches none of them.
     int mode = wxGetApp().appConfiguration.currentFreeDVMode;
-setDefaultMode:
     if (mode == 0)
     {
         m_rb1600->SetValue(1);
@@ -1037,9 +1038,8 @@ setDefaultMode:
     else
     {
         // Anything else (such as RADE, which this build no longer has)
-        // falls back to the default mode.
-        mode = defaultMode;
-        goto setDefaultMode;
+        // falls back to 700D.
+        m_rb700d->SetValue(1);
     }
     
     pConfig->SetPath(wxT("/"));
