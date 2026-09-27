@@ -73,7 +73,10 @@ two voices are a tritone apart as well.
 | `diabolus` | E4 G#4 A#4 B4 D5 E5 F5 G#5 | E major and Bb major triads a tritone apart |
 
 They cost nothing in sensitivity: at G3 Allegro all four scales decode at
-the same SNR within 0.5 dB (DESIGN.md 3.1a has the table). Listen in
+the same SNR within 0.5 dB (DESIGN.md 3.1a has the table). The receiver hears
+all four at once and says which one each station sang in, so the forces of
+good in pentatonic white can chat with Chaotica's diabolus henchmen, each in
+their own key, at no cost in sensitivity or false decodes (DESIGN.md 3.1b). Listen in
 `samples/`: `g3-allegro-<scale>.wav` for a solo and
 `g5-presto-duet-<scale>.wav` for the duet.
 

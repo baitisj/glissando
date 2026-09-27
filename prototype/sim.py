@@ -28,7 +28,7 @@ def snr_grid(gi, chan):
 
 
 def trial(args):
-    gi, chan, snr, seed, scale = args
+    gi, chan, snr, seed, scale, rx_scale = args
     rng = np.random.default_rng(seed)
     gear = g.GEARS[gi].with_scale(scale)
     payloads = [rng.integers(0, 2, 77) for _ in range(gear.voices)]
@@ -38,8 +38,8 @@ def trial(args):
     buf = ch.freq_shift(buf, rng.uniform(-15, 15))
     buf = ch.hf_channel(buf, chan, rng)
     buf = ch.add_noise(buf, snr, rng, np.mean(x ** 2))  # average power, as WSJT-X reports
-    res = g.receive(buf, gear, t_range=(0, int(1.5 * g.FS)))
-    ok = all(p is not None and np.array_equal(p, q) for (p, _), q in zip(res, payloads))
+    res = g.receive(buf, gear, t_range=(0, int(1.5 * g.FS)), scales=rx_scale)
+    ok = all(p is not None and np.array_equal(p, q) and r["scale"] == scale for (p, r), q in zip(res, payloads))
     false = any(p is not None and not np.array_equal(p, q) for (p, _), q in zip(res, payloads))
     rep = res[0][1]
     return gi, chan, snr, ok, false, rep["snr_db"], rep["doppler_hz"]
@@ -51,9 +51,11 @@ def main():
     ap.add_argument("--channels", nargs="+", default=["awgn", "moderate", "poor"])
     ap.add_argument("--trials", type=int, default=40)
     ap.add_argument("--scale", default="pentatonic", choices=list(g.SCALES))
+    ap.add_argument("--rx-scale", default=None, choices=list(g.SCALES) + ["auto"],
+                    help="scale the receiver listens for (default: --scale; auto: all of them)")
     ap.add_argument("--out", default="sim_results.json")
     a = ap.parse_args()
-    jobs = [(gi, c, snr, zlib.crc32(f"{gi}/{c}/{snr}/{t}".encode()), a.scale)
+    jobs = [(gi, c, snr, zlib.crc32(f"{gi}/{c}/{snr}/{t}".encode()), a.scale, a.rx_scale)
             for gi in a.gears for c in a.channels for snr in snr_grid(gi, c) for t in range(a.trials)]
     with Pool() as pool:
         rows = pool.map(trial, jobs, chunksize=4)

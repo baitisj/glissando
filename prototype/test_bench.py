@@ -30,6 +30,13 @@ def test_every_scale_round_trips_solo_and_duet(scale):
         assert r["ok"] and not r["false"]
 
 
+@pytest.mark.parametrize("scale", list(g.SCALES))
+def test_auto_scale_hears_every_scale(scale):
+    for gi in (4, 5):
+        _, r = bench.trial_sim((gi, "awgn", 0, 6, scale, "auto"))
+        assert r["ok"] and not r["false"]
+
+
 @pytest.mark.skipif(not pulse.available(), reason="no PulseAudio server")
 def test_pulse_loopback_roundtrip():
     with pulse.null_sink("glissando-test") as (sink, source):

@@ -51,6 +51,7 @@ struct GlissandoTelemetry
     double snrDb = 0.0;
     double dopplerHz = 0.0;
     int heardGear = 0;              // tempo of the last frame heard
+    Glissando::Scale heardScale = Glissando::Scale::Pentatonic;    // and the scale it was sung in
     double secondsSinceHeard = 0.0;
     int transmitGear = 3;           // what we would send with now
     int advisedGear = 0;            // what the last report recommends, 0 none
@@ -143,6 +144,7 @@ private:
     Chaotica::Meter* snrMeter_;
     Chaotica::Readout* dopplerReadout_;
     Chaotica::Readout* heardReadout_;
+    Chaotica::Readout* heardScaleReadout_;
     Chaotica::Readout* tempoReadout_;
     Chaotica::Readout* frameReadout_;
     std::vector<Chaotica::Button*> gearButtons_;

@@ -99,6 +99,43 @@ one whose overlaps (echoes, the duet, a neighbour in the same key) are
 harmony rather than dissonance. The others are there for the ear, and for
 anyone who wants a mode that sounds like it is up to something.
 
+### 3.1b Hearing every scale at once
+
+A receiver can listen for all four scales together (`receive(...,
+scales="auto")` in the prototype, `ModemSettings::anyScale` and
+`StreamingReceiver::configure(..., anyScale)` in the C++ modem; the app
+always does), so a pentatonic station and a diabolus station can talk, each
+singing in its own scale, and every decode says which scale it was heard in.
+
+The scale is found by the signature motif. The coarse sync search runs once
+per scale, each scale's score grid is normalised by its own median, and the
+best three peaks are taken from all four grids together, a peak near one
+already taken in any scale counting as its sidelobe. Only those three are
+refined, demodulated and put through Viterbi and the CRC, exactly as many
+as a one-scale receiver tries, so the false-decode rate does not grow.
+The extra work is three more coarse searches, which are a small part of a
+search next to the analytic signal, the fine sync search and demodulation.
+
+Measured with the C++ modem on streaming-sized searches (a quarter frame of
+starts, +/-15 Hz offsets, AWGN), the same noise for both receivers:
+
+| | one scale | every scale |
+|---|---|---|
+| G4 frames decoded at -19 .. -14 dB, 200 per point | 3, 38, 147, 187, 190, 200 | 3, 37, 147, 187, 190, 200 |
+| G3 frames decoded at -22 .. -18 dB, 120 per point | 3, 20, 91, 106, 115 | 3, 20, 91, 106, 115 |
+| decodes reported in the wrong scale | | 0 |
+| false decodes in 8000 G4 + 3000 G3 noise-only searches | 2 | 1 |
+| one search on noise, G4 / G3 (`glissando_timing_test`) | 48 / 94 ms | 68 / 126 ms |
+
+The prototype agrees: G3 thresholds with `sim.py --rx-scale auto` came out
+identical to the scale-known runs for pentatonic and diabolus senders
+(table in 3.1a), with no false decodes. Listening for all five gears in
+every scale takes 24 % of one desktop core against 19 % for one scale.
+
+Without it, a strong frame in another scale can still decode, sung out of
+tune, because the data is which of eight notes and several notes are shared
+or a semitone apart; weak ones are lost, and the scale is misreported.
+
 ### 3.2 A symbol is a glide, then a sustain
 
 Symbol n carries one of the eight notes as its target. It starts on the

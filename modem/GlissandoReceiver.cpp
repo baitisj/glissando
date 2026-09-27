@@ -103,6 +103,7 @@ struct StreamingReceiver::Impl
     std::vector<int> gears{1, 2, 3, 4, 5};
     Scale scale = Scale::Pentatonic;
     double tuningOffsetHz = 0.0;
+    bool anyScale = false;
 
     std::mutex callbackMutex;
     DecodeCallback callback;
@@ -122,8 +123,8 @@ struct StreamingReceiver::Impl
     std::vector<GearState> states;
     std::vector<Recent> recent;
     unsigned seenGeneration = 0;
-    Scale activeScale = Scale::Pentatonic;
     double activeTuning = 0.0;
+    std::vector<Scale> activeScales{Scale::Pentatonic};
 
     void run();
     void applyConfig(const std::vector<int>& newGears);
@@ -144,7 +145,7 @@ StreamingReceiver::~StreamingReceiver()
     delete impl_;
 }
 
-void StreamingReceiver::configure(const std::vector<int>& gears, Scale scale, double tuningOffsetHz)
+void StreamingReceiver::configure(const std::vector<int>& gears, Scale scale, double tuningOffsetHz, bool anyScale)
 {
     std::vector<int> valid;
     for (int g : gears)
@@ -158,6 +159,7 @@ void StreamingReceiver::configure(const std::vector<int>& gears, Scale scale, do
     impl_->gears = valid;
     impl_->scale = scale;
     impl_->tuningOffsetHz = tuningOffsetHz;
+    impl_->anyScale = anyScale;
     impl_->configChanged = true;
     impl_->wake.notify_one();
 }
@@ -292,8 +294,8 @@ void StreamingReceiver::Impl::run()
             if (configChanged)
             {
                 newGears = gears;
-                activeScale = scale;
                 activeTuning = tuningOffsetHz;
+                activeScales = listenedScales(scale, anyScale);
                 configChanged = false;
                 haveNewConfig = true;
             }
@@ -439,8 +441,14 @@ void StreamingReceiver::Impl::search(GearState& state, unsigned generation)
     long long reportAt = -1;
     for (int voice = 0; voice < info.voices; voice++)
     {
-        auto templates = detail::voiceTemplates(activeScale, voice, state.gear, activeTuning);
-        detail::VoiceDecode result = detail::receiveVoice(z, info, *templates, first - 2 * geo.step - windowStart,
+        std::vector<std::shared_ptr<const detail::VoiceTemplates>> held;
+        std::vector<const detail::VoiceTemplates*> hypotheses;
+        for (Scale scale : activeScales)
+        {
+            held.push_back(detail::voiceTemplates(scale, voice, state.gear, activeTuning));
+            hypotheses.push_back(held.back().get());
+        }
+        detail::VoiceDecode result = detail::receiveVoice(z, info, hypotheses, first - 2 * geo.step - windowStart,
                                                           first + geo.hop - windowStart, MAX_OFFSET_HZ, CANDIDATES);
         if (!result.haveCandidate) continue;
 
@@ -461,6 +469,7 @@ void StreamingReceiver::Impl::search(GearState& state, unsigned generation)
         decode.gear = state.gear;
         decode.decode = result.decode;
         decode.decode.voice = voice;
+        decode.decode.scale = activeScales[(size_t)result.hypothesis];
         decode.decode.startSample = start;
         found.push_back(decode);
     }

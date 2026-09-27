@@ -71,8 +71,8 @@ longer changes anything.
 | Radio dial | Shows the rig frequency. `Presets` drops down the frequency list (edited in Preferences, Options) and `Set` takes a typed one. Rig control and the US data segment check follow it. |
 | Tempo | Adagio (640 ms notes, 55 s frame), Andante, Allegro, Presto (80 ms, 7 s), Duet (two voices, two payloads per frame). |
 | Auto shift | Picks the fastest gear the SNR and Doppler spread measured on the last frame heard support (`recommendGear`, the prototype's table with 2 dB margin). The tempo being sent lights up; the hand-picked one glows faintly beside it, and is used until something is heard, and again 15 minutes after the last frame. |
-| Scale | Pentatonic (default, harmonious when stations overlap), whole tone, diminished, diabolus (tritones). The scale costs nothing in sensitivity (DESIGN.md 3.1a). |
-| Telemetry | SNR meter, Doppler spread, tempo of the last frame and how long ago, tempo we would send at, and that tempo's frame length. |
+| Scale | Pentatonic (default, harmonious when stations overlap), whole tone, diminished, diabolus (tritones). The scale costs nothing in sensitivity (DESIGN.md 3.1a). It is the scale you send in: the receiver hears every scale and shows the one heard (DESIGN.md 3.1b). |
+| Telemetry | SNR meter, Doppler spread, tempo of the last frame and how long ago, tempo we would send at, that tempo's frame length, and the scale the last frame was sung in. |
 | Engage | Starts and stops audio. |
 | Transmission log | Brings the chat window back if it was closed. |
 | Preferences | Drops down Options, Sound cards, Rig control (CAT and PTT), Audio filters and Easy setup. Sound cards, rig control and easy setup only change while disengaged. |

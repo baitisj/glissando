@@ -315,6 +315,7 @@ struct SyncCandidate
     long long start = 0;    // sample index of symbol 0
     double df = 0.0;        // frequency offset, Hz
     double score = 0.0;
+    int hypothesis = 0;     // which of the voices searched (one per scale)
 };
 
 // Scores sync hypotheses (prototype sync_search()). Each sync symbol is
@@ -404,46 +405,67 @@ private:
     std::vector<double> buffer_;
 };
 
-// Coarse-to-fine search over start time and frequency offset (prototype
-// sync_search()): starts every L/8 samples, the best `top` well separated
-// peaks, then each re-searched every L/256 samples around its start with a
-// parabolic fit to the frequency peak.
-std::vector<SyncCandidate> syncSearch(const ComplexSignal& z, const GearInfo& gear, const VoiceTemplates& voice,
-                                      long long t0, long long t1, double maxOffsetHz, int top)
+// Coarse-to-fine search over start time, frequency offset and scale
+// (prototype sync_search()): starts every L/8 samples, the best `top` well
+// separated peaks, then each re-searched every L/256 samples around its
+// start with a parabolic fit to the frequency peak.
+//
+// `voices` holds one hypothesis per scale listened for. Each hypothesis's
+// scores are normalised by their own median, which makes them comparable,
+// and the best `top` peaks are taken from all of them together. So
+// listening for four scales costs four coarse searches (a small part of a
+// search) but no more candidates to refine and decode, and no more chances
+// for a CRC to pass by luck, than listening for one.
+std::vector<SyncCandidate> syncSearch(const ComplexSignal& z, const GearInfo& gear,
+                                      const std::vector<const VoiceTemplates*>& voices, long long t0, long long t1,
+                                      double maxOffsetHz, int top)
 {
     std::vector<SyncCandidate> out;
-    const int L = voice.samplesPerSymbol;
+    if (voices.empty()) return out;
+    const int L = voices[0]->samplesPerSymbol;
     const long long frame = (long long)SYMBOLS_PER_FRAME * L;
     const long long step = std::max(1, L / 8);
     t0 = std::max(0LL, t0);
     t1 = std::min(t1, (long long)z.size() - frame);
     if (t1 <= t0 || top <= 0) return out;
 
-    SyncSearch search(z, voice, maxOffsetHz);
-    const size_t bins = search.numBins();
+    std::vector<std::unique_ptr<SyncSearch>> searches;
+    for (const VoiceTemplates* voice : voices) searches.emplace_back(new SyncSearch(z, *voice, maxOffsetHz));
+    // Every hypothesis has the same symbol length and search range, so the
+    // same bins.
+    const size_t bins = searches[0]->numBins();
     std::vector<long long> starts;
     for (long long s = t0; s < t1; s += step) starts.push_back(s);
+    const size_t cells = starts.size() * bins;
 
-    std::vector<double> S(starts.size() * bins);
-    for (size_t i = 0; i < starts.size(); i++) search.score(starts[i], S.data() + i * bins);
+    std::vector<double> S(voices.size() * cells);
+    std::vector<double> sorted;
+    for (size_t h = 0; h < voices.size(); h++)
+    {
+        double* grid = S.data() + h * cells;
+        for (size_t i = 0; i < starts.size(); i++) searches[h]->score(starts[i], grid + i * bins);
 
-    // Noise-normalise by the typical (median) score across the search space.
-    // Silence has no typical score, and nothing to find.
-    std::vector<double> sorted = S;
-    double typical = median(sorted);
-    if (!(typical > 0.0) || !std::isfinite(typical)) return out;
-    for (double& s : S) s /= typical;
+        // Noise-normalise by the typical (median) score across the search
+        // space. Silence has no typical score, and nothing to find.
+        sorted.assign(grid, grid + cells);
+        double typical = median(sorted);
+        if (!(typical > 0.0) || !std::isfinite(typical)) return out;
+        for (size_t i = 0; i < cells; i++) grid[i] /= typical;
+    }
 
     // Best peaks first, skipping any within a symbol and 4 bins of symbol
-    // resolution of one already taken.
+    // resolution of one already taken, in any scale: there it is a sidelobe
+    // of the same frame heard through the wrong scale's templates.
     std::vector<size_t> order(S.size());
     for (size_t i = 0; i < order.size(); i++) order[i] = i;
     std::sort(order.begin(), order.end(), [&](size_t a, size_t b) { return S[a] > S[b]; });
+    const SyncSearch& any = *searches[0];
     std::vector<SyncCandidate> coarse;
     for (size_t idx : order)
     {
-        long long s = starts[idx / bins];
-        double f = search.binFrequency(idx % bins);
+        size_t cell = idx % cells;
+        long long s = starts[cell / bins];
+        double f = any.binFrequency(cell % bins);
         bool near = false;
         for (const SyncCandidate& c : coarse)
         {
@@ -451,7 +473,7 @@ std::vector<SyncCandidate> syncSearch(const ComplexSignal& z, const GearInfo& ge
         }
         if (near) continue;
         if (!(S[idx] >= MIN_SYNC_SCORE)) break; // the rest are weaker still
-        coarse.push_back({s, f, S[idx]});
+        coarse.push_back({s, f, S[idx], (int)(idx / cells)});
         if ((int)coarse.size() >= top) break;
     }
 
@@ -459,6 +481,7 @@ std::vector<SyncCandidate> syncSearch(const ComplexSignal& z, const GearInfo& ge
     std::vector<double> row(bins);
     for (const SyncCandidate& c : coarse)
     {
+        SyncSearch& search = *searches[(size_t)c.hypothesis];
         double best = -1.0;
         long long bestStart = c.start;
         size_t bestBin = 0;
@@ -487,7 +510,7 @@ std::vector<SyncCandidate> syncSearch(const ComplexSignal& z, const GearInfo& ge
             double denominator = a - 2 * b + cc;
             if (denominator != 0.0) df += 0.5 * (a - cc) / denominator * search.binHz();
         }
-        out.push_back({bestStart, df, c.score});
+        out.push_back({bestStart, df, c.score, c.hypothesis});
     }
     return out;
 }
@@ -603,7 +626,7 @@ SyncCandidate refineSync(const ComplexSignal& z, const VoiceTemplates& voice, co
 
     shiftSyncTemplates(voice, df, shifted);
     start = bestTime(start, 4, 1);
-    return {start, df, sync.score};
+    return {start, df, sync.score, sync.hypothesis};
 }
 
 // ---------------------------------------------------------------- demodulation
@@ -974,9 +997,10 @@ std::shared_ptr<const VoiceTemplates> voiceTemplates(Scale scale, int voice, int
     std::lock_guard<std::mutex> lock(mutex);
     auto it = cache.find(key);
     if (it != cache.end()) return it->second;
-    // A few MB per G1 entry; keep enough for every gear and voice of two
-    // tunings, and forget the oldest beyond that.
-    const size_t MAX_ENTRIES = 16;
+    // A few MB per G1 entry; keep enough for every gear and voice of every
+    // scale (a receiver listening for all of them) at two tunings, and
+    // forget the oldest beyond that.
+    const size_t MAX_ENTRIES = 2 * SCALE_COUNT * 6;
     while (cache.size() >= MAX_ENTRIES && !age.empty())
     {
         cache.erase(age.front());
@@ -1003,10 +1027,18 @@ static bool allZero(const Payload& payload)
 VoiceDecode receiveVoice(const ComplexSignal& z, const GearInfo& gear, const VoiceTemplates& voice,
                          long long searchFrom, long long searchTo, double maxOffsetHz, int candidates)
 {
+    return receiveVoice(z, gear, std::vector<const VoiceTemplates*>{&voice}, searchFrom, searchTo, maxOffsetHz,
+                        candidates);
+}
+
+VoiceDecode receiveVoice(const ComplexSignal& z, const GearInfo& gear, const std::vector<const VoiceTemplates*>& voices,
+                         long long searchFrom, long long searchTo, double maxOffsetHz, int candidates)
+{
     VoiceDecode result;
     std::unique_ptr<Correlations> corr(new Correlations);
-    for (const SyncCandidate& found : syncSearch(z, gear, voice, searchFrom, searchTo, maxOffsetHz, candidates))
+    for (const SyncCandidate& found : syncSearch(z, gear, voices, searchFrom, searchTo, maxOffsetHz, candidates))
     {
+        const VoiceTemplates& voice = *voices[(size_t)found.hypothesis];
         SyncCandidate sync = refineSync(z, voice, found);
         // Refinement may walk a peak at the edge of the search range out of
         // it; the range is a promise to the caller, so such a peak is not
@@ -1033,6 +1065,7 @@ VoiceDecode receiveVoice(const ComplexSignal& z, const GearInfo& gear, const Voi
             result.decode.report = report;
             result.syncScore = sync.score;
             result.esOverN0 = esOverN0;
+            result.hypothesis = sync.hypothesis;
         }
         if (ok)
         {
@@ -1045,6 +1078,7 @@ VoiceDecode receiveVoice(const ComplexSignal& z, const GearInfo& gear, const Voi
             result.decode.report = report;
             result.syncScore = sync.score;
             result.esOverN0 = esOverN0;
+            result.hypothesis = sync.hypothesis;
             break;
         }
     }
