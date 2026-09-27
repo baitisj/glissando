@@ -182,11 +182,11 @@ void ReportingConfiguration::load(wxConfigBase* config)
 
     load_(config, csvLogFilePath);
 
-    // Set default CSV log file path to Documents/freedv_rx_log.csv if not configured.
+    // Set default CSV log file path to Documents/glissando_rx_log.csv if not configured.
     if (csvLogFilePath->IsEmpty())
     {
         wxString defaultPath;
-        wxString logFileName = "freedv_rx_log.csv";
+        wxString logFileName = "glissando_rx_log.csv";
 
 #if defined(__linux__)
         // Special logic to force use of XDG_DATA_HOME as wxWidgets doesn't currently
@@ -199,9 +199,9 @@ void ReportingConfiguration::load(wxConfigBase* config)
             xdgDataHome = wxString::Format("%s/.local/share", home);
         }
 
-        defaultPath = wxString::Format("%s/freedv", xdgDataHome);
+        defaultPath = wxString::Format("%s/glissando", xdgDataHome);
 #else
-        defaultPath = wxStandardPaths::Get().GetDocumentsDir() + wxFILE_SEP_PATH + "freedv";
+        defaultPath = wxStandardPaths::Get().GetDocumentsDir() + wxFILE_SEP_PATH + "glissando";
 #endif // wxCHECK_VERSION(3,1,0)
 
         // Make folder (including parents as needed)

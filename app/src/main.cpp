@@ -221,17 +221,23 @@ FILE *ftest;
 // Config file management
 wxConfigBase *pConfig = NULL;
 
+// Glissando keeps its settings, chat history and logs under its own names, so
+// it never reads or changes an installed FreeDV's. The application name also
+// names the config file (~/.glissando.conf, or glissando/glissando.conf under
+// XDG) and the user data folder (~/.glissando, or ~/.local/share/glissando).
+static const wxChar* const GLISSANDO_APP_NAME = wxT("glissando");
+static const wxChar* const GLISSANDO_VENDOR_NAME = wxT("Glissando");
+
 // Name used for the separate state-store config object (distinct from the main
 // app config so the last-used path is readable regardless of which backend is
-// active).  On Windows this becomes HKCU\Software\CODEC2-Project\FreeDV-State;
+// active).  On Windows this becomes HKCU\Software\Glissando\Glissando-State;
 // on macOS/Linux it becomes a file in the per-user config directory.
-static const wxChar* const FREEDV_STATE_APP_NAME    = wxT("FreeDV-State");
-static const wxChar* const FREEDV_VENDOR_NAME = wxT("CODEC2-Project");
+static const wxChar* const GLISSANDO_STATE_APP_NAME    = wxT("Glissando-State");
 static const wxChar* const LAST_USED_CONFIG_KEY     = wxT("/LastUsedConfigFile");
 
 wxString getLastUsedConfigPath()
 {
-    wxConfig stateConfig(FREEDV_STATE_APP_NAME, FREEDV_VENDOR_NAME);
+    wxConfig stateConfig(GLISSANDO_STATE_APP_NAME, GLISSANDO_VENDOR_NAME);
     wxString path;
     stateConfig.Read(LAST_USED_CONFIG_KEY, &path, wxEmptyString);
     return path;
@@ -239,14 +245,14 @@ wxString getLastUsedConfigPath()
 
 void saveLastUsedConfigPath(const wxString& path)
 {
-    wxConfig stateConfig(FREEDV_STATE_APP_NAME, FREEDV_VENDOR_NAME);
+    wxConfig stateConfig(GLISSANDO_STATE_APP_NAME, GLISSANDO_VENDOR_NAME);
     stateConfig.Write(LAST_USED_CONFIG_KEY, path);
     stateConfig.Flush();
 }
 
 void clearLastUsedConfigPath()
 {
-    wxConfig stateConfig(FREEDV_STATE_APP_NAME, FREEDV_VENDOR_NAME);
+    wxConfig stateConfig(GLISSANDO_STATE_APP_NAME, GLISSANDO_VENDOR_NAME);
     stateConfig.Write(LAST_USED_CONFIG_KEY, wxEmptyString);
     stateConfig.Flush();
 }
@@ -591,6 +597,11 @@ void MainApp::OnInitCmdLine(wxCmdLineParser& parser)
 
 bool MainApp::OnCmdLineParsed(wxCmdLineParser& parser)
 {
+    // Before anything below looks for a config file or a data folder.
+    SetVendorName(GLISSANDO_VENDOR_NAME);
+    SetAppName(GLISSANDO_APP_NAME);
+    SetAppDisplayName(wxT("Glissando"));
+
     ulog_set_lock(&LogLockFunction_, nullptr);
     ulog_set_prefix_fn([](ulog_Event *, char *prefix, size_t prefix_size) {
         static unsigned int counter = 0;
@@ -609,7 +620,7 @@ bool MainApp::OnCmdLineParsed(wxCmdLineParser& parser)
     if (parser.Found("f", &configPath))
     {
         log_info("Loading configuration from %s", (const char*)configPath.ToUTF8());
-        pConfig = new wxFileConfig(wxT("FreeDV"), FREEDV_VENDOR_NAME, configPath, configPath, wxCONFIG_USE_LOCAL_FILE);
+        pConfig = new wxFileConfig(GLISSANDO_APP_NAME, GLISSANDO_VENDOR_NAME, configPath, configPath, wxCONFIG_USE_LOCAL_FILE);
         wxConfigBase::Set(pConfig);
         
         // On Linux/macOS, this replaces $HOME with "~" to shorten the title a bit.
@@ -619,15 +630,17 @@ bool MainApp::OnCmdLineParsed(wxCmdLineParser& parser)
     }
     else
     {
-        wxString oldFileLocation = wxFileConfig::GetLocalFile("freedv", 0).GetFullPath();
+        // ~/.glissando.conf rather than wxWidgets' default of ~/.glissando,
+        // which is also the user data folder that holds the chat history.
+        wxString oldFileLocation = wxFileConfig::GetLocalFile(wxT("glissando.conf"), 0).GetFullPath();
         wxFileName tempOldFile(oldFileLocation);
 
 #if wxCHECK_VERSION(3,3,0) && defined(__linux__)
         // Execute this early during the application startup, before the
         // global wxConfig object is created.
         bool migrateSuccess = true;
-        wxString newFileLocation = wxFileConfig::GetLocalFile("freedv", wxCONFIG_USE_XDG | wxCONFIG_USE_SUBDIR).GetFullPath();
-        wxString newFileDir = wxFileConfig::GetLocalFile("freedv", wxCONFIG_USE_XDG | wxCONFIG_USE_SUBDIR).GetPath();
+        wxString newFileLocation = wxFileConfig::GetLocalFile(GLISSANDO_APP_NAME, wxCONFIG_USE_XDG | wxCONFIG_USE_SUBDIR).GetFullPath();
+        wxString newFileDir = wxFileConfig::GetLocalFile(GLISSANDO_APP_NAME, wxCONFIG_USE_XDG | wxCONFIG_USE_SUBDIR).GetPath();
         log_info("Determining if we need to migrate config file to standard location...");
         log_info("   Old location: %s", (const char*)oldFileLocation.ToUTF8());
         log_info("   New location: %s", (const char*)newFileLocation.ToUTF8());
@@ -663,13 +676,17 @@ bool MainApp::OnCmdLineParsed(wxCmdLineParser& parser)
 
             // Need to explicitly create the wxFileConfig on Linux so that we can force wxWidgets
             // to load configuration files under a subdirectory. Otherwise, simply FileLayout_XDG
-            // above will use ~/.config/freedv.conf.
-            pConfig = new wxFileConfig(wxT("FreeDV"), FREEDV_VENDOR_NAME, newFileLocation, newFileLocation, wxCONFIG_USE_LOCAL_FILE | wxCONFIG_USE_SUBDIR | wxCONFIG_USE_XDG);
+            // above will use ~/.config/glissando.conf.
+            pConfig = new wxFileConfig(GLISSANDO_APP_NAME, GLISSANDO_VENDOR_NAME, newFileLocation, newFileLocation, wxCONFIG_USE_LOCAL_FILE | wxCONFIG_USE_SUBDIR | wxCONFIG_USE_XDG);
 
             wxConfigBase::Set(pConfig);
             defaultConfigFilePath = tempNewFile.GetPath();
         }
 #else
+#if defined(__linux__)
+        pConfig = new wxFileConfig(GLISSANDO_APP_NAME, GLISSANDO_VENDOR_NAME, oldFileLocation, oldFileLocation, wxCONFIG_USE_LOCAL_FILE);
+        wxConfigBase::Set(pConfig);
+#endif // defined(__linux__)
         defaultConfigFilePath = tempOldFile.GetPath();
 #endif // wxCHECK_VERSION(3,3,0) && defined(__linux__)
 
@@ -682,7 +699,7 @@ bool MainApp::OnCmdLineParsed(wxCmdLineParser& parser)
             {
                 log_info("Restoring last-used configuration from %s",
                          (const char*)lastUsedPath.ToUTF8());
-                pConfig = new wxFileConfig(wxT("FreeDV"), FREEDV_VENDOR_NAME,
+                pConfig = new wxFileConfig(GLISSANDO_APP_NAME, GLISSANDO_VENDOR_NAME,
                                            lastUsedPath, lastUsedPath,
                                            wxCONFIG_USE_LOCAL_FILE);
                 wxConfigBase::Set(pConfig);
@@ -825,8 +842,8 @@ bool MainApp::OnInit()
 #if defined(__WXGTK__) && defined(HAS_GTK3)
     SuppressButtonPressFlicker_();
 #endif // defined(__WXGTK__) && defined(HAS_GTK3)
-    SetVendorName(FREEDV_VENDOR_NAME);
-    SetAppName(wxT("FreeDV"));      // not needed, it's the default value
+    SetVendorName(GLISSANDO_VENDOR_NAME);
+    SetAppName(GLISSANDO_APP_NAME);
     
     golay23_init();
 
