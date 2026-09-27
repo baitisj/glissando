@@ -29,6 +29,8 @@ constexpr double PI = 3.14159265358979323846;
 // Space the plate leaves for its bevel and engraved title.
 constexpr int PLATE_TITLE_HEIGHT = 26;
 constexpr int PLATE_BORDER = 12;
+constexpr double PLATE_NAME_PADDING = 36;  // nameplate beyond its lettering
+constexpr double PLATE_NAME_MARGIN = 42;   // each side: edge, and some speed line
 
 // A dial or meter sweeps 270 degrees and a meter 100, both centred on
 // straight up.
@@ -42,7 +44,20 @@ constexpr double METER_SWEEP = 100.0 * PI / 180.0;
 Panel::Panel(wxWindow* parent, const wxString& title)
     : wxPanel(parent, wxID_ANY)
     , title_(title)
+    , titleWidth_(0)
 {
+    if (!title_.empty())
+    {
+        std::unique_ptr<wxGraphicsContext> gc(
+            wxGraphicsRenderer::GetDefaultRenderer()->CreateMeasuringContext());
+        if (gc)
+        {
+            gc->SetFont(font(FontRole::Plate), Colour::Chrome);
+            titleWidth_ = (int)std::ceil(spacedTextWidth(gc.get(), title_, 3.0) + PLATE_NAME_PADDING +
+                                         2 * PLATE_NAME_MARGIN);
+        }
+    }
+
     SetBackgroundStyle(wxBG_STYLE_PAINT);
     SetBackgroundColour(Colour::Plate);
     SetForegroundColour(Colour::Bone);
@@ -55,6 +70,13 @@ Panel::Panel(wxWindow* parent, const wxString& title)
 
     Bind(wxEVT_PAINT, &Panel::OnPaint, this);
     Bind(wxEVT_SIZE, [this](wxSizeEvent& event) { Refresh(); event.Skip(); });
+}
+
+wxSize Panel::DoGetBestSize() const
+{
+    wxSize best = wxPanel::DoGetBestSize();
+    best.x = std::max(best.x, titleWidth_);
+    return best;
 }
 
 void Panel::OnPaint(wxPaintEvent&)
@@ -73,7 +95,7 @@ void Panel::OnPaint(wxPaintEvent&)
     {
         // An engraved nameplate: a darker inset strip, chrome lettering.
         gc->SetFont(font(FontRole::Plate), Colour::Chrome);
-        double w = spacedTextWidth(gc.get(), title_, 3.0) + 36;
+        double w = spacedTextWidth(gc.get(), title_, 3.0) + PLATE_NAME_PADDING;
         double x = (size.x - w) / 2.0;
         gc->SetPen(wxPen(Colour::PlateEdge, 1));
         gc->SetBrush(wxBrush(Colour::PlateShadow));

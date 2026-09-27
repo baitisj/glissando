@@ -53,6 +53,25 @@ namespace Chaotica
 class Button;
 }
 
+// A label that wraps to whatever width the layout gives it, and wraps again
+// when the window is resized, rather than running off the edge. Set its text
+// with setText(), which keeps the unwrapped text to wrap from.
+class WrappingText : public wxStaticText
+{
+public:
+    explicit WrappingText(wxWindow* parent);
+
+    void setText(const wxString& text);
+    const wxString& text() const { return m_text; }
+
+private:
+    void rewrap(int width);
+    void OnSize(wxSizeEvent& event);
+
+    wxString m_text;
+    int m_wrapWidth;
+};
+
 // The chat window: who has been heard, what has been said, and a place to say
 // something back. All protocol work happens in the session, which keeps
 // running when this window is closed; the dialog only observes it.
@@ -148,9 +167,9 @@ private:
     wxString m_sendToolTip;         // where the message goes
     wxString m_airTimeToolTip;      // and how long it takes, when that is long
     Chaotica::Button* m_chkAutoReply;
-    wxStaticText* m_txtStatus;
-    wxStaticText* m_txtInhibited;
-    wxStaticText* m_txtModem;       // Data2G's connection, while chat uses it
+    WrappingText* m_txtStatus;
+    WrappingText* m_txtInhibited;
+    WrappingText* m_txtModem;       // Data2G's connection, while chat uses it
     wxTimer m_refreshTimer;
 
     // Remembered so the one second timer only touches the controls when the

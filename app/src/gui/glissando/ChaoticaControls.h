@@ -31,11 +31,17 @@ public:
 
     wxSizer* GetContentSizer() const { return content_; }
 
+protected:
+    // Never narrower than the nameplate, so a narrow window cannot cut the
+    // title off.
+    virtual wxSize DoGetBestSize() const override;
+
 private:
     void OnPaint(wxPaintEvent& event);
 
     wxString title_;
     wxSizer* content_;
+    int titleWidth_;
 };
 
 // Common painting plumbing: double buffered, plate coloured background.
