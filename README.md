@@ -21,6 +21,9 @@ consonant. It shifts gears (tempo) to match the HF path.
 | G5 | Presto duet | 80 ms x 2 voices | 6.9 s (2 messages) | -14.1 / -10.8 |
 
 - Design and trade-offs: [docs/DESIGN.md](docs/DESIGN.md)
+- How the receiver hears a chirp, explained from first principles
+  (matched filters, LoRa-style dechirping, the note trellis):
+  [docs/HOW_IT_HEARS.md](docs/HOW_IT_HEARS.md)
 - Listen: [samples/](samples/) (8 kHz WAV; `g3-allegro-moderate-hf-minus10db.wav`
   is what it sounds like through a fading HF path at -10 dB SNR)
 - Modes: see [Scales](#scales) below for the pentatonic default and the
