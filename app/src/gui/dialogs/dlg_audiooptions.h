@@ -75,8 +75,6 @@ class AudioOptsDialog : public wxDialog
                             int         in_out);
 
         AudioInfoDisplay m_RxInDevices;
-        AudioInfoDisplay m_RxOutDevices;
-        AudioInfoDisplay m_TxInDevices;
         AudioInfoDisplay m_TxOutDevices;
         wxPanel* m_panel1;
         wxNotebook* m_notebook1;
@@ -91,26 +89,6 @@ class AudioOptsDialog : public wxDialog
 
         wxButton* m_btnRxInTest;
         PlotScalar* m_plotScalarRxIn;
-
-        wxListCtrl* m_listCtrlRxOutDevices;
-        wxStaticText* m_staticText9;
-        wxTextCtrl* m_textCtrlRxOut;
-        wxStaticText* m_staticText10;
-        wxComboBox* m_cbSampleRateRxOut;
-
-        wxButton* m_btnRxOutTest;
-        PlotScalar* m_plotScalarRxOut;
-
-        wxPanel* m_panelTx;
-
-        wxListCtrl* m_listCtrlTxInDevices;
-        wxStaticText* m_staticText12;
-        wxTextCtrl* m_textCtrlTxIn;
-        wxStaticText* m_staticText11;
-        wxComboBox* m_cbSampleRateTxIn;
-
-        wxButton* m_btnTxInTest;
-        PlotScalar* m_plotScalarTxIn;
 
         wxListCtrl* m_listCtrlTxOutDevices;
         wxStaticText* m_staticText81;
@@ -134,12 +112,8 @@ class AudioOptsDialog : public wxDialog
         void OnRxInDeviceSelect( wxListEvent& event );
 
         void OnRxInTest( wxCommandEvent& event );
-        void OnRxOutTest( wxCommandEvent& event );
-        void OnTxInTest( wxCommandEvent& event );
         void OnTxOutTest( wxCommandEvent& event );
 
-        void OnRxOutDeviceSelect( wxListEvent& event );
-        void OnTxInDeviceSelect( wxListEvent& event );
         void OnTxOutDeviceSelect( wxListEvent& event );
         void OnRefreshClick( wxCommandEvent& event );
         void OnApplyAudioParameters( wxCommandEvent& event );

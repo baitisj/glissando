@@ -90,11 +90,9 @@ using namespace std::chrono_literals;
 // TBD -- work on fully removing the need for these.
 extern paCallBackData* g_rxUserdata;
 extern std::atomic<int> g_analog;
-extern int g_nSoundCards;
 extern std::atomic<bool> g_half_duplex;
 extern std::atomic<bool> g_tx;
 extern int g_dump_fifo_state;
-extern std::atomic<bool> endingTx;
 extern std::atomic<bool> g_playFileToMicIn;
 extern std::atomic<int> g_sfTxFs;
 extern std::atomic<bool> g_loopPlayFileToMicIn;
@@ -160,163 +158,8 @@ void TxRxThread::initializePipeline_()
 {
     if (m_tx)
     {
-        pipeline_ = std::make_unique<AudioPipeline>(inputSampleRate_, outputSampleRate_);
-
-        // Record from mic step (optional)
-        auto recordMicStep = new RecordStep(
-            inputSampleRate_, 
-            []() { return g_sfRecMicFile.load(std::memory_order_acquire); }, 
-            [](int) {
-                // Recording stops when the user explicitly tells us to,
-                // no action required here.
-            }
-        );
-        auto recordMicPipeline = new AudioPipeline(inputSampleRate_, inputSampleRate_);
-        recordMicPipeline->appendPipelineStep(recordMicStep);
-        
-        auto recordMicTap = new TapStep(inputSampleRate_, recordMicPipeline);
-        auto bypassRecordMic = new AudioPipeline(inputSampleRate_, inputSampleRate_);
-        
-        auto eitherOrRecordMic = new EitherOrStep(
-            +[]() FREEDV_NONBLOCKING { return (g_recVoiceKeyerFile.load(std::memory_order_relaxed) || g_recFileFromMic.load(std::memory_order_relaxed)) && (g_sfRecMicFile.load(std::memory_order_acquire) != NULL); },
-            recordMicTap,
-            bypassRecordMic
-        );
-        pipeline_->appendPipelineStep(eitherOrRecordMic);
-        
-        // Mic In playback step (optional)
-        auto eitherOrBypassPlay = new AudioPipeline(inputSampleRate_, inputSampleRate_);
-        auto eitherOrPlayMicIn = new AudioPipeline(inputSampleRate_, inputSampleRate_);
-        auto playMicIn = new PlaybackStep(
-            inputSampleRate_, 
-            []() { return g_sfTxFs.load(std::memory_order_acquire); },
-            []() { return g_playFileToMicIn.load(std::memory_order_acquire) ? g_sfPlayFile.load(std::memory_order_acquire) : nullptr; },
-            []() {
-                if (g_loopPlayFileToMicIn.load(std::memory_order_relaxed))
-                    sf_seek(g_sfPlayFile.load(std::memory_order_acquire), 0, SEEK_SET);
-                else {
-                    log_info("playFileFromRadio finished, issuing event!");
-                    ((MainFrame*)g_parent)->executeOnUiThreadAndWait_([]() { ((MainFrame*)g_parent)->StopPlayFileToMicIn();});
-                }
-            }
-            );
-        eitherOrPlayMicIn->appendPipelineStep(playMicIn);
-        
-        auto eitherOrPlayStep = new EitherOrStep(
-            +[]() FREEDV_NONBLOCKING { return g_playFileToMicIn.load(std::memory_order_acquire) && (g_sfPlayFile.load(std::memory_order_acquire) != NULL); },
-            eitherOrPlayMicIn,
-            eitherOrBypassPlay);
-        pipeline_->appendPipelineStep(eitherOrPlayStep);
-        
-        // RNNoise step (optional)
-        auto eitherOrProcessRNNoise = new AudioPipeline(inputSampleRate_, inputSampleRate_);
-        auto eitherOrBypassRNNoise = new AudioPipeline(inputSampleRate_, inputSampleRate_);
-        
-        auto rnnoiseStep = new RNNoiseStep();
-        eitherOrProcessRNNoise->appendPipelineStep(rnnoiseStep);
-        
-        auto eitherOrRNNoiseStep = new EitherOrStep(
-            +[]() FREEDV_NONBLOCKING { return (bool)NonblockingWxGetApp().appConfiguration.filterConfiguration.noiseReductionEnable.getWithoutProcessing(); },
-            eitherOrProcessRNNoise,
-            eitherOrBypassRNNoise);
-        pipeline_->appendPipelineStep(eitherOrRNNoiseStep);
-
-        // AGC step (optional)
-        auto eitherOrProcessAgc = new AudioPipeline(inputSampleRate_, inputSampleRate_);
-        auto eitherOrBypassAgc = new AudioPipeline(inputSampleRate_, inputSampleRate_);
-
-        auto agcStep = new AgcStep(inputSampleRate_);
-        eitherOrProcessAgc->appendPipelineStep(agcStep);
-
-        auto eitherOrAgcStep = new EitherOrStep(
-            +[]() FREEDV_NONBLOCKING { return g_agcEnabled.load(std::memory_order_acquire); },
-            eitherOrProcessAgc,
-            eitherOrBypassAgc);
-        pipeline_->appendPipelineStep(eitherOrAgcStep); 
-
-        // Equalizer step (optional based on filter state)
-        auto equalizerStep = new EqualizerStep(
-            inputSampleRate_, 
-            &g_rxUserdata->micInEQEnable,
-            &g_rxUserdata->sbqMicInBass,
-            &g_rxUserdata->sbqMicInMid,
-            &g_rxUserdata->sbqMicInTreble,
-            &g_rxUserdata->sbqMicInVol,
-            g_rxUserdata->micEqLock);
-        pipeline_->appendPipelineStep(equalizerStep);
-        
-        // Take TX audio post-equalizer and send it to RX for possible monitoring use.
-        if (equalizedMicAudioLink_ != nullptr)
-        {
-            auto micAudioPipeline = new AudioPipeline(inputSampleRate_, equalizedMicAudioLink_->getSampleRate());
-            micAudioPipeline->appendPipelineStep(equalizedMicAudioLink_->getInputPipelineStep());
-        
-            auto micAudioTap = new TapStep(inputSampleRate_, micAudioPipeline);
-            pipeline_->appendPipelineStep(micAudioTap);
-        }
-                
-        // Resample for plot step
-        auto resampleForPlotStep = new ResampleForPlotStep(&g_plotSpeechInFifo);
-        auto resampleForPlotPipeline = new AudioPipeline(inputSampleRate_, resampleForPlotStep->getOutputSampleRate());
-#if defined(ENABLE_FASTER_PLOTS)
-        auto resampleForPlotResampler = new ResampleStep(inputSampleRate_, resampleForPlotStep->getInputSampleRate(), true); // need to create manually to get access to "plot only" optimizations
-        resampleForPlotPipeline->appendPipelineStep(resampleForPlotResampler);
-#endif // defined(ENABLE_FASTER_PLOTS)
-        resampleForPlotPipeline->appendPipelineStep(resampleForPlotStep);
-
-        auto resampleForPlotTap = new TapStep(inputSampleRate_, resampleForPlotPipeline);
-        pipeline_->appendPipelineStep(resampleForPlotTap);
-      
-        // FreeDV TX step (analog leg)
-        auto doubleLevelStep = new LevelAdjustStep(inputSampleRate_, +[]() FREEDV_NONBLOCKING { return (float)2.0; });
-        auto analogTxPipeline = new AudioPipeline(inputSampleRate_, outputSampleRate_);
-        analogTxPipeline->appendPipelineStep(doubleLevelStep);
-        
-        auto digitalTxStep = freedvInterface.createTransmitPipeline(
-            inputSampleRate_, 
-            outputSampleRate_, 
-            +[]() FREEDV_NONBLOCKING { return g_TxFreqOffsetHz.load(std::memory_order_relaxed); },
-            helper_);
-        auto digitalTxPipeline = new AudioPipeline(inputSampleRate_, outputSampleRate_); 
-        digitalTxPipeline->appendPipelineStep(digitalTxStep);
-        
-        auto eitherOrDigitalAnalog = new EitherOrStep(
-            +[]() FREEDV_NONBLOCKING { return g_analog.load(std::memory_order_relaxed) != 0; },
-            analogTxPipeline,
-            digitalTxPipeline);
-        pipeline_->appendPipelineStep(eitherOrDigitalAnalog);
-
-        // Record modulated output (optional)
-        auto recordModulatedStep = new RecordStep(
-            RECORD_FILE_SAMPLE_RATE, 
-            []() { return g_sfRecFileFromModulator.load(std::memory_order_acquire); },
-            [](int) {
-                // empty
-            });
-        auto recordModulatedPipeline = new AudioPipeline(outputSampleRate_, recordModulatedStep->getOutputSampleRate());
-        recordModulatedPipeline->appendPipelineStep(recordModulatedStep);
-        
-        auto recordModulatedTap = new TapStep(outputSampleRate_, recordModulatedPipeline);
-        auto recordModulatedTapPipeline = new AudioPipeline(outputSampleRate_, outputSampleRate_);
-        recordModulatedTapPipeline->appendPipelineStep(recordModulatedTap);
-        
-        auto bypassRecordModulated = new AudioPipeline(outputSampleRate_, outputSampleRate_);
-        
-        auto eitherOrRecordModulated = new EitherOrStep(
-            +[]() FREEDV_NONBLOCKING { return g_recFileFromModulator.load(std::memory_order_acquire) && (g_sfRecFileFromModulator.load(std::memory_order_acquire) != NULL); },
-            recordModulatedTapPipeline,
-            bypassRecordModulated);
-        pipeline_->appendPipelineStep(eitherOrRecordModulated);
-        
-        // TX attenuation step
-        auto txAttenuationStep = new LevelAdjustStep(outputSampleRate_, +[]() FREEDV_NONBLOCKING {
-            return g_txLevelScale.load(std::memory_order_acquire);
-        });
-        pipeline_->appendPipelineStep(txAttenuationStep);
-
-        // Text messaging bursts skip the microphone pipeline entirely -- they
-        // are already modulated -- but they still have to honor the operator's
-        // transmit level, so they get their own copy of that step.
+        // Chat bursts are all the transmit side sends. They come already
+        // modulated, and only need the operator's transmit level applied.
         dataTxPipeline_ = std::make_unique<AudioPipeline>(FS, outputSampleRate_);
         dataTxPipeline_->appendPipelineStep(new LevelAdjustStep(FS, +[]() FREEDV_NONBLOCKING {
             return g_txLevelScale.load(std::memory_order_acquire);
@@ -667,19 +510,20 @@ void* TxRxThread::Entry() noexcept
 
         // Determine whether we need to pause for a shorter amount
         // of time to avoid dropouts.
-        paCallBackData  *cbData = g_rxUserdata;
-        auto outFifo = cbData->outfifo1;
-        if (!m_tx)
+        // The transmit side hurries while the radio's output FIFO runs low.
+        // The receive side has no output to keep fed and drains all its
+        // input each time round, so it just waits for more.
+        bool fastMode = false;
+        if (m_tx)
         {
-            outFifo = (g_nSoundCards == 1) ? cbData->outfifo1 : cbData->outfifo2;
+            auto outFifo = g_rxUserdata->outfifo1;
+            fastMode = outFifo->numUsed() < outFifo->capacity() / 2;
         }
-        auto totalFifoCapacity = outFifo->capacity();
-        auto fifoUsed = outFifo->numUsed();
 
 #if defined(ENABLE_PROCESSING_STATS)
         waitStats_.start();
 #endif // defined(ENABLE_PROCESSING_STATS)
-        helper->stopRealTimeWork(fifoUsed < totalFifoCapacity / 2);
+        helper->stopRealTimeWork(fastMode);
     }
 
 #if defined(ENABLE_PROCESSING_STATS)
@@ -802,14 +646,10 @@ void TxRxThread::clearFifos_() FREEDV_NONBLOCKING
     if (m_tx)
     {
         cbData->outfifo1->reset();
-        cbData->infifo2->reset();
     }
     else
     {
         cbData->infifo1->reset();
-
-        auto outFifo = (g_nSoundCards == 1) ? cbData->outfifo1 : cbData->outfifo2;
-        outFifo->reset();
     }
 }
 
@@ -838,8 +678,7 @@ bool TxRxThread::transmitTextMessagingAudio_(IRealtimeHelper* helper) FREEDV_NON
     }
 
     // PTT takes a moment to engage; pushing samples at the radio before it
-    // does would clip the front of the burst. Returning true meanwhile keeps
-    // microphone audio out of the transmitter that is about to be ours.
+    // does would clip the front of the burst, so wait for it.
     if (!g_tx.load(std::memory_order_acquire)) return true;
 
     if (!dataTxInProgress_ && !queue.isEmpty())
@@ -872,10 +711,6 @@ bool TxRxThread::transmitTextMessagingAudio_(IRealtimeHelper* helper) FREEDV_NON
     {
         dataTxInProgress_ = false;
         queue.setTransmitting(false);
-
-        // The microphone pipeline has been idle while we borrowed the
-        // transmitter, so start it clean when voice transmit resumes.
-        deferReset_ = true;
     }
 
     return true;
@@ -883,121 +718,10 @@ bool TxRxThread::transmitTextMessagingAudio_(IRealtimeHelper* helper) FREEDV_NON
 
 void TxRxThread::txProcessing_(IRealtimeHelper* helper) FREEDV_NONBLOCKING
 {
-    // A text messaging burst owns the transmitter for its duration; the
-    // session only queues one while the operator is not transmitting voice.
-    if (transmitTextMessagingAudio_(helper)) return;
-
-    paCallBackData  *cbData = g_rxUserdata;
-
-    // Buffers reused by tx and rx processing.  We take samples from
-    // the sound card, and resample them for the freedv modem input
-    // sample rate.  Typically the sound card is running at 48 or 44.1
-    // kHz, and the modem at 8kHz
-
-    //
-    //  TX side processing --------------------------------------------
-    //
-
-    bool tmpHalfDuplex = g_half_duplex.load(std::memory_order_acquire);
-    if (((g_nSoundCards == 2) && ((tmpHalfDuplex && g_tx.load(std::memory_order_acquire)) || !tmpHalfDuplex || g_voice_keyer_tx.load(std::memory_order_acquire) || g_recVoiceKeyerFile.load(std::memory_order_relaxed) || g_recFileFromMic.load(std::memory_order_relaxed)))) {        
-        if (deferReset_)
-        {
-            // We just entered TX from RX.
-            // Reset pipeline and wipe anything in the FIFO.
-            deferReset_ = false;
-            pipeline_->reset();
-            clearFifos_();
-
-            // return out and begin processing on the next loop
-            return;
-        }
-
-        // This while loop locks the modulator to the sample rate of
-        // the input sound card.  We want to make sure that modulator samples
-        // are uninterrupted by differences in sample rate between
-        // this sound card and the output sound card.
-
-        // Run code inside this while loop as soon as we have enough
-        // room for one frame of modem samples.  Aim is to keep
-        // outfifo1 nice and full so we don't have any gaps in tx
-        // signal.
-
-        unsigned int nsam_one_modem_frame = (freedvInterface.getTxNNomModemSamples() * outputSampleRate_) / freedvInterface.getTxModemSampleRate();
-
-        if (g_dump_fifo_state) {
-             // If this drops to zero we have a problem as we will run out of output samples
-             // to send to the sound driver
-             FREEDV_BEGIN_VERIFIED_SAFE
-                 log_debug("outfifo1 used: %6d free: %6d nsam_one_modem_frame: %d",
-                           cbData->outfifo1->numUsed(), cbData->outfifo1->numFree(), nsam_one_modem_frame);
-             FREEDV_END_VERIFIED_SAFE
-        }
-
-        int nsam_in_48 = (inputSampleRate_ * FRAME_DURATION_MS) / MS_TO_SEC;
-        assert(nsam_in_48 > 0);
-
-        int             nout;
-
-        while(!helper->mustStopWork() && (unsigned)cbData->outfifo1->numFree() >= nsam_one_modem_frame) {
-            // OK to generate a frame of modem output samples we need
-            // an input frame of speech samples from the microphone.
-            
-#if defined(ENABLE_PROCESSING_STATS)
-            processingStats_.start();
-#endif // defined(ENABLE_PROCESSING_STATS)
-
-            // infifo2 is written to by another sound card so it may
-            // over or underflow, but we don't really care.  It will
-            // just result in a short interruption in audio being fed
-            // to codec2_enc, possibly making a click every now and
-            // again in the decoded audio at the other end.
-
-            // There may be recorded audio left to encode while ending TX. To handle this,
-            // we keep reading from the FIFO until we have less than nsam_in_48 samples available.
-            auto inputPtr = inputSamples_.get();
-            int nread = cbData->infifo2->read(inputPtr, nsam_in_48);
-            if (nread != 0)
-            {
-                inputPtr = inputSamplesZeros_.get();
-            }
-            if (nread != 0 && endingTx.load(std::memory_order_acquire))
-            {
-                break;
-            }
-
-            auto outputSamples = pipeline_->execute(inputPtr, nsam_in_48, &nout);
-            
-            if (g_dump_fifo_state) {
-                FREEDV_BEGIN_VERIFIED_SAFE
-                log_info("  nout: %d", nout);
-                FREEDV_END_VERIFIED_SAFE
-            }
-            
-            if (outputSamples != nullptr)
-            {
-                if (cbData->outfifo1->write(outputSamples, nout) != 0)
-                {
-                    FREEDV_BEGIN_VERIFIED_SAFE
-                    log_warn("TX outfifo1 full, dropped %d samples (free=%d)", nout, cbData->outfifo1->numFree());
-                    FREEDV_END_VERIFIED_SAFE
-                }
-            }
-            
-#if defined(ENABLE_PROCESSING_STATS)
-            processingStats_.end();
-#endif // defined(ENABLE_PROCESSING_STATS)
-
-            if (nread != 0)
-            {
-                break;
-            }
-        }
-    }
-    else
-    {
-        // Defer reset until next time we go into TX.
-        deferReset_ = true;
-    }
+    // Chat bursts are all Glissando transmits. There is no microphone, so
+    // between bursts, and whenever the radio is keyed without one (Tune plays
+    // its own tone in the sound card callback), the radio gets silence.
+    transmitTextMessagingAudio_(helper);
 }
 
 void TxRxThread::rxProcessing_(IRealtimeHelper* helper) FREEDV_NONBLOCKING
@@ -1033,12 +757,10 @@ void TxRxThread::rxProcessing_(IRealtimeHelper* helper) FREEDV_NONBLOCKING
 
     int             nout;
 
-    int nsam_one_speech_frame = (freedvInterface.getRxNumSpeechSamples() * outputSampleRate_) / freedvInterface.getRxSpeechSampleRate();
-    auto outFifo = (g_nSoundCards == 1) ? cbData->outfifo1 : cbData->outfifo2;
-
-    // while we have enough space in the output FIFO ...
-    while (!helper->mustStopWork() && outFifo->numFree() >= nsam_one_speech_frame) {
-        // ... and enough input samples are available.
+    // While enough input samples are available. The pipeline feeds the chat
+    // receiver and the displays from taps along the way; what comes out of
+    // its end is decoded audio for a speaker, which Glissando doesn't have.
+    while (!helper->mustStopWork()) {
         if (cbData->infifo1->read(inputSamples_.get(), nsam) != 0)
         {
             break;
@@ -1051,17 +773,7 @@ void TxRxThread::rxProcessing_(IRealtimeHelper* helper) FREEDV_NONBLOCKING
         // send latest squelch level to FreeDV API, as it handles squelch internally
         freedvInterface.setSquelch(g_SquelchActive, g_SquelchLevel);
 
-        auto outputSamples = pipeline_->execute(inputSamples_.get(), nsam, &nout);
-
-        if (nout > 0 && outputSamples != nullptr)
-        {
-            if (outFifo->write(outputSamples, nout) != 0)
-            {
-                FREEDV_BEGIN_VERIFIED_SAFE
-                log_warn("RX outFifo full, dropped %d samples (free=%d)", nout, outFifo->numFree());
-                FREEDV_END_VERIFIED_SAFE
-            }
-        }
+        pipeline_->execute(inputSamples_.get(), nsam, &nout);
 
 #if defined(ENABLE_PROCESSING_STATS)
         processingStats_.end();

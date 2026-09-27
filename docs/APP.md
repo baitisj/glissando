@@ -75,7 +75,7 @@ longer changes anything.
 | Telemetry | SNR meter, Doppler spread, tempo of the last frame and how long ago, tempo we would send at, that tempo's frame length, and the scale the last frame was sung in. |
 | Engage | Starts and stops audio. |
 | Transmission log | Brings the chat window back if it was closed. |
-| Preferences | Drops down Options, Sound cards, Rig control (CAT and PTT), Audio filters and Easy setup. Sound cards, rig control and easy setup only change while disengaged. |
+| Preferences | Drops down Options, Sound cards, Rig control (CAT and PTT), Audio filters and Easy setup. Sound cards, rig control and easy setup only change while disengaged. The app opens only the radio's two audio streams, input from the radio and output to it, so Sound cards and Easy setup ask for nothing else; leave the output as none to only listen. |
 
 Settings live in the FreeDV config under `[Glissando]`.
 
