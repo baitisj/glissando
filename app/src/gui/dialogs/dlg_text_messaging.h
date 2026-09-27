@@ -116,6 +116,12 @@ private:
     void updateAckWaitStatus();
     void updateModemStatus();
 
+    // Writes how long the message being typed would take on the air under
+    // the send button, in red past the time-out timer. Nothing for codec2
+    // or Data2G, which do not say.
+    void updateAirTime();
+    void updateSendToolTip();
+
     void OnSend(wxCommandEvent& event);
     void OnPing(wxCommandEvent& event);
     void OnStationSelected(wxListEvent& event);
@@ -128,6 +134,7 @@ private:
     void OnAddStation(wxCommandEvent& event);
     void OnAutoReplyToggled(wxCommandEvent& event);
     void OnEntryKeyDown(wxKeyEvent& event);
+    void OnEntryText(wxCommandEvent& event);
     void OnTimer(wxTimerEvent& event);
     void OnClose(wxCloseEvent& event);
 
@@ -138,6 +145,8 @@ private:
     wxHtmlWindow* m_chatWindow;
     wxTextCtrl* m_txtEntry;
     Chaotica::Button* m_btnSend;
+    wxString m_sendToolTip;         // where the message goes
+    wxString m_airTimeToolTip;      // and how long it takes, when that is long
     Chaotica::Button* m_chkAutoReply;
     wxStaticText* m_txtStatus;
     wxStaticText* m_txtInhibited;

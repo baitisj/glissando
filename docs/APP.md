@@ -36,9 +36,13 @@ Packages on Debian or Ubuntu:
 
 Then, from the top of the repository:
 
-    cmake -S app -B build -DUSE_NATIVE_AUDIO=1 -DUNITTEST=ON
+    cmake -S app -B build -DUSE_NATIVE_AUDIO=1 -DUNITTEST=ON -DCMAKE_BUILD_TYPE=Release
     cmake --build build -j
     ./build/src/freedv
+
+Without a build type the build is Debug, and an unoptimised receiver cannot
+keep up with listening on every tempo at once: decodes fall further and
+further behind the air.
 
 The first configure fetches libsamplerate and RNNoise (from GitHub, and the
 RNNoise model from media.xiph.org). `ctest --test-dir build -R
@@ -99,7 +103,23 @@ first frame decodes, so the waits for the far end are sized to whole bursts.
 Air time for a short message (up to 12 characters of text behind the 15 byte
 header, three segments):
 about 20 s at Presto, 41 s at Allegro, 2.8 minutes at Adagio. A full 54 byte
-text fragment is six frames. Watch the transmit time-out timer at slow tempos.
+text fragment is six frames, about 5.5 minutes at Adagio.
+
+The chat window's send button shows how long the message being typed will be
+on the air at the tempo it would go out at now, in red once that is longer
+than the transmit time-out (Preferences, Rig control; 180 s when the app's
+timer is off, the usual rig setting). Nothing is shown for codec2 or Data2G.
+
+A chat keying runs the same time-out timer as voice. When one would outlast
+it, the transport sends it as several keyings, each at least 20 s short of the
+limit (clear of the warning the main window gives 15 s before it) and cut only
+between whole frames, and lets the radio up for 2 s in
+between, which restarts both the app's timer and the rig's. The protocol
+still sees one transmission. Every Glissando frame carries its own sync and
+the far end rejoins segments by order, so the pauses cost nothing but the
+2 s each; the far end's channel-busy hold (one and a half frames) covers
+them. If the operator keys for voice during a pause, voice wins: the transport
+waits up to 10 s for the radio to come free, then drops the rest of the burst.
 
 ## Chat through Data2G
 

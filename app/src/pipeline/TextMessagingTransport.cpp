@@ -40,6 +40,7 @@
 
 #include "TextMessagingModem.h"
 #include "TextMessagingTxQueue.h"
+#include "text_messaging/KeyingPlan.h"
 #include "util/logging/ulog.h"
 
 namespace
@@ -56,6 +57,24 @@ constexpr uint64_t KEY_TIMEOUT_MARGIN_MS = 10000;
 // for the transmit thread to confirm it. Covers the output FIFO's depth, which
 // is where the samples sit once our own queue has drained.
 constexpr uint64_t PLAYOUT_MARGIN_MS = 1000;
+
+// A burst longer than the time-out timer allows is cut into keyings that
+// stop this far short of it. The main window warns, with a beep and a dialog,
+// once 15 s are left, which a keying that is going to end on its own should
+// not set off; the rest covers keying before the audio starts and unkeying
+// after it ends.
+constexpr int KEYING_LIMIT_MARGIN_MS = 20000;
+
+// How long the radio is let up between two keyings of one burst. Long enough
+// for the changeover to finish and the rig to drop out of transmit, so both
+// the app's time-out timer and the rig's own start again; short against the
+// far end's channel-busy hold of one and a half frames.
+constexpr uint64_t KEYING_PAUSE_MS = 2000;
+
+// If the radio is still keyed when the next keying is due, the operator has
+// most likely taken it for voice, which always wins. Wait this long for them
+// to finish before giving up on the rest of the burst.
+constexpr uint64_t RESUME_GIVE_UP_MS = 10000;
 
 uint64_t monotonicMs()
 {
@@ -78,6 +97,11 @@ bool txLogEnabled()
 
 TextMessagingTransport::TextMessagingTransport(TextMessagingModem* modem)
     : modem_(modem)
+    , queued_(0)
+    , keying_(0)
+    , pausing_(false)
+    , resumeAtMs_(0)
+    , giveUpAtMs_(0)
     , keyed_(false)
     , keyedAtMs_(0)
     , keyDeadlineMs_(0)
@@ -108,6 +132,12 @@ void TextMessagingTransport::setTransmitAllowedCheck(VoiceTransmitCheck transmit
     transmitAllowedCheck_ = std::move(transmitAllowedCheck);
 }
 
+void TextMessagingTransport::setKeyingLimitFunction(KeyingLimitFunction keyingLimitFunction)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    keyingLimitFunction_ = std::move(keyingLimitFunction);
+}
+
 bool TextMessagingTransport::transmit(const std::vector<TextMessaging::OutgoingBurst>& bursts)
 {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -121,25 +151,33 @@ bool TextMessagingTransport::transmit(const std::vector<TextMessaging::OutgoingB
 
     if (transmitAllowedCheck_ != nullptr && !transmitAllowedCheck_()) return false;
 
-    if (!modem_->modulate(bursts, samples_)) return false;
+    if (!modem_->modulate(bursts, samples_, &frameEnds_)) return false;
 
-    auto& queue = textMessagingTxQueue();
-    if (!queue.enqueue(samples_.data(), (int)samples_.size()))
+    // At a slow Glissando tempo one keying of a reply and a message can run
+    // for many minutes, and the time-out timer would unkey the radio part
+    // way through a frame. Such a burst goes out as several keyings instead,
+    // each ending on a frame boundary.
+    int limitMs = keyingLimitFunction_ != nullptr ? keyingLimitFunction_() : 0;
+    size_t maxSamples = 0;
+    if (limitMs > 0)
     {
-        log_warn("Text messaging burst did not fit in the transmit queue");
-        return false;
+        int usableMs = std::max(limitMs - KEYING_LIMIT_MARGIN_MS, 1);
+        maxSamples = (size_t)usableMs * MODEM_SAMPLE_RATE / 1000;
     }
+    keyingEnds_ = TextMessaging::splitKeying(frameEnds_, maxSamples);
+    if (keyingEnds_.empty() || keyingEnds_.back() != samples_.size())
+    {
+        keyingEnds_.assign(1, samples_.size());
+    }
+    keying_ = 0;
+    pausing_ = false;
+    queued_ = 0;
 
-    queue.setOwnsTransmitter(true);
+    textMessagingTxQueue().setOwnsTransmitter(true);
 
-    uint64_t burstMs = (uint64_t)samples_.size() * 1000 / MODEM_SAMPLE_RATE;
-    keyedAtMs_ = monotonicMs();
-    keyDeadlineMs_ = keyedAtMs_ + burstMs + KEY_TIMEOUT_MARGIN_MS;
-    keyed_.store(true, std::memory_order_release);
-
-    burstMs_ = burstMs;
-    sawTransmitting_ = false;
-    sawEmpty_ = false;
+    // A Glissando keying at a slow tempo is also longer than the queue holds,
+    // so it goes in as the queue drains: the rest follows from poll().
+    startKeyingLocked(monotonicMs());
 
     if (txLogEnabled())
     {
@@ -147,14 +185,46 @@ bool TextMessagingTransport::transmit(const std::vector<TextMessaging::OutgoingB
             bursts.begin(), bursts.end(),
             [](const TextMessaging::OutgoingBurst& burst)
             { return burst.mode == TextMessaging::BurstMode::Signalling; });
-        log_info("TX: keying for %d signalling and %d text frame(s), %d samples, %llu ms of audio",
+        log_info("TX: keying for %d signalling and %d text frame(s), %d samples, %llu ms of audio"
+                 " in %d keying(s)",
                  signallingBursts, (int)bursts.size() - signallingBursts,
-                 (int)samples_.size(), (unsigned long long)burstMs);
+                 (int)samples_.size(),
+                 (unsigned long long)((uint64_t)samples_.size() * 1000 / MODEM_SAMPLE_RATE),
+                 (int)keyingEnds_.size());
     }
 
     pttFunction_(true);
 
     return true;
+}
+
+void TextMessagingTransport::startKeyingLocked(uint64_t nowMs)
+{
+    size_t start = keying_ == 0 ? 0 : keyingEnds_[keying_ - 1];
+    uint64_t keyingMs = (uint64_t)(keyingEnds_[keying_] - start) * 1000 / MODEM_SAMPLE_RATE;
+
+    queued_ = start;
+    feedQueueLocked();
+
+    keyedAtMs_ = nowMs;
+    keyDeadlineMs_ = nowMs + keyingMs + KEY_TIMEOUT_MARGIN_MS;
+    burstMs_ = keyingMs;
+    sawTransmitting_ = false;
+    sawEmpty_ = false;
+    keyed_.store(true, std::memory_order_release);
+}
+
+void TextMessagingTransport::feedQueueLocked()
+{
+    size_t end = keying_ < keyingEnds_.size() ? keyingEnds_[keying_] : samples_.size();
+    if (queued_ >= end) return;
+
+    auto& queue = textMessagingTxQueue();
+    size_t room = (size_t)std::max(queue.numFree(), 0);
+    size_t count = std::min(end - queued_, room);
+    if (count == 0) return;
+
+    if (queue.enqueue(samples_.data() + queued_, (int)count)) queued_ += count;
 }
 
 bool TextMessagingTransport::isTransmitting() const
@@ -210,10 +280,35 @@ void TextMessagingTransport::poll()
     auto& queue = textMessagingTxQueue();
     uint64_t now = monotonicMs();
 
+    bool pausing;
+    uint64_t resumeAt;
+    uint64_t giveUpAt;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        pausing = pausing_;
+        resumeAt = resumeAtMs_;
+        giveUpAt = giveUpAtMs_;
+    }
+
+    if (pausing)
+    {
+        resumeAfterPause(now, resumeAt, giveUpAt);
+        return;
+    }
+
+    // Top the queue up with the rest of the keying. It holds a minute, and
+    // this runs every tick, so the transmit thread never finds it dry early.
+    bool allQueued;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        feedQueueLocked();
+        allQueued = queued_ >= keyingEnds_[keying_];
+    }
+
     // The transmit thread sets the transmitting flag when it starts sending
     // and clears it once the sound card has played the last sample out.
     bool transmitting = queue.isTransmitting();
-    bool empty = queue.isEmpty();
+    bool empty = allQueued && queue.isEmpty();
 
     bool startedNow = transmitting && !sawTransmitting_;
     bool emptyNow = empty && !sawEmpty_;
@@ -276,6 +371,38 @@ void TextMessagingTransport::poll()
             queue.setTransmitting(false);
         }
 
+        // More of the burst to come: let up on the radio between frames and
+        // key it again shortly, which restarts the time-out timer.
+        PttFunction pttFunction;
+        bool more;
+        size_t next = 0;
+        size_t count = 0;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            more = keying_ + 1 < keyingEnds_.size();
+            if (more)
+            {
+                keying_++;
+                pausing_ = true;
+                resumeAtMs_ = now + KEYING_PAUSE_MS;
+                giveUpAtMs_ = resumeAtMs_ + RESUME_GIVE_UP_MS;
+                pttFunction = pttFunction_;
+                next = keying_ + 1;
+                count = keyingEnds_.size();
+            }
+        }
+
+        if (more)
+        {
+            if (txLogEnabled())
+            {
+                log_info("TX: +%llu ms letting the radio up before keying %d of %d",
+                         (unsigned long long)(now - keyedAtMs_), (int)next, (int)count);
+            }
+            if (pttFunction != nullptr) pttFunction(false);
+            return;
+        }
+
         unkey();
         return;
     }
@@ -287,6 +414,47 @@ void TextMessagingTransport::poll()
         queue.setTransmitting(false);
         unkey();
     }
+}
+
+void TextMessagingTransport::resumeAfterPause(uint64_t nowMs, uint64_t resumeAtMs,
+                                              uint64_t giveUpAtMs)
+{
+    if (nowMs < resumeAtMs) return;
+
+    // Still keyed: the changeover from the last keying has not finished, or
+    // the operator has keyed the radio for voice, which always wins. Never
+    // key over them, and never unkey them either.
+    if (pttHeld())
+    {
+        if (nowMs < giveUpAtMs) return;
+
+        log_warn("Text messaging burst gave the transmitter up to the operator part way through; "
+                 "dropping the rest of it");
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            pausing_ = false;
+            queued_ = samples_.size();
+        }
+        keyed_.store(false, std::memory_order_release);
+        if (modem_ != nullptr) modem_->resetReceivers();
+        return;
+    }
+
+    PttFunction pttFunction;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!pausing_) return;
+        pausing_ = false;
+        startKeyingLocked(nowMs);
+        pttFunction = pttFunction_;
+    }
+
+    if (txLogEnabled())
+    {
+        log_info("TX: keying again, %llu ms of audio", (unsigned long long)burstMs_);
+    }
+
+    if (pttFunction != nullptr) pttFunction(true);
 }
 
 void TextMessagingTransport::abort()
@@ -307,6 +475,13 @@ void TextMessagingTransport::unkey()
     }
 
     keyed_.store(false, std::memory_order_release);
+
+    // Whatever of the burst had not been queued yet is dropped with it.
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        queued_ = samples_.size();
+        pausing_ = false;
+    }
 
     if (txLogEnabled())
     {

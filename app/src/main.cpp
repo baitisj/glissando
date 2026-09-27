@@ -1593,6 +1593,13 @@ void MainFrame::exportConfiguration_(wxConfigBase* config)
     wxGetApp().appConfiguration.save(config);
 }
 
+// The transmit time-out timer, in seconds, or 0 when it is off.
+static int timeOutTimerSeconds()
+{
+    auto& rig = wxGetApp().appConfiguration.rigControlConfiguration;
+    return rig.totTimerEnabled && rig.totTimerSecs > 0 ? rig.totTimerSecs.get() : 0;
+}
+
 //-------------------------------------------------------------------------
 // startTextMessaging_(): brings up the chat session for the whole run of the
 // application, so retries and incoming messages keep working with the chat
@@ -1620,6 +1627,11 @@ void MainFrame::startTextMessaging_()
         // Sending needs the transmit thread, which only exists when FreeDV is
         // running with a transmit sound device.
         return m_txThread != nullptr;
+    });
+
+    m_textMessagingTransport->setKeyingLimitFunction([]() {
+        // A chat keying runs the same time-out timer as voice does.
+        return timeOutTimerSeconds() * 1000;
     });
 
     textMessagingModem().setFrameCallback([this](const TextMessaging::Frame& frame, float snr) {
@@ -1706,6 +1718,21 @@ void MainFrame::applyChatModem_()
         protocol.setAirTiming(timing);
         appliedAirTiming_ = timing;
     }
+}
+
+double MainFrame::chatMessageAirSeconds(size_t textBytes)
+{
+    // Data2G picks its own mode and says nothing about how long it will take.
+    if (data2gChatActive_.load()) return 0.0;
+    return textMessagingModem().glissandoMessageSeconds(textBytes);
+}
+
+int MainFrame::chatTimeOutSeconds()
+{
+    // With the app's timer off, the rig's own is still likely there, and
+    // 180 s is the usual setting.
+    int seconds = timeOutTimerSeconds();
+    return seconds > 0 ? seconds : 180;
 }
 
 wxString MainFrame::chatModemStatus()
@@ -1795,6 +1822,12 @@ void MainFrame::setTextMessagingPtt_(bool keyed)
 {
     if (keyed)
     {
+        // Normally already set by the transport. But a burst sent as several
+        // keyings lets the radio up in between, and that unkeying released
+        // ownership below; running after it on this thread, this takes it
+        // back before the radio is keyed again.
+        textMessagingTxQueue().setOwnsTransmitter(true);
+
         if (!m_btnTogPTT->GetValue())
         {
             m_btnTogPTT->SetValue(true);
@@ -4010,13 +4043,24 @@ void MainFrame::OnTxOutAudioData_(IAudioDevice& dev, void* data, size_t size, vo
 
     auto toRead = std::min((size_t)cbData->outfifo1->numUsed(), size);
     auto isTuning = cbData->isTuning.load(std::memory_order_acquire);
-    if (toRead < size && !isTuning)
+
+    // Only whole buffers are normally played, so a short read waits for more.
+    // But nothing follows the end of a chat burst, and its last few samples,
+    // less than a buffer, would sit in the FIFO for good: the transmit thread
+    // waits for them to play before it confirms the burst, and the transport
+    // gave up waiting and unkeyed a second late. Play them out, padded with
+    // silence.
+    auto& chatQueue = textMessagingTxQueue();
+    bool chatTail = toRead > 0 && toRead < size && chatQueue.isTransmitting() && chatQueue.isEmpty();
+
+    if (toRead < size && !isTuning && !chatTail)
     {
         g_outfifo1_empty.fetch_add(1, std::memory_order_relaxed);
     }
     else
     {
-        if (toRead >= size && cbData->outfifo1->read(tmpOutput, size) != 0)
+        size_t readCount = toRead >= size ? size : (chatTail ? toRead : 0);
+        if (readCount > 0 && cbData->outfifo1->read(tmpOutput, readCount) != 0)
         {
             // Raced with a concurrent reset(); nothing was actually copied
             // into tmpOutput, so fall back to silence below instead of

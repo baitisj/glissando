@@ -273,6 +273,7 @@ TextMessagingDialog::TextMessagingDialog(wxWindow* parent, wxWindowID id, const 
 
     m_txtEntry->Connect(wxEVT_KEY_DOWN, wxKeyEventHandler(TextMessagingDialog::OnEntryKeyDown),
                         nullptr, this);
+    Connect(ID_ENTRY, wxEVT_COMMAND_TEXT_UPDATED, wxCommandEventHandler(TextMessagingDialog::OnEntryText));
     connectStationMouse(true);
 
     TextMessagingSession::instance().protocol().setObserver(this);
@@ -771,11 +772,12 @@ void TextMessagingDialog::updateSelectionControls()
     if (m_btnSend->GetLabel() == label) return;
 
     m_btnSend->SetLabel(label);
-    m_btnSend->SetToolTip(
+    m_sendToolTip =
         selected ? wxString::Format(_("Send to %s and ask for confirmation."),
                                     wxString::FromUTF8(callsign))
                  : wxString(_("Send to everybody listening. Nothing is expected back, "
-                              "so there is no delivery check.")));
+                              "so there is no delivery check."));
+    updateSendToolTip();
 
     if (uiLogEnabled()) log_info("UI: send button \"%s\"", (const char*)label.ToUTF8());
 }
@@ -985,12 +987,67 @@ void TextMessagingDialog::OnEntryKeyDown(wxKeyEvent& event)
     event.Skip();
 }
 
+void TextMessagingDialog::OnEntryText(wxCommandEvent& event)
+{
+    updateAirTime();
+    event.Skip();
+}
+
 void TextMessagingDialog::OnTimer(wxTimerEvent&)
 {
     refreshStations();
     updateTransmitControls();
     updateAckWaitStatus();
     updateModemStatus();
+
+    // Auto shift can change the tempo while the text sits there.
+    updateAirTime();
+}
+
+// Counting frames is a handful of integer sums, so this runs on every change
+// to the text rather than waiting for typing to stop.
+void TextMessagingDialog::updateAirTime()
+{
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+
+    // The protocol sends the text trimmed, counted in UTF-8 bytes.
+    wxString text = m_txtEntry->GetValue();
+    text.Trim(true).Trim(false);
+    size_t bytes = text.ToUTF8().length();
+
+    double seconds = frame != nullptr && bytes > 0 ? frame->chatMessageAirSeconds(bytes) : 0.0;
+    wxString note;
+    wxString tip;
+    bool over = false;
+    if (seconds > 0.0)
+    {
+        int whole = (int)std::lround(seconds);
+        note = wxString::Format(_("%d:%02d on air"), whole / 60, whole % 60);
+
+        int limit = frame->chatTimeOutSeconds();
+        over = seconds > limit;
+        if (over)
+        {
+            tip = wxString::Format(
+                _("This message takes %d:%02d to send, longer than the %d s transmit time-out. "
+                  "The radio is let up for a moment every few frames to restart the timer; "
+                  "a shorter message or a faster tempo avoids that."),
+                whole / 60, whole % 60, limit);
+        }
+    }
+
+    m_btnSend->SetNote(note, over ? Chaotica::Colour::Alarm : Chaotica::Colour::Bone);
+    if (tip != m_airTimeToolTip)
+    {
+        m_airTimeToolTip = tip;
+        updateSendToolTip();
+    }
+}
+
+void TextMessagingDialog::updateSendToolTip()
+{
+    m_btnSend->SetToolTip(m_airTimeToolTip.empty() ? m_sendToolTip
+                                                   : m_sendToolTip + "\n\n" + m_airTimeToolTip);
 }
 
 void TextMessagingDialog::updateModemStatus()

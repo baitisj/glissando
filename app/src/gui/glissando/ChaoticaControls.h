@@ -69,6 +69,11 @@ public:
     // Faintly lit without being checked: "this is what automatic chose".
     void SetHinted(bool hinted);
 
+    // A smaller second line under the label, in its own colour; empty for
+    // none.
+    void SetNote(const wxString& note, const wxColour& colour);
+    wxString GetNote() const { return note_; }
+
     virtual bool Enable(bool enable = true) override;
 
 protected:
@@ -80,6 +85,8 @@ private:
     void OnMouseLeave(wxMouseEvent& event);
 
     wxString label_;
+    wxString note_;
+    wxColour noteColour_;
     bool toggle_;
     bool checked_;
     bool hinted_;

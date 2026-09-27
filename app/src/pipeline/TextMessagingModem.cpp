@@ -291,11 +291,13 @@ bool TextMessagingModem::modulateFrame(struct freedv* modem, const std::vector<u
 }
 
 bool TextMessagingModem::modulate(const std::vector<OutgoingBurst>& bursts,
-                                  std::vector<short>& samplesOut)
+                                  std::vector<short>& samplesOut,
+                                  std::vector<size_t>* frameEndsOut)
 {
     if (!open_) return false;
 
     samplesOut.clear();
+    if (frameEndsOut != nullptr) frameEndsOut->clear();
 
     if (glissandoOn_.load(std::memory_order_acquire))
     {
@@ -324,6 +326,7 @@ bool TextMessagingModem::modulate(const std::vector<OutgoingBurst>& bursts,
             {
                 samplesOut.push_back((short)std::lround(sample * GLISSANDO_PEAK));
             }
+            if (frameEndsOut != nullptr) frameEndsOut->push_back(samplesOut.size());
         }
 
         if (rxLogEnabled())
@@ -340,8 +343,10 @@ bool TextMessagingModem::modulate(const std::vector<OutgoingBurst>& bursts,
         if (!modulateFrame(modem, burst.frame, samplesOut))
         {
             samplesOut.clear();
+            if (frameEndsOut != nullptr) frameEndsOut->clear();
             return false;
         }
+        if (frameEndsOut != nullptr) frameEndsOut->push_back(samplesOut.size());
     }
 
     return !samplesOut.empty();
@@ -538,6 +543,31 @@ AirTiming TextMessagingModem::airTiming() const
     return AirTiming::forFrameSeconds(info.frameSeconds(),
                                       Glissando::SEGMENT_DATA_BYTES * info.voices,
                                       info.frameSeconds() / 4.0 + GLISSANDO_SEARCH_SECONDS);
+}
+
+double TextMessagingModem::glissandoMessageSeconds(size_t textBytes) const
+{
+    if (!glissandoOn_.load(std::memory_order_acquire) || textBytes == 0) return 0.0;
+
+    int gear = 0;
+    {
+        std::lock_guard<std::mutex> lock(glissandoMutex_);
+        gear = transmitGearLocked();
+    }
+    const Glissando::GearInfo& info = Glissando::gearInfo(gear);
+
+    // The link trims a frame's zero padding off before cutting it into
+    // segments, so a fragment costs its header and its text, as the protocol
+    // cuts the message in sendMessage().
+    textBytes = std::min(textBytes, (size_t)MAX_MESSAGE_TEXT_BYTES);
+    std::vector<Glissando::LinkBurst> bursts;
+    for (size_t offset = 0; offset < textBytes; offset += TEXT_BYTES_PER_FRAGMENT)
+    {
+        size_t chunk = std::min(textBytes - offset, (size_t)TEXT_BYTES_PER_FRAGMENT);
+        bursts.push_back({true, std::vector<uint8_t>(TEXT_HEADER_BYTES + chunk, 0xFF)});
+    }
+
+    return Glissando::framesForBursts(bursts, info.voices) * info.frameSeconds();
 }
 
 int TextMessagingModem::transmitGearLocked() const

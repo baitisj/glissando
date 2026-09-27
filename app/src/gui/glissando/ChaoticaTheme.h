@@ -37,6 +37,7 @@ namespace Colour
     const wxColour Glow(255, 252, 240);         // a lit lamp
     const wxColour Bakelite(20, 19, 19);        // unlit button face
     const wxColour Phosphor(232, 236, 230);     // the visi-scope's trace
+    const wxColour Alarm(236, 64, 52);          // the one red lamp: over the time-out
 }
 
 enum class FontRole
