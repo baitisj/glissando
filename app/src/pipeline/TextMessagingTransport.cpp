@@ -78,6 +78,7 @@ bool txLogEnabled()
 
 TextMessagingTransport::TextMessagingTransport(TextMessagingModem* modem)
     : modem_(modem)
+    , queued_(0)
     , keyed_(false)
     , keyedAtMs_(0)
     , keyDeadlineMs_(0)
@@ -123,14 +124,12 @@ bool TextMessagingTransport::transmit(const std::vector<TextMessaging::OutgoingB
 
     if (!modem_->modulate(bursts, samples_)) return false;
 
-    auto& queue = textMessagingTxQueue();
-    if (!queue.enqueue(samples_.data(), (int)samples_.size()))
-    {
-        log_warn("Text messaging burst did not fit in the transmit queue");
-        return false;
-    }
+    // A Glissando keying at a slow tempo is longer than the queue holds, so
+    // the burst goes in as it drains: the rest follows from poll().
+    queued_ = 0;
+    feedQueueLocked();
 
-    queue.setOwnsTransmitter(true);
+    textMessagingTxQueue().setOwnsTransmitter(true);
 
     uint64_t burstMs = (uint64_t)samples_.size() * 1000 / MODEM_SAMPLE_RATE;
     keyedAtMs_ = monotonicMs();
@@ -155,6 +154,16 @@ bool TextMessagingTransport::transmit(const std::vector<TextMessaging::OutgoingB
     pttFunction_(true);
 
     return true;
+}
+
+void TextMessagingTransport::feedQueueLocked()
+{
+    auto& queue = textMessagingTxQueue();
+    size_t room = (size_t)std::max(queue.numFree(), 0);
+    size_t count = std::min(samples_.size() - queued_, room);
+    if (count == 0) return;
+
+    if (queue.enqueue(samples_.data() + queued_, (int)count)) queued_ += count;
 }
 
 bool TextMessagingTransport::isTransmitting() const
@@ -210,10 +219,19 @@ void TextMessagingTransport::poll()
     auto& queue = textMessagingTxQueue();
     uint64_t now = monotonicMs();
 
+    // Top the queue up with the rest of the burst. It holds a minute, and
+    // this runs every tick, so the transmit thread never finds it dry early.
+    bool allQueued;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        feedQueueLocked();
+        allQueued = queued_ == samples_.size();
+    }
+
     // The transmit thread sets the transmitting flag when it starts sending
     // and clears it once the sound card has played the last sample out.
     bool transmitting = queue.isTransmitting();
-    bool empty = queue.isEmpty();
+    bool empty = allQueued && queue.isEmpty();
 
     bool startedNow = transmitting && !sawTransmitting_;
     bool emptyNow = empty && !sawEmpty_;
@@ -307,6 +325,12 @@ void TextMessagingTransport::unkey()
     }
 
     keyed_.store(false, std::memory_order_release);
+
+    // Whatever of the burst had not been queued yet is dropped with it.
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        queued_ = samples_.size();
+    }
 
     if (txLogEnabled())
     {

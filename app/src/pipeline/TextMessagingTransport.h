@@ -78,6 +78,9 @@ public:
 private:
     void unkey();
 
+    // Moves as much of the burst as the transmit queue has room for into it.
+    void feedQueueLocked();
+
     // Whether the main window has the radio keyed, for voice or for us.
     bool pttHeld() const;
 
@@ -87,7 +90,8 @@ private:
     VoiceTransmitCheck transmitAllowedCheck_;
 
     mutable std::mutex mutex_;
-    std::vector<short> samples_;    // scratch for modulation, reused per burst
+    std::vector<short> samples_;    // the burst being sent, reused per burst
+    size_t queued_;                 // how much of samples_ is in the queue
     std::atomic<bool> keyed_;
     uint64_t keyedAtMs_;
     uint64_t keyDeadlineMs_;

@@ -36,9 +36,13 @@ Packages on Debian or Ubuntu:
 
 Then, from the top of the repository:
 
-    cmake -S app -B build -DUSE_NATIVE_AUDIO=1 -DUNITTEST=ON
+    cmake -S app -B build -DUSE_NATIVE_AUDIO=1 -DUNITTEST=ON -DCMAKE_BUILD_TYPE=Release
     cmake --build build -j
     ./build/src/freedv
+
+Without a build type the build is Debug, and an unoptimised receiver cannot
+keep up with listening on every tempo at once: decodes fall further and
+further behind the air.
 
 The first configure fetches libsamplerate and RNNoise (from GitHub, and the
 RNNoise model from media.xiph.org). `ctest --test-dir build -R

@@ -68,6 +68,11 @@ int TextMessagingTxQueue::numUsed() const FREEDV_NONBLOCKING
     return fifo_.numUsed();
 }
 
+int TextMessagingTxQueue::numFree() const FREEDV_NONBLOCKING
+{
+    return fifo_.numFree();
+}
+
 bool TextMessagingTxQueue::isEmpty() const FREEDV_NONBLOCKING
 {
     return fifo_.numUsed() == 0;

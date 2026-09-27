@@ -41,14 +41,15 @@
 #include "util/GenericFIFO.h"
 
 // Modulated 8 kHz audio waiting for the transmit thread to send it. The
-// session fills it before keying the transmitter and watches it empty to know
-// when the burst is over; the transmit thread drains it in place of
+// session fills it as it keys the transmitter, tops it up while the burst
+// plays, and watches it empty to know when the burst is over; the transmit thread drains it in place of
 // microphone audio.
 class TextMessagingTxQueue
 {
 public:
-    // Room for a minute of audio, well past the longest message the protocol
-    // will send in one keying.
+    // Room for a minute of audio. A codec2 keying fits whole, but a Glissando
+    // one at a slow tempo runs to many minutes, so the transport tops the
+    // queue up as it drains rather than queueing a burst in one go.
     static constexpr int CAPACITY_SAMPLES = 8000 * 60;
 
     TextMessagingTxQueue();
@@ -61,6 +62,7 @@ public:
     int read(short* samples, int numSamples) FREEDV_NONBLOCKING;
 
     int numUsed() const FREEDV_NONBLOCKING;
+    int numFree() const FREEDV_NONBLOCKING;
 
     // True from the moment the transmit thread starts sending a burst until
     // the last sample of it has left the output FIFO. The session watches
