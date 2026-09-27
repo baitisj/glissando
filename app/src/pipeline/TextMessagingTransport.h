@@ -67,6 +67,13 @@ public:
     // not running.
     void setTransmitAllowedCheck(VoiceTransmitCheck transmitAllowedCheck);
 
+    // The longest the radio may stay keyed, in milliseconds, or 0 for no
+    // limit: the transmit time-out timer. A keying that would run longer is
+    // sent as several, letting up on the transmitter between whole frames.
+    // Called once per keying.
+    using KeyingLimitFunction = std::function<int()>;
+    void setKeyingLimitFunction(KeyingLimitFunction keyingLimitFunction);
+
     virtual bool transmit(const std::vector<TextMessaging::OutgoingBurst>& bursts) override;
     virtual bool isTransmitting() const override;
     virtual bool isChannelBusy() const override;
@@ -78,7 +85,15 @@ public:
 private:
     void unkey();
 
-    // Moves as much of the burst as the transmit queue has room for into it.
+    // Keys the radio for the next part of a burst once the pause before it
+    // is over.
+    void resumeAfterPause(uint64_t nowMs, uint64_t resumeAtMs, uint64_t giveUpAtMs);
+
+    // Starts sending the part of the burst up to keyingEnds_[keying_].
+    void startKeyingLocked(uint64_t nowMs);
+
+    // Moves as much of the current keying as the transmit queue has room
+    // for into it.
     void feedQueueLocked();
 
     // Whether the main window has the radio keyed, for voice or for us.
@@ -88,12 +103,24 @@ private:
     PttFunction pttFunction_;
     VoiceTransmitCheck voiceTransmitCheck_;
     VoiceTransmitCheck transmitAllowedCheck_;
+    KeyingLimitFunction keyingLimitFunction_;
 
     mutable std::mutex mutex_;
     std::vector<short> samples_;    // the burst being sent, reused per burst
     size_t queued_;                 // how much of samples_ is in the queue
+    std::vector<size_t> frameEnds_; // where each modem frame of it ends
+
+    // A burst too long for the time-out timer goes out as several keyings,
+    // cut between frames. keyed_ stays set across the pauses between them,
+    // so the protocol sees one transmission and nobody else's turn starts.
+    std::vector<size_t> keyingEnds_;
+    size_t keying_;                 // index into keyingEnds_ of the one on air
+    bool pausing_;                  // radio let up between two keyings
+    uint64_t resumeAtMs_;
+    uint64_t giveUpAtMs_;           // the operator took the radio meanwhile
+
     std::atomic<bool> keyed_;
-    uint64_t keyedAtMs_;
+    uint64_t keyedAtMs_;            // of the current keying
     uint64_t keyDeadlineMs_;
 
     // Timing of the burst currently on the air, for FREEDV_TEXT_CHAT_TX_LOG.

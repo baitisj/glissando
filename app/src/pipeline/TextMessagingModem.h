@@ -87,9 +87,12 @@ public:
     // Turns a keying's bursts into 8 kHz samples ready for the transmitter,
     // each burst in its own mode and complete with its own preamble, so a
     // keying may mix the two. Returns false if the modem is not open or a
-    // frame is the wrong size for the mode it is to be sent in.
+    // frame is the wrong size for the mode it is to be sent in. frameEndsOut,
+    // if given, gets where each modem frame ends in samplesOut: the only
+    // places a keying too long for the time-out timer may be cut.
     bool modulate(const std::vector<TextMessaging::OutgoingBurst>& bursts,
-                  std::vector<short>& samplesOut);
+                  std::vector<short>& samplesOut,
+                  std::vector<size_t>* frameEndsOut = nullptr);
 
     // Feeds received 8 kHz audio to both demodulators, invoking the frame
     // callback for every frame that passes the modem's CRC.
@@ -143,6 +146,11 @@ public:
     // The protocol timers suited to what is on the air now: the codec2
     // defaults, or ones sized to the Glissando tempo we transmit at.
     TextMessaging::AirTiming airTiming() const;
+
+    // How long a new message of textBytes would be on the air, in seconds,
+    // sent on its own at the tempo modulate() would pick now. Zero when chat
+    // goes over the codec2 modes, whose messages are all well under a minute.
+    double glissandoMessageSeconds(size_t textBytes) const;
 
 private:
     struct Demodulator

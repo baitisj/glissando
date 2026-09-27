@@ -146,6 +146,14 @@ void Button::SetChecked(bool checked)
     Refresh();
 }
 
+void Button::SetNote(const wxString& note, const wxColour& colour)
+{
+    if (note_ == note && noteColour_ == colour) return;
+    note_ = note;
+    noteColour_ = colour;
+    Refresh();
+}
+
 void Button::SetHinted(bool hinted)
 {
     if (hinted_ == hinted) return;
@@ -231,7 +239,26 @@ void Button::paint(wxGraphicsContext* gc, const wxSize& size)
     gc->SetFont(font(FontRole::Button), ink);
     double tw = 0, th = 0;
     gc->GetTextExtent("X", &tw, &th);
-    drawSpacedTextCentred(gc, label_, size.x / 2.0, (size.y - th) / 2.0 + (pressed_ ? 1 : 0), 1.5);
+    double press = pressed_ ? 1 : 0;
+
+    if (note_.empty())
+    {
+        drawSpacedTextCentred(gc, label_, size.x / 2.0, (size.y - th) / 2.0 + press, 1.5);
+        return;
+    }
+
+    // Label and note stacked as one block, centred.
+    wxColour noteInk = IsEnabled() ? noteColour_ : Colour::Dim;
+    gc->SetFont(font(FontRole::Readout), noteInk);
+    double nw = 0, nh = 0;
+    gc->GetTextExtent("0", &nw, &nh);
+    double gap = 3;
+    double top = (size.y - th - gap - nh) / 2.0 + press;
+
+    gc->SetFont(font(FontRole::Button), ink);
+    drawSpacedTextCentred(gc, label_, size.x / 2.0, top, 1.5);
+    gc->SetFont(font(FontRole::Readout), noteInk);
+    drawSpacedTextCentred(gc, note_, size.x / 2.0, top + th + gap, 1.0);
 }
 
 //--------------------------------------------------------------- Dial
