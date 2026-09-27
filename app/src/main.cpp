@@ -4043,13 +4043,24 @@ void MainFrame::OnTxOutAudioData_(IAudioDevice& dev, void* data, size_t size, vo
 
     auto toRead = std::min((size_t)cbData->outfifo1->numUsed(), size);
     auto isTuning = cbData->isTuning.load(std::memory_order_acquire);
-    if (toRead < size && !isTuning)
+
+    // Only whole buffers are normally played, so a short read waits for more.
+    // But nothing follows the end of a chat burst, and its last few samples,
+    // less than a buffer, would sit in the FIFO for good: the transmit thread
+    // waits for them to play before it confirms the burst, and the transport
+    // gave up waiting and unkeyed a second late. Play them out, padded with
+    // silence.
+    auto& chatQueue = textMessagingTxQueue();
+    bool chatTail = toRead > 0 && toRead < size && chatQueue.isTransmitting() && chatQueue.isEmpty();
+
+    if (toRead < size && !isTuning && !chatTail)
     {
         g_outfifo1_empty.fetch_add(1, std::memory_order_relaxed);
     }
     else
     {
-        if (toRead >= size && cbData->outfifo1->read(tmpOutput, size) != 0)
+        size_t readCount = toRead >= size ? size : (chatTail ? toRead : 0);
+        if (readCount > 0 && cbData->outfifo1->read(tmpOutput, readCount) != 0)
         {
             // Raced with a concurrent reset(); nothing was actually copied
             // into tmpOutput, so fall back to silence below instead of
