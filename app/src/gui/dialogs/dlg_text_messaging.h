@@ -114,6 +114,7 @@ private:
 
     void setStatus(const wxString& status, StatusKind kind = StatusKind::Sticky);
     void updateAckWaitStatus();
+    void updateModemStatus();
 
     void OnSend(wxCommandEvent& event);
     void OnPing(wxCommandEvent& event);
@@ -140,6 +141,7 @@ private:
     Chaotica::Button* m_chkAutoReply;
     wxStaticText* m_txtStatus;
     wxStaticText* m_txtInhibited;
+    wxStaticText* m_txtModem;       // Data2G's connection, while chat uses it
     wxTimer m_refreshTimer;
 
     // Remembered so the one second timer only touches the controls when the

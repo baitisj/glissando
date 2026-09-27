@@ -78,6 +78,7 @@
 #include "gui/controls/plot_scatter.h"
 #include "gui/controls/plot_waterfall.h"
 #include "gui/glissando/GlissandoConsole.h"
+#include "text_messaging/Data2GTransport.h"
 #include "text_messaging/TextMessagingTypes.h"
 #include "gui/controls/plot_spectrum.h"
 #include "sndfile.h"
@@ -301,6 +302,7 @@ class MainFrame : public TopFrame, public IGlissandoHost
         FilterDlg*              m_filterDialog;
         TextMessagingDialog*    m_textMessagingDialog;
         TextMessagingTransport* m_textMessagingTransport;
+        TextMessaging::Data2GTransport* m_data2gTransport;
         GlissandoConsole*       m_glissandoConsole;
         PlotSpectrum*           m_panelSpectrum;
         PlotWaterfall*          m_panelWaterfall;
@@ -396,6 +398,17 @@ class MainFrame : public TopFrame, public IGlissandoHost
     void startTextMessaging_();
     void stopTextMessaging_();
 
+    // Points text chat at our own modem or at an external data2g-host, as
+    // Preferences say. Call after start and whenever Preferences close.
+    void applyChatModem_();
+
+public:
+    // One line for the chat window: which modem chat goes through and, for
+    // Data2G, whether data2g-host is reachable. Empty for our own modem.
+    wxString chatModemStatus();
+
+private:
+
 public:
     // The Glissando console (glissando_host.cpp), the application's window;
     // this frame stays hidden behind it. Opening it switches text chat to the
@@ -421,6 +434,10 @@ private:
     void closeGlissandoConsole_();
     GlissandoConsoleSettings loadGlissandoSettings_() const;
     TextMessaging::AirTiming appliedAirTiming_;
+
+    // Set while text chat goes through data2g-host (applyChatModem_()).
+    std::atomic<bool> data2gChatActive_{false};
+    TextMessaging::Data2GTransport::Settings appliedData2GSettings_;
 
     bool                    m_schedule_restore;
 

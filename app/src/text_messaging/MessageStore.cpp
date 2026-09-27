@@ -35,6 +35,7 @@
 #include "MessageStore.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include "sqlite3.h"
 
@@ -254,7 +255,9 @@ bool MessageStore::addMessage(TextMessage& message)
     sqlite3_bind_int(statement, 7, message.direction == MessageDirection::Sent ? 0 : 1);
     sqlite3_bind_int(statement, 8, statusToInt(message.status));
     sqlite3_bind_int(statement, 9, message.retryCount);
-    sqlite3_bind_double(statement, 10, message.snr);
+    // A transport that reports no SNR (Data2G) gives NaN, which SQLite would
+    // store as NULL; kept as 0, which the chat window leaves blank.
+    sqlite3_bind_double(statement, 10, std::isfinite(message.snr) ? message.snr : 0.0);
     sqlite3_bind_int(statement, 11, message.kind == MessageKind::Chat ? 0 : 1);
 
     bool ok = sqlite3_step(statement) == SQLITE_DONE;
@@ -399,7 +402,7 @@ bool MessageStore::upsertHeardStation(const HeardStation& station)
     }
 
     sqlite3_bind_text(statement, 1, station.callsign.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_double(statement, 2, station.snr);
+    sqlite3_bind_double(statement, 2, std::isfinite(station.snr) ? station.snr : 0.0);
     sqlite3_bind_int64(statement, 3, (sqlite3_int64)station.lastHeard);
 
     bool ok = sqlite3_step(statement) == SQLITE_DONE;

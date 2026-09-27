@@ -1,4 +1,6 @@
 add_library(fdv_text_messaging STATIC
+    Data2GLink.cpp
+    Data2GTransport.cpp
     FrameCodec.cpp
     HeardStationList.cpp
     MessageStore.cpp
@@ -8,7 +10,7 @@ add_library(fdv_text_messaging STATIC
 
 target_include_directories(fdv_text_messaging PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(fdv_text_messaging PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
-target_link_libraries(fdv_text_messaging PUBLIC sqlite3)
+target_link_libraries(fdv_text_messaging PUBLIC sqlite3 Threads::Threads)
 
 if(UNITTEST)
     add_executable(fdv_text_messaging_test test/FrameCodecTest.cpp)
@@ -30,4 +32,9 @@ if(UNITTEST)
     target_link_libraries(fdv_text_messaging_us_data_segments_test fdv_text_messaging)
     target_compile_options(fdv_text_messaging_us_data_segments_test PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
     add_test(NAME text_messaging_us_data_segments COMMAND fdv_text_messaging_us_data_segments_test)
+
+    add_executable(fdv_text_messaging_data2g_test test/Data2GTest.cpp)
+    target_link_libraries(fdv_text_messaging_data2g_test fdv_text_messaging)
+    target_compile_options(fdv_text_messaging_data2g_test PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
+    add_test(NAME text_messaging_data2g COMMAND fdv_text_messaging_data2g_test)
 endif(UNITTEST)

@@ -556,6 +556,41 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
           "frequency; it still receives."));
     sbSizer_textChat->Add(m_ckboxTextChatUsDataSegmentsOnly, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
 
+    // Data2G: an external modem program the operator runs; chat reaches it
+    // over TCP (docs/DATA2G.md).
+    m_ckboxData2G = new wxCheckBox(
+        sb_textChat, wxID_ANY, _("Send chat through Data2G (a data2g-host you run separately)"),
+        wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
+    m_ckboxData2G->SetToolTip(
+        _("Chat goes out through data2g-host instead of Glissando. Start data2g-host yourself, "
+          "with its own sound card and rigctld PTT settings; this program only connects to it, "
+          "and does not key the radio for chat while this is checked."));
+    sbSizer_textChat->Add(m_ckboxData2G, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
+
+    wxBoxSizer* data2gSizer = new wxBoxSizer(wxHORIZONTAL);
+    data2gSizer->Add(new wxStaticText(sb_textChat, wxID_ANY, _("Host:")), 0,
+                     static_cast<int>(wxLEFT) | wxALIGN_CENTER_VERTICAL, 25);
+    m_txtData2GHost = new wxTextCtrl(sb_textChat, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(140, -1));
+    data2gSizer->Add(m_txtData2GHost, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
+    data2gSizer->Add(new wxStaticText(sb_textChat, wxID_ANY, _("KISS port:")), 0, wxALIGN_CENTER_VERTICAL, 0);
+    m_txtData2GKissPort = new wxTextCtrl(sb_textChat, wxID_ANY, wxEmptyString, wxDefaultPosition,
+                                         wxSize(70, -1), 0, wxTextValidator(wxFILTER_DIGITS));
+    data2gSizer->Add(m_txtData2GKissPort, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
+    m_ckboxData2GCommandPort = new wxCheckBox(sb_textChat, wxID_ANY, _("Command port:"), wxDefaultPosition,
+                                              wxDefaultSize, wxCHK_2STATE);
+    m_ckboxData2GCommandPort->SetToolTip(
+        _("Reads data2g-host's PTT and BUSY reports, so chat knows when its burst is on the air "
+          "and when somebody else has the channel. data2g-host serves one command client at a "
+          "time: turn this off if VarAC or Pat use the same data2g-host."));
+    data2gSizer->Add(m_ckboxData2GCommandPort, 0, static_cast<int>(wxLEFT) | wxALIGN_CENTER_VERTICAL, 10);
+    m_txtData2GCommandPort = new wxTextCtrl(sb_textChat, wxID_ANY, wxEmptyString, wxDefaultPosition,
+                                            wxSize(70, -1), 0, wxTextValidator(wxFILTER_DIGITS));
+    data2gSizer->Add(m_txtData2GCommandPort, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
+    sbSizer_textChat->Add(data2gSizer, 0, wxALIGN_LEFT, 0);
+
+    m_ckboxData2G->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent&) { updateData2GControls_(); });
+    m_ckboxData2GCommandPort->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent&) { updateData2GControls_(); });
+
     sizerModem->Add(sbSizer_textChat, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
     
     wxStaticBox *sb_modemstats = new wxStaticBox(m_modemTab, wxID_ANY, _("Modem Statistics"));
@@ -979,6 +1014,12 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         m_ckboxMultipleRx->SetValue(wxGetApp().appConfiguration.multipleReceiveEnabled);
         m_ckboxSingleRxThread->SetValue(wxGetApp().appConfiguration.multipleReceiveOnSingleThread);
         m_ckboxTextChatUsDataSegmentsOnly->SetValue(wxGetApp().appConfiguration.textChatUsDataSegmentsOnly);
+        m_ckboxData2G->SetValue(wxGetApp().appConfiguration.data2gEnabled);
+        m_txtData2GHost->SetValue(wxGetApp().appConfiguration.data2gHost);
+        m_txtData2GKissPort->SetValue(wxString::Format("%d", wxGetApp().appConfiguration.data2gKissPort.get()));
+        m_ckboxData2GCommandPort->SetValue(wxGetApp().appConfiguration.data2gUseCommandPort);
+        m_txtData2GCommandPort->SetValue(wxString::Format("%d", wxGetApp().appConfiguration.data2gCommandPort.get()));
+        updateData2GControls_();
         
         m_ckboxTestFrame->SetValue(wxGetApp().m_testFrames);
 
@@ -1130,6 +1171,16 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         wxGetApp().appConfiguration.multipleReceiveEnabled = m_ckboxMultipleRx->GetValue();
         wxGetApp().appConfiguration.multipleReceiveOnSingleThread = m_ckboxSingleRxThread->GetValue();
         wxGetApp().appConfiguration.textChatUsDataSegmentsOnly = m_ckboxTextChatUsDataSegmentsOnly->GetValue();
+        wxGetApp().appConfiguration.data2gEnabled = m_ckboxData2G->GetValue();
+        wxString data2gHost = m_txtData2GHost->GetValue().Strip(wxString::both);
+        wxGetApp().appConfiguration.data2gHost = data2gHost.IsEmpty() ? wxString("127.0.0.1") : data2gHost;
+        auto port = [](wxTextCtrl* box, int fallback) {
+            int value = wxAtoi(box->GetValue());
+            return value > 0 && value < 65536 ? value : fallback;
+        };
+        wxGetApp().appConfiguration.data2gKissPort = port(m_txtData2GKissPort, 8100);
+        wxGetApp().appConfiguration.data2gUseCommandPort = m_ckboxData2GCommandPort->GetValue();
+        wxGetApp().appConfiguration.data2gCommandPort = port(m_txtData2GCommandPort, 8300);
         
         /* Plot settings */
         wxGetApp().appConfiguration.currentSpectrumAveraging = m_cbxNumSpectrumAveraging->GetSelection();
@@ -1782,4 +1833,17 @@ void OptionsDlg::OnReportingFreqMoveDown(wxCommandEvent&)
     
     // Refresh button status
     m_txtCtrlNewFrequency->SetValue(prevStr);
+}
+
+//-------------------------------------------------------------------------
+// updateData2GControls_(): the connection settings only matter with Data2G
+// chosen, and the command port's number only with the port in use.
+//-------------------------------------------------------------------------
+void OptionsDlg::updateData2GControls_()
+{
+    bool on = m_ckboxData2G->GetValue();
+    m_txtData2GHost->Enable(on);
+    m_txtData2GKissPort->Enable(on);
+    m_ckboxData2GCommandPort->Enable(on);
+    m_txtData2GCommandPort->Enable(on && m_ckboxData2GCommandPort->GetValue());
 }

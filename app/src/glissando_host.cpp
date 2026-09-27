@@ -125,7 +125,9 @@ void MainFrame::applyGlissandoToModem_(bool enabled)
     textMessagingModem().setGlissando(modemConfig);
 
     // Automatic shifting can change the tempo at any frame heard, and every
-    // protocol timer scales with it.
+    // protocol timer scales with it. Not while chat goes through Data2G,
+    // whose timers applyChatModem_() set.
+    if (data2gChatActive_.load(std::memory_order_acquire)) return;
     TextMessaging::AirTiming timing = textMessagingModem().airTiming();
     if (!sameTiming(timing, appliedAirTiming_))
     {

@@ -61,6 +61,7 @@
 #include "pipeline/TextMessagingModem.h"
 #include "pipeline/TextMessagingTransport.h"
 #include "pipeline/TextMessagingTxQueue.h"
+#include "text_messaging/Data2GTransport.h"
 #include "text_messaging/TextMessagingSession.h"
 #include "text_messaging/UsDataSegments.h"
 #include "gui/util/WindowPositionRestore.h"
@@ -1200,6 +1201,7 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("FreeDV ")
     
     m_textMessagingDialog = nullptr;
     m_textMessagingTransport = nullptr;
+    m_data2gTransport = nullptr;
     m_glissandoConsole = nullptr;
     m_filterDialog = nullptr;
 
@@ -1620,7 +1622,16 @@ void MainFrame::startTextMessaging_()
         return m_txThread != nullptr;
     });
 
-    textMessagingModem().setFrameCallback([](const TextMessaging::Frame& frame, float snr) {
+    textMessagingModem().setFrameCallback([this](const TextMessaging::Frame& frame, float snr) {
+        // With Data2G carrying chat, what our own modem hears is not part of
+        // the conversation: its replies would go out on the other modem.
+        if (data2gChatActive_.load(std::memory_order_acquire)) return;
+        TextMessaging::TextMessagingSession::instance().protocol().onFrameReceived(frame, snr);
+    });
+
+    m_data2gTransport = new TextMessaging::Data2GTransport();
+    m_data2gTransport->setLogFunction([](const std::string& line) { log_info("%s", line.c_str()); });
+    m_data2gTransport->setFrameCallback([](const TextMessaging::Frame& frame, float snr) {
         TextMessaging::TextMessagingSession::instance().protocol().onFrameReceived(frame, snr);
     });
 
@@ -1639,7 +1650,83 @@ void MainFrame::startTextMessaging_()
     session.protocol().setMyCallsign(
         wxGetApp().appConfiguration.reportingConfiguration.reportingCallsign->ToStdString());
 
+    applyChatModem_();
     updateTextChatTransmitPermission_();
+}
+
+//-------------------------------------------------------------------------
+// applyChatModem_(): hands text chat to our own modem or to data2g-host.
+// Data2G's transport keeps its connection only while it is chosen; a change
+// of host or port reconnects.
+//-------------------------------------------------------------------------
+void MainFrame::applyChatModem_()
+{
+    if (m_textMessagingTransport == nullptr || m_data2gTransport == nullptr) return;
+
+    auto& config = wxGetApp().appConfiguration;
+    auto& protocol = TextMessaging::TextMessagingSession::instance().protocol();
+
+    if (config.data2gEnabled)
+    {
+        TextMessaging::Data2GTransport::Settings settings;
+        settings.host = ((wxString)config.data2gHost).ToStdString();
+        settings.kissPort = config.data2gKissPort;
+        settings.useCommandPort = config.data2gUseCommandPort;
+        settings.commandPort = config.data2gCommandPort;
+
+        bool changed = !data2gChatActive_.load() || settings.host != appliedData2GSettings_.host ||
+                       settings.kissPort != appliedData2GSettings_.kissPort ||
+                       settings.useCommandPort != appliedData2GSettings_.useCommandPort ||
+                       settings.commandPort != appliedData2GSettings_.commandPort;
+        if (!changed) return;
+
+        log_info("Text chat now goes through data2g-host at %s:%d%s", settings.host.c_str(), settings.kissPort,
+                 settings.useCommandPort ? "" : " (command port off)");
+        // Anything our own transmitter still had queued for chat goes.
+        m_textMessagingTransport->abort();
+        m_data2gTransport->start(settings);
+        appliedData2GSettings_ = settings;
+        data2gChatActive_.store(true, std::memory_order_release);
+        protocol.setTransport(m_data2gTransport);
+
+        TextMessaging::AirTiming timing = TextMessaging::Data2G::airTiming();
+        protocol.setAirTiming(timing);
+        appliedAirTiming_ = timing;
+    }
+    else
+    {
+        if (!data2gChatActive_.load()) return;
+
+        log_info("Text chat back on our own modem");
+        data2gChatActive_.store(false, std::memory_order_release);
+        protocol.setTransport(m_textMessagingTransport);
+        m_data2gTransport->stop();
+
+        TextMessaging::AirTiming timing = textMessagingModem().airTiming();
+        protocol.setAirTiming(timing);
+        appliedAirTiming_ = timing;
+    }
+}
+
+wxString MainFrame::chatModemStatus()
+{
+    if (!data2gChatActive_.load() || m_data2gTransport == nullptr) return wxEmptyString;
+
+    TextMessaging::Data2GTransport::Status status = m_data2gTransport->status();
+    wxString where = wxString::Format("%s:%d", wxString::FromUTF8(appliedData2GSettings_.host),
+                                      appliedData2GSettings_.kissPort);
+    if (!status.kissConnected)
+    {
+        return wxString::Format(_("Data2G: no data2g-host at %s yet; retrying."), where);
+    }
+
+    wxString line = wxString::Format(_("Data2G at %s"), where);
+    if (appliedData2GSettings_.useCommandPort && !status.commandConnected)
+    {
+        line += _(", command port not connected");
+    }
+    if (!status.mode.empty()) line += wxString::Format(_(", last sent in %s"), wxString::FromUTF8(status.mode));
+    return line + ".";
 }
 
 //-------------------------------------------------------------------------
@@ -1684,10 +1771,17 @@ void MainFrame::stopTextMessaging_()
 {
     if (m_textMessagingTransport != nullptr) m_textMessagingTransport->abort();
 
+    // Its thread hands frames to the protocol, so it goes first.
+    if (m_data2gTransport != nullptr) m_data2gTransport->stop();
+    data2gChatActive_.store(false, std::memory_order_release);
+
     TextMessaging::TextMessagingSession::instance().stop();
 
     textMessagingModem().setFrameCallback(nullptr);
     textMessagingModem().close();
+
+    delete m_data2gTransport;
+    m_data2gTransport = nullptr;
 
     delete m_textMessagingTransport;
     m_textMessagingTransport = nullptr;
