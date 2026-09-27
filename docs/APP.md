@@ -79,9 +79,16 @@ longer changes anything.
 | Telemetry | SNR meter, Doppler spread, tempo of the last frame and how long ago, tempo we would send at, that tempo's frame length, and the scale the last frame was sung in. |
 | Engage | Starts and stops audio. |
 | Transmission log | Brings the chat window back if it was closed. |
-| Preferences | Drops down Options, Sound cards, Rig control (CAT and PTT), Audio filters and Easy setup. Sound cards, rig control and easy setup only change while disengaged. |
+| Preferences | Drops down Options, Sound cards, Rig control (CAT and PTT), Audio filters and Easy setup. Sound cards, rig control and easy setup only change while disengaged. The app opens only the radio's two audio streams, input from the radio and output to it, so Sound cards and Easy setup ask for nothing else; leave the output as none to only listen. |
 
-Settings live in the FreeDV config under `[Glissando]`.
+Glissando keeps its own settings and never reads or changes FreeDV's, so the
+two can be installed side by side. On Linux the settings are in `~/.glissando.conf`
+(or `~/.config/glissando/glissando.conf` with wxWidgets 3.3 and later), the chat
+history in `~/.glissando/text_messaging.db` (`~/.local/share/glissando/` with
+3.3), and the default reception log in `~/.local/share/glissando/`. On Windows
+the settings are under `HKEY_CURRENT_USER\Software\Glissando`. Nothing is
+imported from an existing FreeDV setup, so the first start runs Easy setup.
+Glissando's own options are in the `[Glissando]` section.
 
 ## How chat rides on Glissando
 

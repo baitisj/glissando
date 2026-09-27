@@ -627,8 +627,6 @@ private:
         friend class TxRxThread; // XXX - needed for execOnUiThreadAndWait_().
 
         std::shared_ptr<IAudioDevice> rxInSoundDevice;
-        std::shared_ptr<IAudioDevice> rxOutSoundDevice;
-        std::shared_ptr<IAudioDevice> txInSoundDevice;
         std::shared_ptr<IAudioDevice> txOutSoundDevice;
         
         unsigned int         m_timeSinceSyncLoss;
@@ -737,10 +735,8 @@ private:
         void handleAudioDeviceChange_(std::string const& newDeviceName);
 
         // Audio device data handlers
-        static void OnTxInAudioData_(IAudioDevice& dev, void* data, size_t size, void* state) FREEDV_NONBLOCKING;
         static void OnTxOutAudioData_(IAudioDevice& dev, void* data, size_t size, void* state) FREEDV_NONBLOCKING;
         static void OnRxInAudioData_(IAudioDevice& dev, void* data, size_t size, void* state) FREEDV_NONBLOCKING;
-        static void OnRxOutAudioData_(IAudioDevice& dev, void* data, size_t size, void* state) FREEDV_NONBLOCKING;
 
         bool isFrequencyControlEnabled_()
         {

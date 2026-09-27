@@ -2128,10 +2128,10 @@ void MainFrame::OnToolsExportConfig(wxCommandEvent& event)
 
     wxFileDialog saveFileDialog(
         this,
-        _("Export FreeDV Configuration"),
+        _("Export Glissando Configuration"),
         wxGetApp().defaultConfigFilePath,
         wxEmptyString,
-        wxT("FreeDV configuration files (*.conf)|*.conf|All files (*.*)|*.*"),
+        wxT("Glissando configuration files (*.conf)|*.conf|All files (*.*)|*.*"),
         wxFD_SAVE | wxFD_OVERWRITE_PROMPT
     );
 
@@ -2139,7 +2139,7 @@ void MainFrame::OnToolsExportConfig(wxCommandEvent& event)
         return;
 
     wxString path = saveFileDialog.GetPath();
-    wxFileConfig* exportConfig = new wxFileConfig(wxT("FreeDV"), wxT("CODEC2-Project"), path, path, wxCONFIG_USE_LOCAL_FILE);
+    wxFileConfig* exportConfig = new wxFileConfig(wxT("glissando"), wxT("Glissando"), path, path, wxCONFIG_USE_LOCAL_FILE);
     exportConfiguration_(exportConfig);
     exportConfig->Flush();
     delete exportConfig;
@@ -2151,10 +2151,10 @@ void MainFrame::OnToolsImportConfig(wxCommandEvent& event)
 
     wxFileDialog openFileDialog(
         this,
-        _("Import FreeDV Configuration"),
+        _("Import Glissando Configuration"),
         wxGetApp().defaultConfigFilePath,
         wxEmptyString,
-        wxT("FreeDV configuration files (*.conf)|*.conf|All files (*.*)|*.*"),
+        wxT("Glissando configuration files (*.conf)|*.conf|All files (*.*)|*.*"),
         wxFD_OPEN | wxFD_FILE_MUST_EXIST
     );
 
@@ -2169,12 +2169,12 @@ void MainFrame::OnToolsImportConfig(wxCommandEvent& event)
         return;
     }
 
-    wxFileConfig* importConfig = new wxFileConfig(wxT("FreeDV"), wxT("CODEC2-Project"), path, path, wxCONFIG_USE_LOCAL_FILE);
+    wxFileConfig* importConfig = new wxFileConfig(wxT("glissando"), wxT("Glissando"), path, path, wxCONFIG_USE_LOCAL_FILE);
 
     if (importConfig->GetNumberOfGroups() == 0 && importConfig->GetNumberOfEntries() == 0)
     {
         delete importConfig;
-        wxMessageBox(_("The selected file could not be parsed as a FreeDV configuration."), _("Import Error"), wxOK | wxICON_ERROR, this);
+        wxMessageBox(_("The selected file could not be parsed as a Glissando configuration."), _("Import Error"), wxOK | wxICON_ERROR, this);
         return;
     }
 

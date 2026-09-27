@@ -69,7 +69,6 @@ public:
         , outputSampleRate_(outputSampleRate)
         , equalizedMicAudioLink_(std::move(micAudioLink))
         , helper_(std::move(helper))
-        , deferReset_(false)
         , dataTxInProgress_(false)
     { 
         assert(inputSampleRate_ > 0);
@@ -78,9 +77,6 @@ public:
         auto numSamples = std::max(inputSampleRate_, outputSampleRate_);
         inputSamples_ = std::make_unique<short[]>(numSamples);
         assert(inputSamples_ != nullptr);
-        inputSamplesZeros_ = std::make_unique<short[]>(numSamples);
-        assert(inputSamplesZeros_ != nullptr);
-        memset(inputSamplesZeros_.get(), 0, numSamples * sizeof(short));
     }
     
     virtual ~TxRxThread()
@@ -120,8 +116,6 @@ private:
     BeepStep* beepStep_;
     std::shared_ptr<IRealtimeHelper> helper_;
     std::unique_ptr<short[]> inputSamples_;
-    std::unique_ptr<short[]> inputSamplesZeros_;
-    bool deferReset_;
     std::thread thread_;
 
     // Text messaging bursts arrive already modulated at 8 kHz, so they only

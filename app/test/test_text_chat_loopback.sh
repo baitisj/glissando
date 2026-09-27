@@ -40,15 +40,9 @@ STATION_B_CALLSIGN="${STATION_B_CALLSIGN:-TEST2/P}"
 # so no module-loopback is needed.
 CABLE_A_TO_B=TextChat_A_To_B
 CABLE_B_TO_A=TextChat_B_To_A
-# Speakers are discarded, and the mic sinks are never played to, so their
-# monitors are a source of silence -- which is what a chat only station wants
-# going into its transmit pipeline.
-SPEAKER_A=TextChat_A_Speaker
-SPEAKER_B=TextChat_B_Speaker
-MIC_A=TextChat_A_Mic
-MIC_B=TextChat_B_Mic
+# Glissando has no microphone or speaker, so these two are all a station uses.
 
-ALL_CABLES="$CABLE_A_TO_B $CABLE_B_TO_A $SPEAKER_A $SPEAKER_B $MIC_A $MIC_B"
+ALL_CABLES="$CABLE_A_TO_B $CABLE_B_TO_A"
 
 findBinary () {
     if [ -n "${FREEDV_BINARY:-}" ]; then echo "$FREEDV_BINARY"; return; fi
@@ -84,12 +78,10 @@ waitForCableUp () {
 # the same text_messaging.db and each would show the other's sent messages as
 # its own history.
 writeStationConfig () {
-    local dir=$1 callsign=$2 rxin=$3 txout=$4 micin=$5 spkout=$6
+    local dir=$1 callsign=$2 rxin=$3 txout=$4
     mkdir -p "$dir"
     sed -e "s|@FREEDV_RADIO_TO_COMPUTER_DEVICE@|$rxin|g" \
         -e "s|@FREEDV_COMPUTER_TO_RADIO_DEVICE@|$txout|g" \
-        -e "s|@FREEDV_MICROPHONE_TO_COMPUTER_DEVICE@|$micin|g" \
-        -e "s|@FREEDV_COMPUTER_TO_SPEAKER_DEVICE@|$spkout|g" \
         -e "s|@FREEDV_CALLSIGN@|$callsign|g" \
         -e "s|@FREEDV_TEST_MODE@|$FREEDV_TEST_MODE|g" \
         -e "s|@FREEDV_FREQUENCY_HZ@|$FREEDV_TEXT_CHAT_FREQUENCY_HZ|g" \
@@ -136,9 +128,9 @@ doUp () {
     done
 
     writeStationConfig "$WORKDIR/stationA" "$STATION_A_CALLSIGN" \
-        "$CABLE_B_TO_A.monitor" "$CABLE_A_TO_B" "$MIC_A.monitor" "$SPEAKER_A"
+        "$CABLE_B_TO_A.monitor" "$CABLE_A_TO_B"
     writeStationConfig "$WORKDIR/stationB" "$STATION_B_CALLSIGN" \
-        "$CABLE_A_TO_B.monitor" "$CABLE_B_TO_A" "$MIC_B.monitor" "$SPEAKER_B"
+        "$CABLE_A_TO_B.monitor" "$CABLE_B_TO_A"
 
     echo "Starting stations..."
     startStation "A ($STATION_A_CALLSIGN)" "$WORKDIR/stationA"

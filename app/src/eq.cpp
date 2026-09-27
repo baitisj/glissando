@@ -9,7 +9,6 @@
 #include <functional>
 using namespace std::placeholders;
 
-extern int g_nSoundCards;
 
 #define SBQ_MAX_ARGS 5
 
@@ -66,13 +65,13 @@ void  MainFrame::designEQFilters(paCallBackData *cb, int rxSampleRate, int txSam
     cb->micEqLock.lock();
 
     // Volume can be adjusted via main window without enabling filters
-    if (wxGetApp().appConfiguration.filterConfiguration.micInChannel.volInDB != 0 && g_nSoundCards > 1)
+    if (wxGetApp().appConfiguration.filterConfiguration.micInChannel.volInDB != 0 && txSampleRate > 0)
     {
         cb->sbqMicInVol    = designAnEQFilter("vol", 0, wxGetApp().appConfiguration.filterConfiguration.micInChannel.volInDB, 0, txSampleRate);
     }
     
     // init Mic In Equaliser Filters
-    if (cb->micInEQEnable.load(std::memory_order_relaxed) && g_nSoundCards > 1) {
+    if (cb->micInEQEnable.load(std::memory_order_relaxed) && txSampleRate > 0) {
         assert(cb->sbqMicInBass == nullptr && cb->sbqMicInTreble == nullptr && cb->sbqMicInMid == nullptr);
         //printf("designing new Min In filters\n");
         cb->sbqMicInBass   = designAnEQFilter("bass", wxGetApp().appConfiguration.filterConfiguration.micInChannel.bassFreqHz, wxGetApp().appConfiguration.filterConfiguration.micInChannel.bassGaindB, txSampleRate);

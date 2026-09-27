@@ -83,6 +83,25 @@ void AudioConfiguration::load(wxConfigBase* config)
     soundCard1Out.load(config);
     soundCard2In.load(config);
     soundCard2Out.load(config);
+
+    // Glissando uses only the radio's audio: soundCard1In from the radio and
+    // soundCard1Out to it. FreeDV's layouts also had a microphone and
+    // speaker, and its receive-only layout put the speaker in soundCard1Out.
+    // Convert a FreeDV layout once, so that speaker is never taken for the
+    // radio.
+    if (!config->Read(wxT("/Audio/radioOnlyLayout"), false))
+    {
+        bool hadSecondCard = soundCard2In.deviceName != "none" || soundCard2Out.deviceName != "none";
+        if (!hadSecondCard)
+        {
+            // Receive only: soundCard1Out was the speaker.
+            soundCard1Out.deviceName = "none";
+        }
+        soundCard2In.deviceName = "none";
+        soundCard2Out.deviceName = "none";
+
+        save(config);
+    }
 }
 
 void AudioConfiguration::save(wxConfigBase* config)
@@ -91,4 +110,5 @@ void AudioConfiguration::save(wxConfigBase* config)
     soundCard1Out.save(config);
     soundCard2In.save(config);
     soundCard2Out.save(config);
+    config->Write(wxT("/Audio/radioOnlyLayout"), true);
 }

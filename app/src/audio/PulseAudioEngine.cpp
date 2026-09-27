@@ -61,7 +61,7 @@ void PulseAudioEngine::start()
     }
     
     mainloopApi_ = pa_threaded_mainloop_get_api(mainloop_);
-    context_ = pa_context_new(mainloopApi_, "FreeDV");
+    context_ = pa_context_new(mainloopApi_, "Glissando");
     
     if (context_ == nullptr)
     {

@@ -42,7 +42,7 @@
 #include <arpa/inet.h>
 #endif // defined(WIN32) || defined(__MINGW32__)
 
-const std::string WSJTXNetworkLogger::UNIQUE_ID("FreeDV");
+const std::string WSJTXNetworkLogger::UNIQUE_ID("Glissando");
 const std::string WSJTXNetworkLogger::LOG_MODE("DIGITALVOICE");
 const std::string WSJTXNetworkLogger::LOG_SUBMODE("FREEDV");
 

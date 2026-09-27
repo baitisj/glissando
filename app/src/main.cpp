@@ -221,17 +221,23 @@ FILE *ftest;
 // Config file management
 wxConfigBase *pConfig = NULL;
 
+// Glissando keeps its settings, chat history and logs under its own names, so
+// it never reads or changes an installed FreeDV's. The application name also
+// names the config file (~/.glissando.conf, or glissando/glissando.conf under
+// XDG) and the user data folder (~/.glissando, or ~/.local/share/glissando).
+static const wxChar* const GLISSANDO_APP_NAME = wxT("glissando");
+static const wxChar* const GLISSANDO_VENDOR_NAME = wxT("Glissando");
+
 // Name used for the separate state-store config object (distinct from the main
 // app config so the last-used path is readable regardless of which backend is
-// active).  On Windows this becomes HKCU\Software\CODEC2-Project\FreeDV-State;
+// active).  On Windows this becomes HKCU\Software\Glissando\Glissando-State;
 // on macOS/Linux it becomes a file in the per-user config directory.
-static const wxChar* const FREEDV_STATE_APP_NAME    = wxT("FreeDV-State");
-static const wxChar* const FREEDV_VENDOR_NAME = wxT("CODEC2-Project");
+static const wxChar* const GLISSANDO_STATE_APP_NAME    = wxT("Glissando-State");
 static const wxChar* const LAST_USED_CONFIG_KEY     = wxT("/LastUsedConfigFile");
 
 wxString getLastUsedConfigPath()
 {
-    wxConfig stateConfig(FREEDV_STATE_APP_NAME, FREEDV_VENDOR_NAME);
+    wxConfig stateConfig(GLISSANDO_STATE_APP_NAME, GLISSANDO_VENDOR_NAME);
     wxString path;
     stateConfig.Read(LAST_USED_CONFIG_KEY, &path, wxEmptyString);
     return path;
@@ -239,14 +245,14 @@ wxString getLastUsedConfigPath()
 
 void saveLastUsedConfigPath(const wxString& path)
 {
-    wxConfig stateConfig(FREEDV_STATE_APP_NAME, FREEDV_VENDOR_NAME);
+    wxConfig stateConfig(GLISSANDO_STATE_APP_NAME, GLISSANDO_VENDOR_NAME);
     stateConfig.Write(LAST_USED_CONFIG_KEY, path);
     stateConfig.Flush();
 }
 
 void clearLastUsedConfigPath()
 {
-    wxConfig stateConfig(FREEDV_STATE_APP_NAME, FREEDV_VENDOR_NAME);
+    wxConfig stateConfig(GLISSANDO_STATE_APP_NAME, GLISSANDO_VENDOR_NAME);
     stateConfig.Write(LAST_USED_CONFIG_KEY, wxEmptyString);
     stateConfig.Flush();
 }
@@ -276,6 +282,16 @@ static void LogLockFunction_(bool lock, void *)
     {
         logMutex.unlock();
     }
+}
+
+// g_nSoundCards counts the radio's audio ports in use: 0 with no radio
+// input, 1 when receiving only, 2 when the radio output is there as well and
+// the station can transmit.
+static int radioSoundCardCount()
+{
+    auto& audio = wxGetApp().appConfiguration.audioConfiguration;
+    if (audio.soundCard1In.deviceName == "none") return 0;
+    return audio.soundCard1Out.deviceName == "none" ? 1 : 2;
 }
 
 template<int soundCardId, bool isOut>
@@ -581,6 +597,11 @@ void MainApp::OnInitCmdLine(wxCmdLineParser& parser)
 
 bool MainApp::OnCmdLineParsed(wxCmdLineParser& parser)
 {
+    // Before anything below looks for a config file or a data folder.
+    SetVendorName(GLISSANDO_VENDOR_NAME);
+    SetAppName(GLISSANDO_APP_NAME);
+    SetAppDisplayName(wxT("Glissando"));
+
     ulog_set_lock(&LogLockFunction_, nullptr);
     ulog_set_prefix_fn([](ulog_Event *, char *prefix, size_t prefix_size) {
         static unsigned int counter = 0;
@@ -599,7 +620,7 @@ bool MainApp::OnCmdLineParsed(wxCmdLineParser& parser)
     if (parser.Found("f", &configPath))
     {
         log_info("Loading configuration from %s", (const char*)configPath.ToUTF8());
-        pConfig = new wxFileConfig(wxT("FreeDV"), FREEDV_VENDOR_NAME, configPath, configPath, wxCONFIG_USE_LOCAL_FILE);
+        pConfig = new wxFileConfig(GLISSANDO_APP_NAME, GLISSANDO_VENDOR_NAME, configPath, configPath, wxCONFIG_USE_LOCAL_FILE);
         wxConfigBase::Set(pConfig);
         
         // On Linux/macOS, this replaces $HOME with "~" to shorten the title a bit.
@@ -609,15 +630,17 @@ bool MainApp::OnCmdLineParsed(wxCmdLineParser& parser)
     }
     else
     {
-        wxString oldFileLocation = wxFileConfig::GetLocalFile("freedv", 0).GetFullPath();
+        // ~/.glissando.conf rather than wxWidgets' default of ~/.glissando,
+        // which is also the user data folder that holds the chat history.
+        wxString oldFileLocation = wxFileConfig::GetLocalFile(wxT("glissando.conf"), 0).GetFullPath();
         wxFileName tempOldFile(oldFileLocation);
 
 #if wxCHECK_VERSION(3,3,0) && defined(__linux__)
         // Execute this early during the application startup, before the
         // global wxConfig object is created.
         bool migrateSuccess = true;
-        wxString newFileLocation = wxFileConfig::GetLocalFile("freedv", wxCONFIG_USE_XDG | wxCONFIG_USE_SUBDIR).GetFullPath();
-        wxString newFileDir = wxFileConfig::GetLocalFile("freedv", wxCONFIG_USE_XDG | wxCONFIG_USE_SUBDIR).GetPath();
+        wxString newFileLocation = wxFileConfig::GetLocalFile(GLISSANDO_APP_NAME, wxCONFIG_USE_XDG | wxCONFIG_USE_SUBDIR).GetFullPath();
+        wxString newFileDir = wxFileConfig::GetLocalFile(GLISSANDO_APP_NAME, wxCONFIG_USE_XDG | wxCONFIG_USE_SUBDIR).GetPath();
         log_info("Determining if we need to migrate config file to standard location...");
         log_info("   Old location: %s", (const char*)oldFileLocation.ToUTF8());
         log_info("   New location: %s", (const char*)newFileLocation.ToUTF8());
@@ -653,13 +676,17 @@ bool MainApp::OnCmdLineParsed(wxCmdLineParser& parser)
 
             // Need to explicitly create the wxFileConfig on Linux so that we can force wxWidgets
             // to load configuration files under a subdirectory. Otherwise, simply FileLayout_XDG
-            // above will use ~/.config/freedv.conf.
-            pConfig = new wxFileConfig(wxT("FreeDV"), FREEDV_VENDOR_NAME, newFileLocation, newFileLocation, wxCONFIG_USE_LOCAL_FILE | wxCONFIG_USE_SUBDIR | wxCONFIG_USE_XDG);
+            // above will use ~/.config/glissando.conf.
+            pConfig = new wxFileConfig(GLISSANDO_APP_NAME, GLISSANDO_VENDOR_NAME, newFileLocation, newFileLocation, wxCONFIG_USE_LOCAL_FILE | wxCONFIG_USE_SUBDIR | wxCONFIG_USE_XDG);
 
             wxConfigBase::Set(pConfig);
             defaultConfigFilePath = tempNewFile.GetPath();
         }
 #else
+#if defined(__linux__)
+        pConfig = new wxFileConfig(GLISSANDO_APP_NAME, GLISSANDO_VENDOR_NAME, oldFileLocation, oldFileLocation, wxCONFIG_USE_LOCAL_FILE);
+        wxConfigBase::Set(pConfig);
+#endif // defined(__linux__)
         defaultConfigFilePath = tempOldFile.GetPath();
 #endif // wxCHECK_VERSION(3,3,0) && defined(__linux__)
 
@@ -672,7 +699,7 @@ bool MainApp::OnCmdLineParsed(wxCmdLineParser& parser)
             {
                 log_info("Restoring last-used configuration from %s",
                          (const char*)lastUsedPath.ToUTF8());
-                pConfig = new wxFileConfig(wxT("FreeDV"), FREEDV_VENDOR_NAME,
+                pConfig = new wxFileConfig(GLISSANDO_APP_NAME, GLISSANDO_VENDOR_NAME,
                                            lastUsedPath, lastUsedPath,
                                            wxCONFIG_USE_LOCAL_FILE);
                 wxConfigBase::Set(pConfig);
@@ -815,8 +842,8 @@ bool MainApp::OnInit()
 #if defined(__WXGTK__) && defined(HAS_GTK3)
     SuppressButtonPressFlicker_();
 #endif // defined(__WXGTK__) && defined(HAS_GTK3)
-    SetVendorName(FREEDV_VENDOR_NAME);
-    SetAppName(wxT("FreeDV"));      // not needed, it's the default value
+    SetVendorName(GLISSANDO_VENDOR_NAME);
+    SetAppName(GLISSANDO_APP_NAME);
     
     golay23_init();
 
@@ -1080,17 +1107,7 @@ void MainFrame::loadConfiguration_()
 
     // Ensure that sound card count is correct. Otherwise the Audio Options won't show
     // the correct devices prior to start.
-    bool hasSoundCard1InDevice = wxGetApp().appConfiguration.audioConfiguration.soundCard1In.deviceName != "none";
-    bool hasSoundCard1OutDevice = wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.deviceName != "none";
-    bool hasSoundCard2InDevice = wxGetApp().appConfiguration.audioConfiguration.soundCard2In.deviceName != "none";
-    bool hasSoundCard2OutDevice = wxGetApp().appConfiguration.audioConfiguration.soundCard2Out.deviceName != "none";
-    
-    g_nSoundCards = 0;
-    if (hasSoundCard1InDevice && hasSoundCard1OutDevice) {
-        g_nSoundCards = 1;
-        if (hasSoundCard2InDevice && hasSoundCard2OutDevice)
-            g_nSoundCards = 2;
-    }
+    g_nSoundCards = radioSoundCardCount();
     
     // Update the reporting list as needed.
     updateReportingFreqList_();
@@ -2393,14 +2410,7 @@ void MainFrame::OnTimer(wxTimerEvent &evt)
 
             if (m_newMicInFilter || m_newSpkOutFilter)
             {
-                if (g_nSoundCards == 1)
-                {
-                    designEQFilters(g_rxUserdata, wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.sampleRate, 0);
-                }
-                else
-                {   
-                    designEQFilters(g_rxUserdata, wxGetApp().appConfiguration.audioConfiguration.soundCard2Out.sampleRate, wxGetApp().appConfiguration.audioConfiguration.soundCard2In.sampleRate);
-                }
+                designEQFilters(g_rxUserdata, wxGetApp().appConfiguration.audioConfiguration.soundCard1In.sampleRate, 0);
             }
 
             m_newMicInFilter = m_newSpkOutFilter = false;
@@ -3232,12 +3242,6 @@ void MainFrame::stopRxStream()
         {
             m_txThread->stop();
             
-            if (txInSoundDevice)
-            {
-                txInSoundDevice->stop();
-                txInSoundDevice.reset();
-            }
-            
             if (txOutSoundDevice)
             {
                 txOutSoundDevice->stop();
@@ -3256,13 +3260,7 @@ void MainFrame::stopRxStream()
                 rxInSoundDevice->stop();
                 rxInSoundDevice.reset();
             }
-        
-            if (rxOutSoundDevice)
-            {
-                rxOutSoundDevice->stop();
-                rxOutSoundDevice.reset();
-            }
-            
+
             m_rxThread = nullptr;
         }
 
@@ -3333,280 +3331,125 @@ void MainFrame::startRxStream()
         int m_fifoSize_ms = wxGetApp().appConfiguration.fifoSizeMs;
         int soundCard1InFifoSizeSamples = MAX_INCOMING_AUDIO_SEC * wxGetApp().appConfiguration.audioConfiguration.soundCard1In.sampleRate;
 
-        // Guards against FIFO sizes accidentally being too small to fit an entier TX block.
-        // Theoretically allows up to three TX packets to be queued at a time at minimum
-        // (depending on mode).
-        int soundCard1OutFifoSizeSamples = std::max(
-            3 * (freedvInterface.getTxNNomModemSamples() * wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.sampleRate) / freedvInterface.getTxModemSampleRate(),
-            m_fifoSize_ms*wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.sampleRate / 1000);
+        // Glissando only talks to the radio: audio in from it, and, on a
+        // station that transmits, audio out to it. There is no microphone or
+        // speaker stream, so only the radio's two FIFOs exist.
+        g_rxUserdata->infifo1 = new GenericFIFO<short>(soundCard1InFifoSizeSamples);
+        g_rxUserdata->tmpReadRxBuffer_ = std::make_unique<short[]>(soundCard1InFifoSizeSamples);
 
+        int soundCard1OutFifoSizeSamples = 0;
         if (g_nSoundCards == 2)
         {
-            int soundCard2InFifoSizeSamples = MAX_INCOMING_AUDIO_SEC * wxGetApp().appConfiguration.audioConfiguration.soundCard2In.sampleRate;
-
-            // Guards against FIFO sizes accidentally being too small to fit an entier TX block.
-            // Theoretically allows up to three RX packets to be queued at a time at minimum
-            // (depending on mode).
-            int soundCard2OutFifoSizeSamples = std::max(
-                3 * (freedvInterface.getRxNumSpeechSamples() * wxGetApp().appConfiguration.audioConfiguration.soundCard2Out.sampleRate) / freedvInterface.getRxSpeechSampleRate(),
-                m_fifoSize_ms*wxGetApp().appConfiguration.audioConfiguration.soundCard2Out.sampleRate / 1000);
+            soundCard1OutFifoSizeSamples = std::max(
+                3 * (freedvInterface.getTxNNomModemSamples() * wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.sampleRate) / freedvInterface.getTxModemSampleRate(),
+                m_fifoSize_ms*wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.sampleRate / 1000);
             g_rxUserdata->outfifo1 = new GenericFIFO<short>(soundCard1OutFifoSizeSamples);
-            g_rxUserdata->infifo2 = new GenericFIFO<short>(soundCard2InFifoSizeSamples);
-            g_rxUserdata->infifo1 = new GenericFIFO<short>(soundCard1InFifoSizeSamples);
-            g_rxUserdata->outfifo2 = new GenericFIFO<short>(soundCard2OutFifoSizeSamples);
-        
-            log_debug("fifoSize_ms:  %d infifo2: %d/outfilo2: %d",
-                wxGetApp().appConfiguration.fifoSizeMs.get(), soundCard2InFifoSizeSamples, soundCard2OutFifoSizeSamples);
-
-            g_rxUserdata->tmpReadRxBuffer_ = std::make_unique<short[]>(std::max(soundCard1InFifoSizeSamples, soundCard2InFifoSizeSamples));
-            g_rxUserdata->tmpReadTxBuffer_ = std::make_unique<short[]>(std::max(soundCard1InFifoSizeSamples, soundCard2InFifoSizeSamples));
-            g_rxUserdata->tmpWriteRxBuffer_ = std::make_unique<short[]>(std::max(soundCard1OutFifoSizeSamples, soundCard2OutFifoSizeSamples));
-            g_rxUserdata->tmpWriteTxBuffer_ = std::make_unique<short[]>(std::max(soundCard1OutFifoSizeSamples, soundCard2OutFifoSizeSamples));
-        }
-        else
-        {
-            g_rxUserdata->infifo1 = new GenericFIFO<short>(soundCard1InFifoSizeSamples);
-            g_rxUserdata->outfifo1 = new GenericFIFO<short>(soundCard1OutFifoSizeSamples);
-            g_rxUserdata->infifo2 = nullptr;
-            g_rxUserdata->outfifo2 = nullptr;
-
-            g_rxUserdata->tmpReadRxBuffer_ = std::make_unique<short[]>(soundCard1InFifoSizeSamples);
-            g_rxUserdata->tmpReadTxBuffer_ = std::make_unique<short[]>(soundCard1InFifoSizeSamples);
-            g_rxUserdata->tmpWriteRxBuffer_ = std::make_unique<short[]>(soundCard1OutFifoSizeSamples);
             g_rxUserdata->tmpWriteTxBuffer_ = std::make_unique<short[]>(soundCard1OutFifoSizeSamples);
         }
 
-        log_debug("fifoSize_ms: %d infifo1: %d/outfilo1 %d",
+        log_debug("fifoSize_ms: %d infifo1: %d/outfifo1 %d",
                 wxGetApp().appConfiguration.fifoSizeMs.get(), soundCard1InFifoSizeSamples, soundCard1OutFifoSizeSamples);
 
         if (g_nSoundCards == 0) 
         {
             executeOnUiThreadAndWait_([&]() {
-                wxMessageBox(wxT("No Sound Cards configured, use Tools - Audio Config to configure"), wxT("Error"), wxOK);
+                wxMessageBox(wxT("No radio sound device configured, use Preferences - Sound cards to configure"), wxT("Error"), wxOK);
             });
             
             m_RxRunning = false;
             
             engine->stop();
             engine->setOnEngineError(nullptr, nullptr);
+            destroy_fifos();
             delete g_rxUserdata;
             return;
         }
-        else if (g_nSoundCards == 1)
-        {
-            // RX-only setup.
-            // Note: we assume 2 channels, but IAudioEngine will automatically downgrade to 1 channel if needed.
-            rxInSoundDevice = engine->getAudioDevice(wxGetApp().appConfiguration.audioConfiguration.soundCard1In.deviceName, IAudioEngine::AUDIO_ENGINE_IN, wxGetApp().appConfiguration.audioConfiguration.soundCard1In.sampleRate, 2);
-            rxOutSoundDevice = engine->getAudioDevice(wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.deviceName, IAudioEngine::AUDIO_ENGINE_OUT, wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.sampleRate, 2);
-            
-            bool failed = false;
-            if (!rxInSoundDevice)
-            {
-                executeOnUiThreadAndWait_([&]() {
-                    wxMessageBox(wxString::Format("Could not find RX input sound device '%s'. Please check settings and try again.", wxGetApp().appConfiguration.audioConfiguration.soundCard1In.deviceName.get()), wxT("Error"), wxOK);
-                });
-                failed = true;
-            }
-            else
-            {
-                rxInSoundDevice->setDescription("Radio to FreeDV");
-                rxInSoundDevice->setOnAudioDeviceChanged([](IAudioDevice&, std::string newDeviceName, void* state) {
-                    MainFrame* castedThis = (MainFrame*)state;
-                    castedThis->CallAfter(&MainFrame::handleAudioDeviceChange_<1, false>, std::move(newDeviceName));
-                }, this);
-            }
-            
-            if (!rxOutSoundDevice && !failed)
-            {
-                executeOnUiThreadAndWait_([]() {
-                    wxMessageBox(wxString::Format("Could not find RX output sound device '%s'. Please check settings and try again.", wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.deviceName.get()), wxT("Error"), wxOK);
-                });
-                failed = true;
-            }
-            else if (!failed)
-            {
-                rxOutSoundDevice->setDescription("FreeDV to Speaker");
-                rxOutSoundDevice->setOnAudioDeviceChanged([](IAudioDevice&, std::string newDeviceName, void* state) {
-                    MainFrame* castedThis = (MainFrame*)state;
-                    castedThis->CallAfter(&MainFrame::handleAudioDeviceChange_<1, true>, std::move(newDeviceName));
-                }, this);
-            }
- 
-            if (failed)
-            {
-                if (rxInSoundDevice)
-                {
-                    rxInSoundDevice.reset();
-                }
-                
-                if (rxOutSoundDevice)
-                {
-                    rxOutSoundDevice.reset();
-                }
-                
-                m_RxRunning = false;
-            
-                engine->stop();
-                engine->setOnEngineError(nullptr, nullptr);
-                delete g_rxUserdata;
-                return;
-            }
-            else
-            {
-                // Re-save sample rates in case they were somehow invalid before
-                // device creation.
-                wxGetApp().appConfiguration.audioConfiguration.soundCard1In.sampleRate = rxInSoundDevice->getSampleRate();
-                wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.sampleRate = rxOutSoundDevice->getSampleRate();
-            }
-        }
-        else
-        {
-            // RX + TX setup
-            // Same note as above re: number of channels.
-            // Note: TX devices are started here as RX device sample rates could change as a result (e.g. Bluetooth on macOS).
-            bool failed = false;
-            
-            txInSoundDevice = engine->getAudioDevice(wxGetApp().appConfiguration.audioConfiguration.soundCard2In.deviceName, IAudioEngine::AUDIO_ENGINE_IN, wxGetApp().appConfiguration.audioConfiguration.soundCard2In.sampleRate, 2);
-            
-            if (!txInSoundDevice)
-            {
-                executeOnUiThreadAndWait_([]() {
-                    wxMessageBox(wxString::Format("Could not find TX input sound device '%s'. Please check settings and try again.", wxGetApp().appConfiguration.audioConfiguration.soundCard2In.deviceName.get()), wxT("Error"), wxOK);
-                });
-                failed = true;
-            }
-            else
-            {
-                txInSoundDevice->setDescription("Mic to FreeDV");
-                txInSoundDevice->setOnAudioDeviceChanged([](IAudioDevice&, std::string newDeviceName, void* state) {
-                    MainFrame* castedThis = (MainFrame*)state;
-                    castedThis->CallAfter(&MainFrame::handleAudioDeviceChange_<2, false>, std::move(newDeviceName));
-                }, this);
-                txInSoundDevice->setOnAudioData(&OnTxInAudioData_, g_rxUserdata);
-        
-                txInSoundDevice->setOnAudioOverflow([](IAudioDevice&, void*)
-                {
-                    g_AEstatus2[1]++;
-                }, nullptr);
-        
-                txInSoundDevice->setOnAudioUnderflow([](IAudioDevice&, void*)
-                {
-                    g_AEstatus2[0]++;
-                }, nullptr);
-                
-                txInSoundDevice->setOnAudioError(errorCallback, this);                
-                txInSoundDevice->start();
-            }
 
+        bool failed = false;
+
+        // Note: we assume 2 channels, but IAudioEngine will automatically downgrade to 1 channel if needed.
+        // The radio output is started first as the input's sample rate could change as a result (e.g. Bluetooth on macOS).
+        if (g_nSoundCards == 2)
+        {
             txOutSoundDevice = engine->getAudioDevice(wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.deviceName, IAudioEngine::AUDIO_ENGINE_OUT, wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.sampleRate, 2);
-            
-            if (!txOutSoundDevice && !failed)
+
+            if (!txOutSoundDevice)
             {
                 executeOnUiThreadAndWait_([]() {
                     wxMessageBox(wxString::Format("Could not find TX output sound device '%s'. Please check settings and try again.", wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.deviceName.get()), wxT("Error"), wxOK);
                 });
                 failed = true;
             }
-            else if (!failed)
+            else
             {
-                txOutSoundDevice->setDescription("FreeDV to Radio");
+                txOutSoundDevice->setDescription("Glissando to Radio");
                 txOutSoundDevice->setOnAudioDeviceChanged([](IAudioDevice&, std::string newDeviceName, void* state) {
                     MainFrame* castedThis = (MainFrame*)state;
                     castedThis->CallAfter(&MainFrame::handleAudioDeviceChange_<1, true>, std::move(newDeviceName));
                 }, this);
                 txOutSoundDevice->setOnAudioData(&OnTxOutAudioData_, g_rxUserdata);
-        
+
                 txOutSoundDevice->setOnAudioOverflow([](IAudioDevice&, void*)
                 {
-                    g_AEstatus1[3]++;
+                    g_AEstatus2[3]++;
                 }, nullptr);
-        
+
                 txOutSoundDevice->setOnAudioUnderflow([](IAudioDevice&, void*)
                 {
-                    g_AEstatus1[2]++;
+                    g_AEstatus2[2]++;
                 }, nullptr);
-            
+
                 txOutSoundDevice->setOnAudioError(errorCallback, this);
                 txOutSoundDevice->start();
             }
-            
+        }
+
+        if (!failed)
+        {
             rxInSoundDevice = engine->getAudioDevice(wxGetApp().appConfiguration.audioConfiguration.soundCard1In.deviceName, IAudioEngine::AUDIO_ENGINE_IN, wxGetApp().appConfiguration.audioConfiguration.soundCard1In.sampleRate, 2);
 
-            rxOutSoundDevice = engine->getAudioDevice(wxGetApp().appConfiguration.audioConfiguration.soundCard2Out.deviceName, IAudioEngine::AUDIO_ENGINE_OUT, wxGetApp().appConfiguration.audioConfiguration.soundCard2Out.sampleRate, 2);
-            
-            if (!rxInSoundDevice && !failed)
+            if (!rxInSoundDevice)
             {
                 executeOnUiThreadAndWait_([]() {
                     wxMessageBox(wxString::Format("Could not find RX input sound device '%s'. Please check settings and try again.", wxGetApp().appConfiguration.audioConfiguration.soundCard1In.deviceName.get()), wxT("Error"), wxOK);
                 });
                 failed = true;
             }
-            else if (!failed)
+            else
             {
-                rxInSoundDevice->setDescription("Radio to FreeDV");
+                rxInSoundDevice->setDescription("Radio to Glissando");
                 rxInSoundDevice->setOnAudioDeviceChanged([](IAudioDevice&, std::string newDeviceName, void* state) {
                     MainFrame* castedThis = (MainFrame*)state;
                     castedThis->CallAfter(&MainFrame::handleAudioDeviceChange_<1, false>, std::move(newDeviceName));
                 }, this);
             }
- 
-            if (!rxOutSoundDevice && !failed)
-            {
-                executeOnUiThreadAndWait_([]() {
-                    wxMessageBox(wxString::Format("Could not find RX output sound device '%s'. Please check settings and try again.", wxGetApp().appConfiguration.audioConfiguration.soundCard2Out.deviceName.get()), wxT("Error"), wxOK);
-                });
-                failed = true;
-            }
-            else if (!failed)
-            {
-                rxOutSoundDevice->setDescription("FreeDV to Speaker");
-                rxOutSoundDevice->setOnAudioDeviceChanged([](IAudioDevice&, std::string newDeviceName, void* state) {
-                    MainFrame* castedThis = (MainFrame*)state;
-                    castedThis->CallAfter(&MainFrame::handleAudioDeviceChange_<2, true>, std::move(newDeviceName));
-                }, this);
-            }
- 
-            if (failed)
-            {
-                if (rxInSoundDevice)
-                {
-                    rxInSoundDevice.reset();
-                }
-                
-                if (rxOutSoundDevice)
-                {
-                    rxOutSoundDevice.reset();
-                }
-                
-                if (txInSoundDevice)
-                {
-                    txInSoundDevice->stop();
-                    txInSoundDevice.reset();
-                }
-                
-                if (txOutSoundDevice)
-                {
-                    txOutSoundDevice->stop();
-                    txOutSoundDevice.reset();
-                }
-                
-                m_RxRunning = false;
-            
-                engine->stop();
-                engine->setOnEngineError(nullptr, nullptr);
-                delete g_rxUserdata;
-                return;
-            }
-            else
-            {
-                // Re-save sample rates in case they were somehow invalid before
-                // device creation.
-                wxGetApp().appConfiguration.audioConfiguration.soundCard1In.sampleRate = rxInSoundDevice->getSampleRate();
-                wxGetApp().appConfiguration.audioConfiguration.soundCard2Out.sampleRate = rxOutSoundDevice->getSampleRate();
+        }
 
-                wxGetApp().appConfiguration.audioConfiguration.soundCard2In.sampleRate = txInSoundDevice->getSampleRate();
-                wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.sampleRate = txOutSoundDevice->getSampleRate();
+        if (failed)
+        {
+            rxInSoundDevice.reset();
+
+            if (txOutSoundDevice)
+            {
+                txOutSoundDevice->stop();
+                txOutSoundDevice.reset();
             }
+
+            m_RxRunning = false;
+
+            engine->stop();
+            engine->setOnEngineError(nullptr, nullptr);
+            destroy_fifos();
+            delete g_rxUserdata;
+            return;
+        }
+
+        // Re-save sample rates in case they were somehow invalid before
+        // device creation.
+        wxGetApp().appConfiguration.audioConfiguration.soundCard1In.sampleRate = rxInSoundDevice->getSampleRate();
+        if (txOutSoundDevice)
+        {
+            wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.sampleRate = txOutSoundDevice->getSampleRate();
         }
 
         // reset debug stats for FIFOs
@@ -3649,20 +3492,12 @@ void MainFrame::startRxStream()
         g_rxUserdata->micInEQEnable.store(wxGetApp().appConfiguration.filterConfiguration.micInChannel.eqEnable, std::memory_order_relaxed);
         g_rxUserdata->spkOutEQEnable.store(wxGetApp().appConfiguration.filterConfiguration.spkOutChannel.eqEnable, std::memory_order_relaxed);
 
-        if (g_nSoundCards == 1)
-        {
-            designEQFilters(
-                g_rxUserdata, 
-                wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.sampleRate, 
-                0);
-        }
-        else
-        {
-            designEQFilters(
-                g_rxUserdata, 
-                wxGetApp().appConfiguration.audioConfiguration.soundCard2Out.sampleRate, 
-                wxGetApp().appConfiguration.audioConfiguration.soundCard2In.sampleRate);
-        }
+        // No microphone, so no microphone filters; the receive filters run at
+        // the radio input's rate, which is where the receive pipeline ends.
+        designEQFilters(
+            g_rxUserdata, 
+            wxGetApp().appConfiguration.audioConfiguration.soundCard1In.sampleRate, 
+            0);
 
         m_newMicInFilter = m_newSpkOutFilter = false;
         g_mutexProtectingCallbackData.Unlock();
@@ -3686,90 +3521,23 @@ void MainFrame::startRxStream()
         }, nullptr);
         
         rxInSoundDevice->setOnAudioError(errorCallback, this);
-        rxOutSoundDevice->setOnAudioError(errorCallback, this);
         
-        if (txInSoundDevice && txOutSoundDevice)
-        {
-            rxOutSoundDevice->setOnAudioData(&OnRxOutAudioData_, g_rxUserdata);
-            
-            rxOutSoundDevice->setOnAudioOverflow([](IAudioDevice&, void*)
-            {
-                g_AEstatus2[3]++;
-            }, nullptr);
-        
-            rxOutSoundDevice->setOnAudioUnderflow([](IAudioDevice&, void*)
-            {
-                g_AEstatus2[2]++;
-            }, nullptr);
-        }
-        else
-        {
-            rxOutSoundDevice->setOnAudioData([](IAudioDevice& dev, void* data, size_t size, void* state) FREEDV_NONBLOCKING {
-                paCallBackData* cbData = static_cast<paCallBackData*>(state);
-                short* audioData = static_cast<short*>(data);
-                short* tmpOutput = cbData->tmpWriteRxBuffer_.get();
-
-                auto toRead = std::min((size_t)cbData->outfifo1->numUsed(), size);
-                if (toRead < size)
-                {
-                    g_outfifo1_empty.fetch_add(1, std::memory_order_relaxed);
-                }
-
-                if (toRead > 0 && cbData->outfifo1->read(tmpOutput, toRead) != 0)
-                {
-                    // A concurrent reset() (e.g. on a TX/RX transition) can make a
-                    // read that numUsed() just reported as available fail. Treat
-                    // that as silence rather than replaying whatever was left over
-                    // in tmpOutput from the previous callback.
-                    toRead = 0;
-                }
-                auto numChannels = dev.getNumChannels();
-                for (size_t count = 0; count < size; count++)
-                {
-                    for (int j = 0; j < numChannels; j++)
-                    {
-                        *audioData++ = (count < toRead) ? tmpOutput[count] : 0;
-                    }
-                }
-            }, g_rxUserdata);
-            
-            rxOutSoundDevice->setOnAudioOverflow([](IAudioDevice&, void*)
-            {
-                g_AEstatus1[3]++;
-            }, nullptr);
-        
-            rxOutSoundDevice->setOnAudioUnderflow([](IAudioDevice&, void*)
-            {
-                g_AEstatus1[2]++;
-            }, nullptr);
-        }
-        
-        // Create link to allow monitoring TX/VK audio
-        wxGetApp().linkStep = std::make_shared<LinkStep>(rxOutSoundDevice->getSampleRate());
+        // Nothing monitors the transmit audio any more.
+        wxGetApp().linkStep = nullptr;
         
         // start tx/rx processing thread
-        if (txInSoundDevice && txOutSoundDevice)
+        if (txOutSoundDevice)
         {
-            m_txThread = std::make_shared<TxRxThread>(true, txInSoundDevice->getSampleRate(), txOutSoundDevice->getSampleRate(), wxGetApp().linkStep, txInSoundDevice);
-            
-            if (!txInSoundDevice->isRunning())
-            {
-                rxInSoundDevice.reset();
-                rxOutSoundDevice.reset();
-                txInSoundDevice.reset();
-                txOutSoundDevice.reset();
-                m_RxRunning = false;
-                return;
-            }
+            // The transmit side has no input device: it only plays what the
+            // chat modem queues, so it runs at the radio output's rate
+            // throughout and takes its timing from that device.
+            m_txThread = std::make_shared<TxRxThread>(true, txOutSoundDevice->getSampleRate(), txOutSoundDevice->getSampleRate(), nullptr, txOutSoundDevice);
 
             if (!txOutSoundDevice->isRunning())
             {
-                txInSoundDevice->stop();
-
                 rxInSoundDevice.reset();
-                rxOutSoundDevice.reset();
-                txInSoundDevice.reset();
                 txOutSoundDevice.reset();
+                m_txThread = nullptr;
                 m_RxRunning = false;
                 return;
             }
@@ -3777,32 +3545,16 @@ void MainFrame::startRxStream()
             m_txThread->start();
         }
 
-        m_rxThread = std::make_shared<TxRxThread>(false, rxInSoundDevice->getSampleRate(), rxOutSoundDevice->getSampleRate(), wxGetApp().linkStep, rxInSoundDevice);
+        // Decoded audio has nowhere to go, so the receive side's output rate
+        // just matches its input.
+        m_rxThread = std::make_shared<TxRxThread>(false, rxInSoundDevice->getSampleRate(), rxInSoundDevice->getSampleRate(), nullptr, rxInSoundDevice);
 
         rxInSoundDevice->start();
         if (!rxInSoundDevice->isRunning())
         {
-            if (txInSoundDevice) txInSoundDevice->stop();
             if (txOutSoundDevice) txOutSoundDevice->stop();
             
             rxInSoundDevice.reset();
-            rxOutSoundDevice.reset();
-            txInSoundDevice.reset();
-            txOutSoundDevice.reset();
-            m_RxRunning = false;
-            return;
-        }
-
-        rxOutSoundDevice->start();
-        if (!rxOutSoundDevice->isRunning())
-        {
-            if (txInSoundDevice) txInSoundDevice->stop();
-            if (txOutSoundDevice) txOutSoundDevice->stop();
-            rxInSoundDevice->stop();
-
-            rxInSoundDevice.reset();
-            rxOutSoundDevice.reset();
-            txInSoundDevice.reset();
             txOutSoundDevice.reset();
             m_RxRunning = false;
             return;
@@ -3829,11 +3581,9 @@ void MainFrame::startRxStream()
         // Work around an issue where the buttons stay disabled even if there
         // is an error opening one or more audio device(s).
         bool txDevicesRunning = 
-            (!txInSoundDevice || txInSoundDevice->isRunning()) &&
             (!txOutSoundDevice || txOutSoundDevice->isRunning());
         bool rxDevicesRunning = 
-            (rxInSoundDevice && rxInSoundDevice->isRunning()) &&
-            (rxOutSoundDevice && rxOutSoundDevice->isRunning());
+            (rxInSoundDevice && rxInSoundDevice->isRunning());
         m_RxRunning = txDevicesRunning && rxDevicesRunning;
     }
 
@@ -3862,23 +3612,11 @@ bool MainFrame::validateSoundCardSetup(bool silent)
     auto defaultInputDevice = engine->getDefaultAudioDevice(IAudioEngine::AUDIO_ENGINE_IN);
     auto defaultOutputDevice = engine->getDefaultAudioDevice(IAudioEngine::AUDIO_ENGINE_OUT);
     
-    bool hasSoundCard1InDevice = wxGetApp().appConfiguration.audioConfiguration.soundCard1In.deviceName != "none";
-    bool hasSoundCard1OutDevice = wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.deviceName != "none";
-    bool hasSoundCard2InDevice = wxGetApp().appConfiguration.audioConfiguration.soundCard2In.deviceName != "none";
-    bool hasSoundCard2OutDevice = wxGetApp().appConfiguration.audioConfiguration.soundCard2Out.deviceName != "none";
-    
-    g_nSoundCards = 0;
-    if (hasSoundCard1InDevice && hasSoundCard1OutDevice) {
-        g_nSoundCards = 1;
-        if (hasSoundCard2InDevice && hasSoundCard2OutDevice)
-            g_nSoundCards = 2;
-    }
+    g_nSoundCards = radioSoundCardCount();
     
     // For the purposes of validation, number of channels isn't necessary.
     auto soundCard1InDevice = engine->getAudioDevice(wxGetApp().appConfiguration.audioConfiguration.soundCard1In.deviceName, IAudioEngine::AUDIO_ENGINE_IN, wxGetApp().appConfiguration.audioConfiguration.soundCard1In.sampleRate, 1);
     auto soundCard1OutDevice = engine->getAudioDevice(wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.deviceName, IAudioEngine::AUDIO_ENGINE_OUT, wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.sampleRate, 1);
-    auto soundCard2InDevice = engine->getAudioDevice(wxGetApp().appConfiguration.audioConfiguration.soundCard2In.deviceName, IAudioEngine::AUDIO_ENGINE_IN, wxGetApp().appConfiguration.audioConfiguration.soundCard2In.sampleRate, 1);
-    auto soundCard2OutDevice = engine->getAudioDevice(wxGetApp().appConfiguration.audioConfiguration.soundCard2Out.deviceName, IAudioEngine::AUDIO_ENGINE_OUT, wxGetApp().appConfiguration.audioConfiguration.soundCard2Out.sampleRate, 1);
 
     wxString failedDeviceName;
     if (wxGetApp().appConfiguration.audioConfiguration.soundCard1In.deviceName != "none" && !soundCard1InDevice)
@@ -3889,16 +3627,6 @@ bool MainFrame::validateSoundCardSetup(bool silent)
     else if (canRun && wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.deviceName != "none" && !soundCard1OutDevice)
     {
         failedDeviceName = wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.deviceName.get();
-        canRun = false;
-    }
-    else if (canRun && wxGetApp().appConfiguration.audioConfiguration.soundCard2In.deviceName != "none" && !soundCard2InDevice)
-    {
-        failedDeviceName = wxGetApp().appConfiguration.audioConfiguration.soundCard2In.deviceName.get();
-        canRun = false;
-    }
-    else if (canRun && wxGetApp().appConfiguration.audioConfiguration.soundCard2Out.deviceName != "none" && !soundCard2OutDevice)
-    {
-        failedDeviceName = wxGetApp().appConfiguration.audioConfiguration.soundCard2Out.deviceName.get();
         canRun = false;
     }
     
@@ -3944,11 +3672,10 @@ bool MainFrame::validateSoundCardSetup(bool silent)
     }
     else
     {
-        const int MIN_SAMPLE_RATE_ANALOG = 16000;
         const int MIN_SAMPLE_RATE_RADIO = 8000;
         int failedSampleRate = 0;
         int expectedSampleRate = 0;
-        int expectedSampleRate1Out = (g_nSoundCards == 1 ? MIN_SAMPLE_RATE_ANALOG : MIN_SAMPLE_RATE_RADIO);
+        int expectedSampleRate1Out = MIN_SAMPLE_RATE_RADIO;
         
         // Validate sample rates
         if (wxGetApp().appConfiguration.audioConfiguration.soundCard1In.deviceName != "none" && wxGetApp().appConfiguration.audioConfiguration.soundCard1In.sampleRate < MIN_SAMPLE_RATE_RADIO)
@@ -3963,20 +3690,6 @@ bool MainFrame::validateSoundCardSetup(bool silent)
             failedDeviceName = wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.deviceName.get();
             failedSampleRate = wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.sampleRate;
             expectedSampleRate = expectedSampleRate1Out;
-            canRun = false;
-        }
-        else if (wxGetApp().appConfiguration.audioConfiguration.soundCard2In.deviceName != "none" && wxGetApp().appConfiguration.audioConfiguration.soundCard2In.sampleRate < MIN_SAMPLE_RATE_ANALOG)
-        {
-            failedDeviceName = wxGetApp().appConfiguration.audioConfiguration.soundCard2In.deviceName.get();
-            failedSampleRate = wxGetApp().appConfiguration.audioConfiguration.soundCard2In.sampleRate;
-            expectedSampleRate = MIN_SAMPLE_RATE_ANALOG;
-            canRun = false;
-        }
-        else if (wxGetApp().appConfiguration.audioConfiguration.soundCard2Out.deviceName != "none" && wxGetApp().appConfiguration.audioConfiguration.soundCard2Out.sampleRate < MIN_SAMPLE_RATE_ANALOG)
-        {
-            failedDeviceName = wxGetApp().appConfiguration.audioConfiguration.soundCard2Out.deviceName.get();
-            failedSampleRate = wxGetApp().appConfiguration.audioConfiguration.soundCard2Out.sampleRate;
-            expectedSampleRate = MIN_SAMPLE_RATE_ANALOG;
             canRun = false;
         }
         
@@ -4013,26 +3726,6 @@ void MainFrame::OnAudioDeviceError_(IAudioDevice&, std::string const& error, voi
     MainFrame* castedState = (MainFrame*)state;
     log_error("%s", error.c_str());
     castedState->CallAfter(&MainFrame::onAudioDeviceError_, error);
-}
-
-void MainFrame::OnTxInAudioData_(IAudioDevice& dev, void* data, size_t size, void* state) FREEDV_NONBLOCKING
-{
-    paCallBackData* cbData = static_cast<paCallBackData*>(state);
-    short* audioData = static_cast<short*>(data);
-    short* tmpInput = cbData->tmpReadTxBuffer_.get();
-
-    if (!endingTx.load(std::memory_order_acquire)) 
-    {
-        auto numChannels = dev.getNumChannels();
-        for(size_t i = 0; i < size; i++, audioData += numChannels)
-        {
-            tmpInput[i] = audioData[0];
-        }
-        if (isModemRunning.load(std::memory_order_acquire) && cbData->infifo2->write(tmpInput, size)) 
-        {
-            g_infifo2_full.fetch_add(1, std::memory_order_relaxed);
-        }
-    }
 }
 
 void MainFrame::OnTxOutAudioData_(IAudioDevice& dev, void* data, size_t size, void* state) FREEDV_NONBLOCKING
@@ -4136,36 +3829,6 @@ void MainFrame::OnRxInAudioData_(IAudioDevice& dev, void* data, size_t size, voi
     if (isModemRunning.load(std::memory_order_acquire) && cbData->infifo1->write(tmpInput, size)) 
     {
         g_infifo1_full.fetch_add(1, std::memory_order_relaxed);
-    }
-}
-
-void MainFrame::OnRxOutAudioData_(IAudioDevice& dev, void* data, size_t size, void* state) FREEDV_NONBLOCKING
-{
-    paCallBackData* cbData = static_cast<paCallBackData*>(state);
-    short* audioData = static_cast<short*>(data);
-    short* tmpOutput = cbData->tmpWriteRxBuffer_.get();
-
-    auto toRead = std::min((size_t)cbData->outfifo2->numUsed(), size);
-    if (toRead < size)
-    {
-        g_outfifo2_empty.fetch_add(1, std::memory_order_relaxed);
-    }
-
-    if (toRead > 0 && cbData->outfifo2->read(tmpOutput, toRead) != 0)
-    {
-        // Raced with a concurrent reset(); nothing was actually copied
-        // into tmpOutput, so fall back to silence below instead of
-        // replaying stale samples from the previous callback.
-        toRead = 0;
-    }
-
-    auto numChannels = dev.getNumChannels();
-    for (size_t count = 0; count < size; count++)
-    {
-        for (int j = 0; j < numChannels; j++)
-        {
-            *audioData++ = (count < toRead) ? tmpOutput[count] : 0;
-        }
     }
 }
 
