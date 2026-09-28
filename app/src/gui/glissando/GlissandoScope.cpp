@@ -6,6 +6,7 @@
 #include "GlissandoScope.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <memory>
@@ -34,6 +35,17 @@ constexpr int LEFT_MARGIN = 38;
 // many dB above the floor is full white.
 constexpr float DISPLAY_RANGE_DB = 24.0f;
 constexpr float PEAK_RANGE_DB = 30.0f;
+
+// Decoded frames kept on the trace at most, however slowly it scrolls.
+constexpr size_t HEARD_LIMIT = 200;
+
+// Captions are wrapped to this fraction of the trace's width.
+constexpr double CAPTION_WIDTH = 0.62;
+
+wxFont captionTextFont()
+{
+    return wxFont(wxFontInfo(9).Family(wxFONTFAMILY_TELETYPE).Bold());
+}
 
 } // namespace
 
@@ -103,8 +115,37 @@ void GlissandoScope::setActivity(bool receiving, bool transmitting)
 
 void GlissandoScope::clear()
 {
+    // Decoded frames stay: they are placed by frequency and time, not by
+    // pixel, so they are still in the right place on the new scale.
     std::fill(history_.begin(), history_.end(), 0);
     Refresh();
+}
+
+double GlissandoScope::steadySeconds()
+{
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+void GlissandoScope::addHeard(const GlissandoScopeFrame& frame)
+{
+    heard_.push_back(frame);
+    while (heard_.size() > HEARD_LIMIT) heard_.pop_front();
+    Refresh(false);
+}
+
+double GlissandoScope::timeToRow(double seconds) const
+{
+    if (rowSeconds_.empty() || rowSeconds_[0] <= 0.0) return historyHeight_;
+    if (seconds >= rowSeconds_[0]) return -(seconds - rowSeconds_[0]) * scanRate_;
+
+    // Rows are newest first: find the first drawn at or before `seconds`.
+    auto it = std::lower_bound(rowSeconds_.begin(), rowSeconds_.end(), seconds,
+                               [](double row, double t) { return row > t; });
+    size_t i = (size_t)(it - rowSeconds_.begin());
+    if (i >= rowSeconds_.size() || rowSeconds_[i] <= 0.0) return historyHeight_;
+    double newer = rowSeconds_[i - 1];
+    double older = rowSeconds_[i];
+    return (double)(i - 1) + (newer - seconds) / std::max(1e-6, newer - older);
 }
 
 wxRect GlissandoScope::traceRect() const
@@ -135,6 +176,7 @@ void GlissandoScope::OnSize(wxSizeEvent& event)
         historyWidth_ = r.width;
         historyHeight_ = r.height;
         history_.assign((size_t)historyWidth_ * historyHeight_, 0);
+        rowSeconds_.assign((size_t)historyHeight_, 0.0);
     }
     Refresh();
     event.Skip();
@@ -153,6 +195,16 @@ void GlissandoScope::addRow()
     // Scroll everything down one row.
     std::memmove(history_.data() + historyWidth_, history_.data(),
                  (size_t)historyWidth_ * (historyHeight_ - 1));
+    std::move_backward(rowSeconds_.begin(), rowSeconds_.end() - 1, rowSeconds_.end());
+    rowSeconds_[0] = steadySeconds();
+
+    // Frames that have scrolled off the bottom are done with.
+    double oldest = rowSeconds_.back();
+    while (!heard_.empty() && oldest > 0.0 &&
+           heard_.front().startSeconds + heard_.front().symbolSeconds * heard_.front().melody.size() < oldest)
+    {
+        heard_.pop_front();
+    }
 
     unsigned char* row = history_.data();
     double nyquist = 0.0;
@@ -276,6 +328,8 @@ void GlissandoScope::OnPaint(wxPaintEvent&)
         gc->DrawRectangle(trace.x, trace.y, trace.width, 30);
     }
 
+    paintHeard(gc.get(), trace);
+
     if (hoverX_ >= 0)
     {
         gc->SetPen(wxPen(wxColour(255, 255, 255, 140), 1));
@@ -345,5 +399,147 @@ void GlissandoScope::OnPaint(wxPaintEvent&)
         gc->SetBrush(wxBrush(wxColour(0, 0, 0, 170)));
         gc->DrawRectangle(lx - 3, trace.y + 4, tw + 6, th + 2);
         gc->DrawText(label, lx, trace.y + 5);
+    }
+}
+
+void GlissandoScope::paintHeard(wxGraphicsContext* gc, const wxRect& trace)
+{
+    auto yOf = [&](double seconds) { return trace.y + timeToRow(seconds); };
+    const double bottom = trace.y + trace.height;
+
+    for (const GlissandoScopeFrame& frame : heard_)
+    {
+        const size_t symbols = frame.melody.size();
+        if (symbols == 0) continue;
+        const double L = frame.symbolSeconds;
+        double yFirst = yOf(frame.startSeconds);                // the frame's start, lower down
+        double yLast = yOf(frame.startSeconds + L * symbols);   // its end, higher up
+        if (yLast > bottom || yFirst < trace.y - 400) continue;
+
+        // The tune as the receiver heard it: each symbol's held note lit up
+        // over the phosphor, as a bar along the hold where the scope
+        // scrolls fast enough to give it a few rows, otherwise as a bead.
+        // The glides are left to the phosphor: drawn across the trace they
+        // would zigzag over everything. Motif notes are the brighter ones.
+        wxGraphicsPath data = gc->CreatePath();
+        wxGraphicsPath motif = gc->CreatePath();
+        for (size_t k = 0; k < symbols; k++)
+        {
+            int note = std::min(7, std::max(0, frame.melody[k]));
+            double x = hzToX(frame.notesHz[(size_t)note]);
+            double holdStart = frame.startSeconds + L * (k + frame.glide);
+            double y0 = yOf(holdStart);                     // lower
+            double y1 = yOf(frame.startSeconds + L * (k + 1));
+            if (y1 > bottom + 2 || y0 < trace.y - 2) continue;
+
+            bool isMotif = k < frame.motif.size() && frame.motif[k];
+            wxGraphicsPath& path = isMotif ? motif : data;
+            double r = isMotif ? 2.2 : 1.5;
+            if (y0 - y1 >= 2 * r + 1)
+                path.AddRoundedRectangle(x - r, y1, 2 * r, y0 - y1, r);
+            else
+                path.AddCircle(x, (y0 + y1) / 2, r);
+        }
+        gc->SetPen(*wxTRANSPARENT_PEN);
+        gc->SetBrush(wxBrush(wxColour(232, 236, 230, 130)));
+        gc->FillPath(data);
+        gc->SetBrush(wxBrush(wxColour(255, 252, 240, 235)));
+        gc->FillPath(motif);
+
+        // Down the left edge, the frame's sequence: a bright bar for each
+        // motif the receiver locked on to, a thin one for the data between.
+        double edge = trace.x + 3;
+        gc->SetPen(wxPen(wxColour(128, 124, 114, 200), 1));
+        gc->StrokeLine(edge, yFirst, edge, yLast);
+        for (size_t k = 0; k < symbols;)
+        {
+            if (k < frame.motif.size() && frame.motif[k])
+            {
+                size_t end = k;
+                while (end < symbols && end < frame.motif.size() && frame.motif[end]) end++;
+                gc->SetPen(wxPen(Colour::Glow, 3));
+                gc->StrokeLine(edge, yOf(frame.startSeconds + L * k), edge, yOf(frame.startSeconds + L * end));
+                k = end;
+            }
+            else
+            {
+                k++;
+            }
+        }
+
+        // The caption: tempo and segment, then what this frame added to the
+        // chat frame, wrapped to fit.
+        struct Piece
+        {
+            wxString text;
+            wxFont font;
+            wxColour colour;
+            double w = 0, h = 0;
+        };
+        std::vector<Piece> pieces;
+        pieces.push_back({frame.title, font(FontRole::Caption), Colour::Dim});
+        for (const GlissandoScopeFrame::Token& token : frame.tokens)
+        {
+            switch (token.role)
+            {
+                case GlissandoScopeFrame::Role::Kind:
+                    pieces.push_back({token.text, font(FontRole::Plate), Colour::Glow});
+                    break;
+                case GlissandoScopeFrame::Role::Station:
+                    pieces.push_back({token.text, font(FontRole::Button), Colour::Bone});
+                    break;
+                case GlissandoScopeFrame::Role::Field:
+                case GlissandoScopeFrame::Role::Unknown:
+                    pieces.push_back({token.text, font(FontRole::Caption), Colour::Dim});
+                    break;
+                case GlissandoScopeFrame::Role::Text:
+                    pieces.push_back({wxString(wxUniChar(0x201C)) + token.text + wxUniChar(0x201D), captionTextFont(),
+                                      Colour::Phosphor});
+                    break;
+            }
+        }
+        if (frame.completed) pieces.push_back({_("RECEIVED"), font(FontRole::Plate), Colour::Glow});
+
+        const double gap = 7, pad = 5;
+        double maxWidth = std::max(120.0, trace.width * CAPTION_WIDTH);
+        double lineH = 0, x = 0, widest = 0;
+        int lines = 1;
+        for (Piece& p : pieces)
+        {
+            gc->SetFont(p.font, p.colour);
+            gc->GetTextExtent(p.text, &p.w, &p.h);
+            lineH = std::max(lineH, p.h);
+            if (x > 0 && x + gap + p.w > maxWidth)
+            {
+                lines++;
+                x = 0;
+            }
+            x += (x > 0 ? gap : 0) + p.w;
+            widest = std::max(widest, x);
+        }
+        double chipW = widest + 2 * pad;
+        double chipH = lines * lineH + 2 * pad - 2;
+        double cx = frame.voice == 0 ? trace.x + 12 : trace.x + trace.width - chipW - 8;
+        double cy = (yFirst + yLast) / 2 - chipH / 2;
+        cy = std::min(bottom - chipH - 2, std::max<double>(trace.y + 2, cy));
+
+        gc->SetBrush(wxBrush(wxColour(0, 0, 0, 180)));
+        gc->SetPen(frame.completed ? wxPen(wxColour(255, 252, 240, 210), 1) : wxPen(wxColour(200, 198, 192, 80), 1));
+        gc->DrawRoundedRectangle(cx, cy, chipW, chipH, 4);
+
+        x = 0;
+        double y = cy + pad - 1;
+        for (const Piece& p : pieces)
+        {
+            if (x > 0 && x + gap + p.w > maxWidth)
+            {
+                x = 0;
+                y += lineH;
+            }
+            if (x > 0) x += gap;
+            gc->SetFont(p.font, p.colour);
+            gc->DrawText(p.text, cx + pad + x, y + (lineH - p.h) / 2);
+            x += p.w;
+        }
     }
 }

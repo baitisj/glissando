@@ -117,11 +117,16 @@ void Reassembler::reset()
 }
 
 bool Reassembler::add(const Payload& payload, long long startSample, long long duplicateSamples,
-                      LinkBurst& burstOut)
+                      LinkBurst& burstOut, SegmentProgress* progressOut)
 {
+    SegmentProgress progress;
+    SegmentProgress& p = progressOut != nullptr ? *progressOut : progress;
+    p = SegmentProgress();
+
     if (haveLast_ && payload == lastPayload_ &&
         std::llabs(startSample - lastStartSample_) <= duplicateSamples)
     {
+        p.duplicate = true;
         return false;
     }
     haveLast_ = true;
@@ -132,7 +137,17 @@ bool Reassembler::add(const Payload& payload, long long startSample, long long d
     bool text = getBits(payload, position, 1) != 0;
     int index = (int)getBits(payload, position, 3);
     bool last = getBits(payload, position, 1) != 0;
-    if (index == FILLER_SEGMENT_INDEX) return false;
+    p.text = text;
+    p.index = index;
+    p.last = last;
+    if (index == FILLER_SEGMENT_INDEX)
+    {
+        p.filler = true;
+        return false;
+    }
+
+    uint8_t data[SEGMENT_DATA_BYTES];
+    for (int i = 0; i < SEGMENT_DATA_BYTES; i++) data[i] = (uint8_t)getBits(payload, position, 8);
 
     Partial& partial = partial_[text ? 1 : 0];
     if (index == 0)
@@ -143,16 +158,21 @@ bool Reassembler::add(const Payload& payload, long long startSample, long long d
     else if (!partial.active || index != partial.nextIndex)
     {
         partial = Partial();
+        if (progressOut != nullptr)
+        {
+            p.knownFrom = index * SEGMENT_DATA_BYTES;
+            p.bytes.assign((size_t)p.knownFrom, 0);
+            p.bytes.insert(p.bytes.end(), data, data + SEGMENT_DATA_BYTES);
+        }
         return false;
     }
 
-    for (int i = 0; i < SEGMENT_DATA_BYTES; i++)
-    {
-        partial.bytes.push_back((uint8_t)getBits(payload, position, 8));
-    }
+    partial.bytes.insert(partial.bytes.end(), data, data + SEGMENT_DATA_BYTES);
     partial.nextIndex = index + 1;
+    if (progressOut != nullptr) p.bytes = partial.bytes;
 
     if (!last) return false;
+    p.completed = true;
 
     int size = text ? textBytes_ : signallingBytes_;
     partial.bytes.resize((size_t)size, 0);

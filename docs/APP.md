@@ -68,6 +68,7 @@ longer changes anything.
 | Control | What it does |
 | --- | --- |
 | Visi-scope | Receive spectrum over the melody's part of the passband, white phosphor on black. The scale's notes are ruled across it with the receiver's +/-25 Hz search band shaded. Double click to put the lowest note where you clicked; mouse wheel nudges the tuning 1 Hz (shift: 0.1 Hz). |
+| Decoded frames | Every frame the receiver decodes is written back on the visi-scope where it was heard, and scrolls down with it. Its held notes are lit over the phosphor (the three signature motifs brighter, and marked as bars down the left edge), and a caption beside it reads out what that frame added to the chat frame, which Glissando carries nine bytes at a time: first the header fields as each one becomes whole (MESSAGE, TO YOU, DE K6ABC, the message number, which part of how many), then the characters of the text. A frame that finishes a chat frame says RECEIVED. Frames addressed to other stations are written up too. |
 | Scan rate | Waterfall rows per second, 0.5 to 20. |
 | Duet voice | Widens the scope to show the duet gear's high voice (C6..E7). |
 | All tempos | Decode every gear at once, so a station that shifts gear is still heard. Off: only the chosen gear (and the one automatic shifting picked). |
@@ -80,6 +81,8 @@ longer changes anything.
 | Engage | Starts and stops audio. |
 | Transmission log | Brings the chat window back if it was closed. |
 | Preferences | Drops down Options, Sound cards, Rig control (CAT and PTT), Audio filters and Easy setup. Sound cards, rig control and easy setup only change while disengaged. The app opens only the radio's two audio streams, input from the radio and output to it, so Sound cards and Easy setup ask for nothing else; leave the output as none to only listen. |
+
+![The visi-scope at Presto, 10 rows a second, with a message from K6ABC and W1AW's acknowledgement written on it as each frame decoded (a simulated channel, drawn by the scope's own code)](images/visi-scope-captions.png)
 
 Glissando keeps its own settings and never reads or changes FreeDV's, so the
 two can be installed side by side. On Linux the settings are in `~/.glissando.conf`

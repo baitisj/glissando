@@ -558,6 +558,7 @@ void GlissandoConsole::refreshTelemetry()
     receivingLamp_->SetLit(t.receiving);
     transmittingLamp_->SetLit(t.transmitting);
     scope_->setActivity(t.receiving, t.transmitting);
+    for (const GlissandoScopeFrame& frame : host_->glissandoHeardFrames()) scope_->addHeard(frame);
 
     snrMeter_->SetValue(t.haveReport ? t.snrDb : std::nan(""));
     dopplerReadout_->SetText(t.haveReport ? wxString::Format("%.2f Hz", t.dopplerHz) : wxString("---"));

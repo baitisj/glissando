@@ -94,6 +94,14 @@ struct ModemSettings
 // tuningOffsetHz is zero.
 std::vector<float> modulate(const std::vector<Payload>& payloads, const ModemSettings& settings);
 
+// The tune a frame carrying this payload sings: the note index (0 lowest
+// .. 7 highest) of each of its SYMBOLS_PER_FRAME symbols, signature motifs
+// included. A receiver can redraw what it decoded with it.
+std::array<int, SYMBOLS_PER_FRAME> payloadMelody(const Payload& payload);
+
+// True for the symbols of the three signature motifs (0-6, 39-45, 79-85).
+bool isMotifSymbol(int symbol);
+
 struct ChannelReport
 {
     double snrDb = 0.0;         // in 2500 Hz

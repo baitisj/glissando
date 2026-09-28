@@ -35,6 +35,7 @@
 #ifndef AUDIO_PIPELINE__TEXT_MESSAGING_MODEM_H
 #define AUDIO_PIPELINE__TEXT_MESSAGING_MODEM_H
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -143,6 +144,25 @@ public:
 
     GlissandoStatus glissandoStatus() const;
 
+    // Every Glissando frame heard, one entry per voice decoded, so the
+    // console can write what each one said on its waterfall as it arrives.
+    // Kept until taken, at most the newest GLISSANDO_HEARD_LIMIT.
+    struct GlissandoHeard
+    {
+        uint64_t startMs = 0;           // steady clock, when the frame began on the air
+        int gear = 0;
+        Glissando::Scale scale = Glissando::Scale::Pentatonic;
+        int voice = 0;
+        std::array<double, Glissando::NOTES> notesHz{};    // as heard: tuning and drift included
+        std::array<int, Glissando::SYMBOLS_PER_FRAME> melody{};
+        double snrDb = 0.0;
+        Glissando::SegmentProgress segment;
+    };
+
+    static constexpr size_t GLISSANDO_HEARD_LIMIT = 64;
+
+    std::vector<GlissandoHeard> takeGlissandoHeard();
+
     // The protocol timers suited to what is on the air now: the codec2
     // defaults, or ones sized to the Glissando tempo we transmit at.
     TextMessaging::AirTiming airTiming() const;
@@ -193,6 +213,7 @@ private:
     GlissandoConfig glissando_;
     GlissandoStatus glissandoStatus_;
     Glissando::Reassembler reassembler_;
+    std::vector<GlissandoHeard> glissandoHeard_;
     std::unique_ptr<Glissando::StreamingReceiver> glissandoRx_;
     std::atomic<bool> glissandoOn_;
 };

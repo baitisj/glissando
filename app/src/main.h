@@ -428,6 +428,7 @@ public:
     virtual GlissandoTelemetry glissandoTelemetry() override;
     virtual void glissandoSettingsChanged(const GlissandoConsoleSettings& settings) override;
     virtual bool glissandoSpectrum(std::vector<float>& magnitudesDb, double& nyquistHz) override;
+    virtual std::vector<GlissandoScopeFrame> glissandoHeardFrames() override;
     virtual void glissandoSetAudioRunning(bool running) override;
     virtual void glissandoAbortTransmit() override;
     virtual void glissandoSetRigFrequency(double hz) override;

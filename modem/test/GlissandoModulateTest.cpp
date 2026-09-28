@@ -155,6 +155,47 @@ void testTuningOffset()
     CHECK(worst < 1e-2);
 }
 
+// payloadMelody() names the note each symbol actually holds on the air.
+void testMelody()
+{
+    Random rng(7);
+    Payload payload{};
+    for (uint8_t& bit : payload) bit = (uint8_t)(rng.next() & 1);
+
+    ModemSettings settings;
+    settings.gear = 1;
+    const GearInfo& gear = gearInfo(settings.gear);
+    std::vector<float> x = modulate({payload}, settings);
+    std::array<int, SYMBOLS_PER_FRAME> melody = payloadMelody(payload);
+    std::array<double, NOTES> notes = scaleNotes(settings.scale, 0);
+
+    int L = gear.samplesPerSymbol();
+    int wrong = 0;
+    int motif = 0;
+    for (int k = 0; k < SYMBOLS_PER_FRAME; k++)
+    {
+        // Count zero crossings over the settled part of the sustain.
+        int from = k * L + (int)(0.55 * L);
+        int to = k * L + (int)(0.95 * L);
+        int crossings = 0;
+        for (int n = from + 1; n < to; n++)
+        {
+            if ((x[(size_t)n - 1] < 0.0f) != (x[(size_t)n] < 0.0f)) crossings++;
+        }
+        double hz = crossings / 2.0 / ((to - from) / (double)SAMPLE_RATE_HZ);
+        int nearest = 0;
+        for (int i = 1; i < NOTES; i++)
+        {
+            if (std::fabs(notes[(size_t)i] - hz) < std::fabs(notes[(size_t)nearest] - hz)) nearest = i;
+        }
+        if (nearest != melody[(size_t)k]) wrong++;
+        if (isMotifSymbol(k)) motif++;
+    }
+    CHECK(wrong == 0);
+    CHECK(motif == 21);
+    CHECK(isMotifSymbol(0) && isMotifSymbol(45) && !isMotifSymbol(46) && isMotifSymbol(85));
+}
+
 } // namespace
 
 int main()
@@ -163,6 +204,7 @@ int main()
     testGears();
     testScales();
     testTuningOffset();
+    testMelody();
     if (failures == 0) printf("glissando modulation tests passed\n");
     return failures == 0 ? 0 : 1;
 }

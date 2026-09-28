@@ -21,8 +21,7 @@
 #include <wx/timer.h>
 
 #include "GlissandoModem.h"
-
-class GlissandoScope;
+#include "GlissandoScope.h"
 
 namespace Chaotica
 {
@@ -83,6 +82,9 @@ public:
 
     // Averaged receive spectrum for the visi-scope; see GlissandoScope.
     virtual bool glissandoSpectrum(std::vector<float>& magnitudesDb, double& nyquistHz) = 0;
+
+    // Frames decoded since the last call, to write on the visi-scope.
+    virtual std::vector<GlissandoScopeFrame> glissandoHeardFrames() = 0;
 
     virtual void glissandoSetAudioRunning(bool running) = 0;
 

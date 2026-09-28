@@ -16,6 +16,8 @@
 #include "gui/dialogs/dlg_text_messaging.h"
 #include "pipeline/TextMessagingModem.h"
 #include "pipeline/TextMessagingTransport.h"
+#include "text_messaging/FrameAnnotation.h"
+#include "text_messaging/FrameCodec.h"
 #include "text_messaging/TextMessagingSession.h"
 #include "util/logging/ulog.h"
 
@@ -42,6 +44,28 @@ uint64_t steadyNowMs()
     return (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
                std::chrono::steady_clock::now().time_since_epoch())
         .count();
+}
+
+wxString fromAir(const std::string& text)
+{
+    // Chat text is UTF-8, but a frame can end part way through a character;
+    // show what there is rather than nothing.
+    wxString s = wxString::FromUTF8(text.data(), text.size());
+    return s.empty() && !text.empty() ? wxString::From8BitData(text.data(), text.size()) : s;
+}
+
+GlissandoScopeFrame::Role scopeRole(TextMessaging::AnnotationToken::Role role)
+{
+    using Role = TextMessaging::AnnotationToken::Role;
+    switch (role)
+    {
+        case Role::Kind: return GlissandoScopeFrame::Role::Kind;
+        case Role::Station: return GlissandoScopeFrame::Role::Station;
+        case Role::Field: return GlissandoScopeFrame::Role::Field;
+        case Role::Text: return GlissandoScopeFrame::Role::Text;
+        case Role::Unknown: return GlissandoScopeFrame::Role::Unknown;
+    }
+    return GlissandoScopeFrame::Role::Field;
 }
 
 bool sameTiming(const TextMessaging::AirTiming& a, const TextMessaging::AirTiming& b)
@@ -191,6 +215,62 @@ bool MainFrame::glissandoSpectrum(std::vector<float>& magnitudesDb, double& nyqu
     magnitudesDb.assign(g_avmag_waterfall, g_avmag_waterfall + MODEM_STATS_NSPEC);
     nyquistHz = freedvInterface.getTxModemSampleRate() / 2.0;
     return nyquistHz > 0.0;
+}
+
+std::vector<GlissandoScopeFrame> MainFrame::glissandoHeardFrames()
+{
+    std::vector<GlissandoScopeFrame> frames;
+    std::vector<TextMessagingModem::GlissandoHeard> heard = textMessagingModem().takeGlissandoHeard();
+    if (heard.empty()) return frames;
+
+    // Destinations are sent as a CRC of the callsign: name the ones we can,
+    // ourselves and the stations we have heard.
+    auto& session = TextMessaging::TextMessagingSession::instance();
+    std::string me = session.protocol().myCallsign();
+    uint32_t myCrc = me.empty() ? 0 : TextMessaging::FrameCodec::callsignCrc24(me);
+    std::vector<TextMessaging::HeardStation> stations = session.stations().stations();
+    TextMessaging::CallsignForCrc nameFor = [&](uint32_t crc) -> std::string {
+        if (myCrc != 0 && crc == myCrc) return "YOU";
+        for (const TextMessaging::HeardStation& station : stations)
+        {
+            if (TextMessaging::FrameCodec::callsignCrc24(station.callsign) == crc) return station.callsign;
+        }
+        return std::string();
+    };
+
+    for (const TextMessagingModem::GlissandoHeard& h : heard)
+    {
+        const Glissando::GearInfo& gear = Glissando::gearInfo(h.gear);
+        const Glissando::SegmentProgress& segment = h.segment;
+
+        GlissandoScopeFrame frame;
+        // Both are on the steady clock.
+        frame.startSeconds = h.startMs / 1000.0;
+        frame.symbolSeconds = gear.symbolSeconds;
+        frame.glide = gear.glide;
+        frame.voice = h.voice;
+        frame.notesHz = h.notesHz;
+        frame.melody.assign(h.melody.begin(), h.melody.end());
+        for (int k = 0; k < Glissando::SYMBOLS_PER_FRAME; k++) frame.motif.push_back(Glissando::isMotifSymbol(k));
+        frame.completed = segment.completed;
+
+        wxString part = segment.filler ? wxString(_("FILLER"))
+                                       : wxString::Format(segment.text ? _("TEXT %d") : _("SIGNAL %d"),
+                                                          segment.index + 1);
+        frame.title = wxString::Format("%s  %s  %+.0f dB", wxString(gear.tempo).Upper(), part, h.snrDb);
+
+        if (!segment.filler)
+        {
+            for (const TextMessaging::AnnotationToken& token :
+                 TextMessaging::describeSegment(segment.bytes, segment.index * Glissando::SEGMENT_DATA_BYTES,
+                                                segment.knownFrom, segment.text, nameFor))
+            {
+                frame.tokens.push_back({scopeRole(token.role), fromAir(token.text)});
+            }
+        }
+        frames.push_back(std::move(frame));
+    }
+    return frames;
 }
 
 void MainFrame::glissandoSetAudioRunning(bool running)
