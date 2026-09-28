@@ -436,7 +436,8 @@ public:
     virtual void glissandoSetRigFrequency(double hz) override;
     virtual std::vector<double> glissandoFrequencyPresets() override;
     virtual void glissandoShowChat() override;
-    virtual void glissandoShowSnoop() override;
+    virtual void glissandoShowSnoop(bool show) override;
+    virtual bool glissandoSnoopShown() override;
     virtual bool glissandoSetupAvailable(GlissandoSetup setup) override;
     virtual void glissandoOpenSetup(GlissandoSetup setup) override;
     virtual void glissandoConsoleClosed(const wxRect& lastPosition) override;

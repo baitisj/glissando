@@ -572,14 +572,24 @@ void Readout::SetText(const wxString& text)
     Refresh();
 }
 
-void Readout::paint(wxGraphicsContext* gc, const wxSize& size)
+int Readout::WindowTop()
 {
+    std::unique_ptr<wxGraphicsContext> gc(wxGraphicsRenderer::GetDefaultRenderer()->CreateMeasuringContext());
+    if (!gc) return 16;
+
     gc->SetFont(font(FontRole::Caption), Colour::Dim);
     double tw = 0, th = 0;
     gc->GetTextExtent("X", &tw, &th);
+    return (int)std::ceil(th + 4);
+}
+
+void Readout::paint(wxGraphicsContext* gc, const wxSize& size)
+{
+    gc->SetFont(font(FontRole::Caption), Colour::Dim);
     drawSpacedText(gc, caption_, 4, 1, 1.5);
 
-    double y = th + 4;
+    double tw = 0, th = 0;
+    double y = WindowTop();
     gc->SetPen(wxPen(Colour::PlateEdge, 1));
     gc->SetBrush(wxBrush(Colour::PlateShadow));
     gc->DrawRoundedRectangle(2, y, size.x - 4, size.y - y - 2, 3);

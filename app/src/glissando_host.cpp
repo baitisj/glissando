@@ -333,8 +333,15 @@ void MainFrame::glissandoShowChat()
     OnToolsTextMessaging(event);
 }
 
-void MainFrame::glissandoShowSnoop()
+void MainFrame::glissandoShowSnoop(bool show)
 {
+    if (!show)
+    {
+        // Hidden, not destroyed: it keeps listening for when it comes back.
+        if (m_snoopDialog != nullptr) m_snoopDialog->Hide();
+        return;
+    }
+
     if (m_snoopDialog == nullptr)
     {
         m_snoopDialog = new SnoopDialog(this);
@@ -350,6 +357,11 @@ void MainFrame::glissandoShowSnoop()
     m_snoopDialog->Show();
     m_snoopDialog->Iconize(false);
     m_snoopDialog->Raise();
+}
+
+bool MainFrame::glissandoSnoopShown()
+{
+    return m_snoopDialog != nullptr && m_snoopDialog->IsShown();
 }
 
 bool MainFrame::glissandoSetupAvailable(GlissandoSetup setup)

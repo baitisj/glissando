@@ -182,6 +182,10 @@ public:
 
     void SetText(const wxString& text);
 
+    // Where the display window starts below the caption, so that controls
+    // beside a readout can line up with the window rather than the caption.
+    static int WindowTop();
+
 protected:
     virtual void paint(wxGraphicsContext* gc, const wxSize& size) override;
 

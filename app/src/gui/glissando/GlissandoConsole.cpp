@@ -323,31 +323,47 @@ void GlissandoConsole::buildControls()
     auto* commandPlate = new Panel(page, _("Command"));
     auto* commandRow = row();
 
+    // Two columns on one grid: each switch on the left sits level with the
+    // row beside it, Engage with the dial's window, then a row of buttons each.
+    const int COLUMN = 190;
+    const int READOUT = 46;
+    const int ROW = 32;
+    const int GAP = 6;
+    const int RIM = 3;                              // Button paints this far in
+    int windowTop = Readout::WindowTop();
+    int windowHeight = READOUT - windowTop - 2;     // as Readout paints it
+    int engageTop = windowTop - RIM;
+    int engageHeight = windowHeight + 2 * RIM;
+
     auto* switches = new wxBoxSizer(wxVERTICAL);
-    engageButton_ = new Button(commandPlate, wxID_ANY, _("Engage"), true, wxSize(170, 34));
+    engageButton_ = new Button(commandPlate, wxID_ANY, _("Engage"), true, wxSize(COLUMN, engageHeight));
     engageButton_->SetToolTip(_("Start or stop the audio."));
-    chatButton_ = new Button(commandPlate, wxID_ANY, _("Transmission log"), false, wxSize(170, 34));
+    chatButton_ = new Button(commandPlate, wxID_ANY, _("Transmission log"), false, wxSize(COLUMN, ROW));
     chatButton_->SetToolTip(_("Open the chat window."));
-    preferencesButton_ = new Button(commandPlate, wxID_ANY, _("Preferences"), false, wxSize(170, 34));
+    preferencesButton_ = new Button(commandPlate, wxID_ANY, _("Preferences"), false, wxSize(COLUMN, ROW));
     preferencesButton_->SetToolTip(_("Options, sound cards, rig control and audio filters."));
-    switches->Add(engageButton_, 0, wxBOTTOM, 4);
-    switches->Add(chatButton_, 0, wxBOTTOM, 4);
+    switches->AddSpacer(engageTop);
+    switches->Add(engageButton_, 0, wxBOTTOM, READOUT - engageTop - engageHeight + GAP);
+    switches->Add(chatButton_, 0, wxBOTTOM, GAP);
     switches->Add(preferencesButton_, 0);
     commandRow->Add(switches, 0, wxRIGHT, 10);
 
     auto* dial = new wxBoxSizer(wxVERTICAL);
-    rigReadout_ = new Readout(commandPlate, _("Radio dial"), wxSize(190, 46));
-    dial->Add(rigReadout_, 0, wxEXPAND | wxBOTTOM, 6);
+    rigReadout_ = new Readout(commandPlate, _("Radio dial"), wxSize(COLUMN, READOUT));
+    dial->Add(rigReadout_, 0, wxEXPAND | wxBOTTOM, GAP);
     auto* dialButtons = row();
-    presetsButton_ = new Button(commandPlate, wxID_ANY, _("Presets"), false, wxSize(92, 32));
+    presetsButton_ = new Button(commandPlate, wxID_ANY, _("Presets"), false, wxSize(92, ROW));
     presetsButton_->SetToolTip(_("Pick a frequency from your list (edited in Preferences, Options)."));
     dialButtons->Add(presetsButton_, 0, wxRIGHT, 6);
-    rigButton_ = new Button(commandPlate, wxID_ANY, _("Set"), false, wxSize(92, 32));
+    rigButton_ = new Button(commandPlate, wxID_ANY, _("Set"), false, wxSize(92, ROW));
     rigButton_->SetToolTip(_("Type in a dial frequency. With rig control set up, the radio tunes to it."));
     dialButtons->Add(rigButton_, 0);
-    dial->Add(dialButtons, 0, wxBOTTOM, 4);
-    snoopButton_ = new Button(commandPlate, wxID_ANY, _("Snooper"), false, wxSize(190, 32));
-    snoopButton_->SetToolTip(_("Open the snooping window: every message heard, whoever it was sent to."));
+    dial->Add(dialButtons, 0, wxBOTTOM, GAP);
+
+    // Lit while the snooping window is up, the way Engage is lit while the
+    // audio runs.
+    snoopButton_ = new Button(commandPlate, wxID_ANY, _("Snooper"), true, wxSize(COLUMN, ROW));
+    snoopButton_->SetToolTip(_("Open or close the snooping window: every message heard, whoever it was sent to."));
     dial->Add(snoopButton_, 0);
     commandRow->Add(dial, 0);
 
@@ -413,7 +429,10 @@ void GlissandoConsole::buildControls()
         refreshTelemetry();
     });
     chatButton_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { host_->glissandoShowChat(); });
-    snoopButton_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { host_->glissandoShowSnoop(); });
+    snoopButton_->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent&) {
+        host_->glissandoShowSnoop(snoopButton_->IsChecked());
+        snoopButton_->SetChecked(host_->glissandoSnoopShown());
+    });
     preferencesButton_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { showPreferences(); });
     presetsButton_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { showFrequencyPresets(); });
     rigButton_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { enterRigFrequency(); });
@@ -604,6 +623,9 @@ void GlissandoConsole::refreshTelemetry()
 
     rigReadout_->SetText(t.rigFrequencyKnown ? wxString::Format("%.3f kHz", t.rigFrequencyHz / 1000.0)
                                              : wxString("---"));
+
+    // The snooping window can be closed from its own title bar.
+    snoopButton_->SetChecked(host_->glissandoSnoopShown());
 }
 
 void GlissandoConsole::OnTimer(wxTimerEvent&)

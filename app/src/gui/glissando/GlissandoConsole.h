@@ -99,8 +99,10 @@ public:
 
     virtual void glissandoShowChat() = 0;
 
-    // Every station's traffic, not only ours.
-    virtual void glissandoShowSnoop() = 0;
+    // Every station's traffic, not only ours: shows or hides its window,
+    // and says whether it is showing.
+    virtual void glissandoShowSnoop(bool show) = 0;
+    virtual bool glissandoSnoopShown() = 0;
 
     // Some setup can only change while the audio is stopped.
     virtual bool glissandoSetupAvailable(GlissandoSetup setup) = 0;

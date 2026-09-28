@@ -880,7 +880,7 @@ bool MainApp::OnInit()
     frame->openGlissandoConsole();
     frame->CallAfter([]() {
         wxGetApp().frame->glissandoShowChat();
-        wxGetApp().frame->glissandoShowSnoop();
+        wxGetApp().frame->glissandoShowSnoop(true);
     });
 
     // Begin test execution
