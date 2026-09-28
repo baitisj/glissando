@@ -614,7 +614,25 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
         // The same waveform can be decoded as more than one tempo (Presto
         // and the duet's low voice), or by two overlapping searches.
         long long duplicate = Glissando::gearInfo(decode.gear).samplesPerSymbol();
-        complete = reassembler_.add(d.payload, d.startSample, duplicate, burst);
+        GlissandoHeard heard;
+        complete = reassembler_.add(d.payload, d.startSample, duplicate, burst, &heard.segment);
+
+        if (!heard.segment.duplicate)
+        {
+            long long age = glissandoRx_->samplesReceived() - d.startSample;
+            uint64_t now = steadyMs();
+            uint64_t ageMs = (uint64_t)std::max(0LL, age * 1000 / Glissando::SAMPLE_RATE_HZ);
+            heard.startMs = now > ageMs ? now - ageMs : 0;
+            heard.gear = decode.gear;
+            heard.scale = d.scale;
+            heard.voice = d.voice;
+            heard.notesHz = Glissando::scaleNotes(d.scale, d.voice);
+            for (double& hz : heard.notesHz) hz += glissando_.tuningOffsetHz + d.frequencyOffsetHz;
+            heard.melody = Glissando::payloadMelody(d.payload);
+            heard.snrDb = d.report.snrDb;
+            if (glissandoHeard_.size() >= GLISSANDO_HEARD_LIMIT) glissandoHeard_.erase(glissandoHeard_.begin());
+            glissandoHeard_.push_back(std::move(heard));
+        }
     }
     lastSyncMs_.store(steadyMs(), std::memory_order_release);
 
@@ -639,6 +657,14 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
         callback = frameCallback_;
     }
     if (callback) callback(frame, snr);
+}
+
+std::vector<TextMessagingModem::GlissandoHeard> TextMessagingModem::takeGlissandoHeard()
+{
+    std::lock_guard<std::mutex> lock(glissandoMutex_);
+    std::vector<GlissandoHeard> heard;
+    heard.swap(glissandoHeard_);
+    return heard;
 }
 
 TextMessagingModem& textMessagingModem()

@@ -21,8 +21,7 @@
 #include <wx/timer.h>
 
 #include "GlissandoModem.h"
-
-class GlissandoScope;
+#include "GlissandoScope.h"
 
 namespace Chaotica
 {
@@ -42,6 +41,7 @@ struct GlissandoConsoleSettings
     bool listenAllGears = true;     // decode every tempo, not just ours
     double scanRate = 4.0;          // visi-scope rows per second
     bool wideScope = false;         // show the duet's high voice too
+    bool lens = true;               // the visi-scope's time lens: recent rows magnified, old ones kept
 };
 
 // What the console shows on its meters, gathered by the host.
@@ -83,6 +83,9 @@ public:
 
     // Averaged receive spectrum for the visi-scope; see GlissandoScope.
     virtual bool glissandoSpectrum(std::vector<float>& magnitudesDb, double& nyquistHz) = 0;
+
+    // Frames decoded since the last call, to write on the visi-scope.
+    virtual std::vector<GlissandoScopeFrame> glissandoHeardFrames() = 0;
 
     virtual void glissandoSetAudioRunning(bool running) = 0;
 
@@ -160,6 +163,7 @@ private:
     Chaotica::Button* autoButton_;
     Chaotica::Button* listenAllButton_;
     Chaotica::Button* wideButton_;
+    Chaotica::Button* lensButton_;
     Chaotica::Button* engageButton_;
     bool engageAborts_ = false;     // the button reads Abort
     Chaotica::Button* chatButton_;

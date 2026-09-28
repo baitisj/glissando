@@ -221,6 +221,11 @@ void GlissandoConsole::buildControls()
     scopeControls->Add(scanRateDial_, 0, wxRIGHT, 8);
 
     auto* scopeButtons = new wxBoxSizer(wxVERTICAL);
+    lensButton_ = new Button(scopePlate, wxID_ANY, _("Time lens"), true, wxSize(120, 32));
+    lensButton_->SetToolTip(_("Magnify the most recent band activity at the top of the scope and squeeze "
+                              "older history below it on a logarithmic time scale, so eight times "
+                              "as much stays in view and nothing faint is averaged away."));
+    scopeButtons->Add(lensButton_, 0, wxBOTTOM, 6);
     wideButton_ = new Button(scopePlate, wxID_ANY, _("Duet voice"), true, wxSize(120, 32));
     wideButton_->SetToolTip(_("Widen the scope to show the duet's high voice, C6 to E7."));
     scopeButtons->Add(wideButton_, 0, wxBOTTOM, 6);
@@ -384,6 +389,10 @@ void GlissandoConsole::buildControls()
         settings_.listenAllGears = event.GetInt() != 0;
         applySettings(true);
     });
+    lensButton_->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& event) {
+        settings_.lens = event.GetInt() != 0;
+        applySettings(true);
+    });
     wideButton_->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& event) {
         settings_.wideScope = event.GetInt() != 0;
         applySettings(true);
@@ -499,6 +508,8 @@ void GlissandoConsole::applySettings(bool notifyHost)
     autoButton_->SetChecked(settings_.autoGear);
     listenAllButton_->SetChecked(settings_.listenAllGears);
     wideButton_->SetChecked(settings_.wideScope);
+    lensButton_->SetChecked(settings_.lens);
+    scope_->setLens(settings_.lens);
     tuningDial_->SetValue(settings_.tuningOffsetHz);
     scanRateDial_->SetValue(settings_.scanRate);
     scope_->setScanRate(settings_.scanRate);
@@ -562,6 +573,7 @@ void GlissandoConsole::refreshTelemetry()
     receivingLamp_->SetLit(t.receiving);
     transmittingLamp_->SetLit(t.transmitting);
     scope_->setActivity(t.receiving, t.transmitting);
+    for (const GlissandoScopeFrame& frame : host_->glissandoHeardFrames()) scope_->addHeard(frame);
 
     snrMeter_->SetValue(t.haveReport ? t.snrDb : std::nan(""));
     dopplerReadout_->SetText(t.haveReport ? wxString::Format("%.2f Hz", t.dopplerHz) : wxString("---"));

@@ -233,6 +233,20 @@ std::vector<float> modulate(const std::vector<Payload>& payloads, const ModemSet
     return audio;
 }
 
+std::array<int, SYMBOLS_PER_FRAME> payloadMelody(const Payload& payload)
+{
+    return detail::frameNotes(encodeFrame(payload));
+}
+
+bool isMotifSymbol(int symbol)
+{
+    for (int start : detail::MOTIF_START)
+    {
+        if (symbol >= start && symbol < start + detail::MOTIF_LENGTH) return true;
+    }
+    return false;
+}
+
 std::vector<Decode> receive(const float* audio, size_t numSamples, const ModemSettings& settings,
                             long long searchFrom, long long searchTo, double maxOffsetHz, int candidates)
 {

@@ -50,6 +50,24 @@ std::vector<Payload> segmentBursts(const std::vector<LinkBurst>& bursts, int voi
 // Number of Glissando frames segmentBursts() would produce.
 int framesForBursts(const std::vector<LinkBurst>& bursts, int voices);
 
+// What Reassembler::add() made of one payload, for showing reception as it
+// happens rather than only when a burst completes.
+struct SegmentProgress
+{
+    bool duplicate = false;     // the same frame decoded again, and ignored
+    bool filler = false;        // a duet's padding segment
+    bool text = false;
+    int index = 0;
+    bool last = false;
+
+    // The burst so far, this segment's SEGMENT_DATA_BYTES last, so it is
+    // (index + 1) * SEGMENT_DATA_BYTES long. Bytes before knownFrom were
+    // never heard (the segments before this one went missing) and are zero.
+    std::vector<uint8_t> bytes;
+    int knownFrom = 0;
+    bool completed = false;     // this segment finished the burst
+};
+
 // Puts segments back together. Feed it every decoded payload in the order
 // the frames arrived (voice 0 before voice 1 within a duet frame). A
 // segment that does not follow on from the one before it in the same mode
@@ -68,7 +86,7 @@ public:
     // (by a second gear that shares its waveform, or by an overlapping
     // search) is ignored.
     bool add(const Payload& payload, long long startSample, long long duplicateSamples,
-             LinkBurst& burstOut);
+             LinkBurst& burstOut, SegmentProgress* progressOut = nullptr);
 
     void reset();
 

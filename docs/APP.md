@@ -76,7 +76,9 @@ longer changes anything.
 | Control | What it does |
 | --- | --- |
 | Visi-scope | Receive spectrum over the melody's part of the passband, white phosphor on black. The scale's notes are ruled across it with the receiver's +/-25 Hz search band shaded. Double click to put the lowest note where you clicked; mouse wheel nudges the tuning 1 Hz (shift: 0.1 Hz). |
+| Decoded frames | Every frame the receiver decodes is written back on the visi-scope where it was heard, and scrolls down with it. Its held notes are lit over the phosphor (the three signature motifs brighter, and marked as bars down the left edge), and a caption beside it reads out what that frame added to the chat frame, which Glissando carries nine bytes at a time: first the header fields as each one becomes whole (MESSAGE, TO YOU, DE K6ABC, the message number, which part of how many), then the characters of the text. A frame that finishes a chat frame says RECEIVED. Frames addressed to other stations are written up too. |
 | Scan rate | Waterfall rows per second, 0.5 to 20. |
+| Time lens | On by default. The top of the visi-scope works like an elongated convex lens: the newest rows are drawn three pixels tall, and further down the time scale eases into a logarithmic one (`y = K asinh(age / tau)`), so older history moves down ever more slowly and eight times as much of it stays on screen as without the lens. Where several rows share a pixel the brightest wins, so an old, weak melody is squeezed but never averaged away. The rim marked TIME LENS x3 is where one row takes one pixel. The time scale on the left follows the lens. Off: one row per pixel, as before. |
 | Duet voice | Widens the scope to show the duet gear's high voice (C6..E7). |
 | All tempos | Decode every gear at once, so a station that shifts gear is still heard. Off: only the chosen gear (and the one automatic shifting picked). |
 | Melody offset | Moves every note by up to +/-250 Hz, on transmit and receive: the audio equivalent of the tuning dial. |
@@ -89,6 +91,10 @@ longer changes anything.
 | Transmission log | Brings the chat window back if it was closed. |
 | Snooper | Brings the snooping window back if it was closed. |
 | Preferences | Drops down Options, Sound cards, Rig control (CAT and PTT), Audio filters and Easy setup. Sound cards, rig control and easy setup only change while disengaged. The app opens only the radio's two audio streams, input from the radio and output to it, so Sound cards and Easy setup ask for nothing else; leave the output as none to only listen. |
+
+![The visi-scope at Presto, 10 rows a second, with a message from K6ABC and W1AW's acknowledgement written on it as each frame decoded (a simulated channel, drawn by the scope's own code)](images/visi-scope-captions.png)
+
+![The same with the time lens on after a three minute exchange: the last seconds magnified under the glass at the top, then the history squeezed on a logarithmic scale down to four minutes ago, with the newest captions kept where older ones would overlap (simulated channel)](images/visi-scope-lens.png)
 
 Glissando keeps its own settings and never reads or changes FreeDV's, so the
 two can be installed side by side. On Linux the settings are in `~/.glissando.conf`

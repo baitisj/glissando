@@ -201,6 +201,49 @@ void testOverTheModem()
     CHECK(out.size() == 1 && sameBurst(out[0], text));
 }
 
+// add() reports each segment as it arrives, not only whole bursts.
+void testProgress()
+{
+    Random rng(5);
+    LinkBurst burst = makeBurst(true, 20, rng);
+    std::vector<Payload> payloads = segmentBursts({burst}, 1);
+    CHECK(payloads.size() == 3);
+
+    Reassembler r(SIGNALLING_BYTES, TEXT_BYTES);
+    LinkBurst out;
+    SegmentProgress progress;
+    for (size_t i = 0; i < payloads.size(); i++)
+    {
+        bool complete = r.add(payloads[i], (long long)i * 100000, DUPLICATE_SAMPLES, out, &progress);
+        CHECK(!progress.duplicate && !progress.filler && progress.text);
+        CHECK(progress.index == (int)i);
+        CHECK(progress.knownFrom == 0);
+        CHECK(progress.bytes.size() == (i + 1) * SEGMENT_DATA_BYTES);
+        CHECK(std::equal(progress.bytes.begin(), progress.bytes.begin() + 9 * (i + 1) - (i == 2 ? 7 : 0),
+                         burst.bytes.begin()));
+        CHECK(progress.completed == complete);
+        CHECK(complete == (i == 2) && progress.last == (i == 2));
+    }
+
+    // The same frame again is a duplicate.
+    r.add(payloads[2], 200000 + 10, DUPLICATE_SAMPLES, out, &progress);
+    CHECK(progress.duplicate);
+
+    // A segment whose predecessors went missing: its own bytes, at their
+    // place in the burst, and nothing before them.
+    r.reset();
+    r.add(payloads[1], 0, DUPLICATE_SAMPLES, out, &progress);
+    CHECK(progress.index == 1 && progress.knownFrom == SEGMENT_DATA_BYTES);
+    CHECK(progress.bytes.size() == 2 * SEGMENT_DATA_BYTES);
+    CHECK(std::equal(progress.bytes.begin() + 9, progress.bytes.end(), burst.bytes.begin() + 9));
+
+    // A duet's filler.
+    std::vector<Payload> duet = segmentBursts({makeBurst(false, 5, rng)}, 2);
+    CHECK(duet.size() == 2);
+    r.add(duet[1], 500000, DUPLICATE_SAMPLES, out, &progress);
+    CHECK(progress.filler);
+}
+
 } // namespace
 
 int main()
@@ -211,6 +254,7 @@ int main()
     testOutOfOrder();
     testDuplicates();
     testOverTheModem();
+    testProgress();
     if (failures == 0) printf("glissando link tests passed\n");
     return failures == 0 ? 0 : 1;
 }
