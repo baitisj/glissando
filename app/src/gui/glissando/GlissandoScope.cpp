@@ -316,7 +316,6 @@ void GlissandoScope::setLens(bool on)
 {
     if (on == lens_) return;
     lens_ = on;
-    sizeHistory();
     Refresh();
 }
 
@@ -362,8 +361,9 @@ void GlissandoScope::sizeHistory()
     if (traceHeight_ <= 0) return;
     // The lens reaches back lensSpanSeconds(); a little more, so the bottom
     // pixel of the trace always has rows under it after a scan rate change.
-    int rows = traceHeight_;
-    if (lens_) rows = std::max(rows, (int)std::ceil(lensSpanSeconds() * scanRate_ * 1.1) + 2);
+    // Kept that deep with the lens off too, so turning it off and on again
+    // does not throw away everything older than one screen.
+    int rows = std::max(traceHeight_, (int)std::ceil(lensSpanSeconds() * scanRate_ * 1.1) + 2);
     if (rows == historyRows_ && history_.size() == (size_t)historyWidth_ * rows) return;
     history_.resize((size_t)historyWidth_ * rows, 0);
     rowSeconds_.resize((size_t)rows, 0.0);
