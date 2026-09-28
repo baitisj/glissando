@@ -169,6 +169,7 @@ void      clearLastUsedConfigPath();
 class MainFrame;
 class FilterDlg;
 class TextMessagingDialog;
+class SnoopDialog;
 class TextMessagingTransport;
 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=--=-=-=-=
@@ -301,6 +302,7 @@ class MainFrame : public TopFrame, public IGlissandoHost
 
         FilterDlg*              m_filterDialog;
         TextMessagingDialog*    m_textMessagingDialog;
+        SnoopDialog*            m_snoopDialog;
         TextMessagingTransport* m_textMessagingTransport;
         TextMessaging::Data2GTransport* m_data2gTransport;
         GlissandoConsole*       m_glissandoConsole;
@@ -434,6 +436,7 @@ public:
     virtual void glissandoSetRigFrequency(double hz) override;
     virtual std::vector<double> glissandoFrequencyPresets() override;
     virtual void glissandoShowChat() override;
+    virtual void glissandoShowSnoop() override;
     virtual bool glissandoSetupAvailable(GlissandoSetup setup) override;
     virtual void glissandoOpenSetup(GlissandoSetup setup) override;
     virtual void glissandoConsoleClosed(const wxRect& lastPosition) override;
@@ -664,7 +667,11 @@ private:
         float      vk_rx_time;
         float      vk_rx_sync_time;
         bool suppressFreqModeUpdates_;
-        bool firstFreqUpdateOnConnect_;
+        // The operator picked a frequency in the app while no radio was
+        // connected; the radio is tuned to it once it connects. Otherwise the
+        // radio's own frequency stands: the app never retunes it on its own.
+        std::atomic<bool> operatorFrequencyPending_;
+        void refreshRigFrequencyBeforeKeying_();
         FilterFrequency lastBand_;
         // Restore-point: the TX/tune level that was active when we entered the
         // current band (or when Enable was first clicked for that band). Restore

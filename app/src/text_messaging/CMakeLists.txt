@@ -6,6 +6,7 @@ add_library(fdv_text_messaging STATIC
     HeardStationList.cpp
     KeyingPlan.cpp
     MessageStore.cpp
+    SnoopFeed.cpp
     TextMessagingProtocol.cpp
     TextMessagingSession.cpp
 )
@@ -59,4 +60,9 @@ if(UNITTEST)
     target_link_libraries(fdv_text_messaging_frame_annotation_test fdv_text_messaging)
     target_compile_options(fdv_text_messaging_frame_annotation_test PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
     add_test(NAME text_messaging_frame_annotation COMMAND fdv_text_messaging_frame_annotation_test)
+
+    add_executable(fdv_text_messaging_snoop_test test/SnoopFeedTest.cpp)
+    target_link_libraries(fdv_text_messaging_snoop_test fdv_text_messaging)
+    target_compile_options(fdv_text_messaging_snoop_test PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
+    add_test(NAME text_messaging_snoop COMMAND fdv_text_messaging_snoop_test)
 endif(UNITTEST)

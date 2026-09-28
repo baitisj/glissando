@@ -13,6 +13,7 @@
 #include <wx/numformatter.h>
 
 #include "main.h"
+#include "gui/dialogs/dlg_snoop.h"
 #include "gui/dialogs/dlg_text_messaging.h"
 #include "pipeline/TextMessagingModem.h"
 #include "pipeline/TextMessagingTransport.h"
@@ -330,6 +331,25 @@ void MainFrame::glissandoShowChat()
 {
     wxCommandEvent event;
     OnToolsTextMessaging(event);
+}
+
+void MainFrame::glissandoShowSnoop()
+{
+    if (m_snoopDialog == nullptr)
+    {
+        m_snoopDialog = new SnoopDialog(this);
+
+        // Beside the chat window rather than on top of it.
+        if (m_textMessagingDialog != nullptr && m_textMessagingDialog->IsShown())
+        {
+            wxRect chat = m_textMessagingDialog->GetScreenRect();
+            m_snoopDialog->Move(chat.GetLeft() + 60, chat.GetTop() + 60);
+        }
+    }
+
+    m_snoopDialog->Show();
+    m_snoopDialog->Iconize(false);
+    m_snoopDialog->Raise();
 }
 
 bool MainFrame::glissandoSetupAvailable(GlissandoSetup setup)
