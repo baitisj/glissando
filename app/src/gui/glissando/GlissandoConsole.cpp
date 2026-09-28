@@ -588,12 +588,12 @@ void GlissandoConsole::refreshTelemetry()
                                          : _("Start or stop the audio."));
     }
     engageButton_->SetChecked(t.audioRunning);
-    engageButton_->SetAlarm(aborts);
     engageButton_->SetLabel(aborts ? _("Abort") : t.audioRunning ? _("Disengage") : _("Engage"));
 
-    // A chat message is waiting for a transmitter that only Engage brings up:
-    // the button flashes red with the message's chip until it is pressed.
-    engageButton_->SetAlarm(t.engageToSend && Chaotica::blinkLit());
+    // Red while it reads Abort. And a chat message is waiting for a
+    // transmitter that only Engage brings up: the button flashes red with the
+    // message's chip until it is pressed.
+    engageButton_->SetAlarm(aborts || (t.engageToSend && Chaotica::blinkLit()));
     engagedLamp_->SetLit(t.audioRunning);
     receivingLamp_->SetLit(t.receiving);
     transmittingLamp_->SetLit(t.transmitting);
