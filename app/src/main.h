@@ -663,7 +663,11 @@ private:
         float      vk_rx_time;
         float      vk_rx_sync_time;
         bool suppressFreqModeUpdates_;
-        bool firstFreqUpdateOnConnect_;
+        // The operator picked a frequency in the app while no radio was
+        // connected; the radio is tuned to it once it connects. Otherwise the
+        // radio's own frequency stands: the app never retunes it on its own.
+        std::atomic<bool> operatorFrequencyPending_;
+        void refreshRigFrequencyBeforeKeying_();
         FilterFrequency lastBand_;
         // Restore-point: the TX/tune level that was active when we entered the
         // current band (or when Enable was first clicked for that band). Restore
