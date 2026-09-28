@@ -163,6 +163,22 @@ public:
 
     std::vector<GlissandoHeard> takeGlissandoHeard();
 
+    // Every Glissando frame modulate() has made, one entry per voice, in
+    // the order they go on the air, so the console can draw our own tune as
+    // it is sent. Kept until taken, at most the newest GLISSANDO_SENT_LIMIT.
+    struct GlissandoSent
+    {
+        int gear = 0;
+        Glissando::Scale scale = Glissando::Scale::Pentatonic;
+        int voice = 0;
+        std::array<double, Glissando::NOTES> notesHz{};    // tuning included
+        std::array<int, Glissando::SYMBOLS_PER_FRAME> melody{};
+    };
+
+    static constexpr size_t GLISSANDO_SENT_LIMIT = 256;
+
+    std::vector<GlissandoSent> takeGlissandoSent();
+
     // The protocol timers suited to what is on the air now: the codec2
     // defaults, or ones sized to the Glissando tempo we transmit at.
     TextMessaging::AirTiming airTiming() const;
@@ -214,6 +230,7 @@ private:
     GlissandoStatus glissandoStatus_;
     Glissando::Reassembler reassembler_;
     std::vector<GlissandoHeard> glissandoHeard_;
+    std::vector<GlissandoSent> glissandoSent_;
     std::unique_ptr<Glissando::StreamingReceiver> glissandoRx_;
     std::atomic<bool> glissandoOn_;
 

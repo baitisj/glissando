@@ -66,6 +66,19 @@ struct GlissandoScopeFrame
     bool completed = false;         // this frame finished a chat frame
 };
 
+// A frame we are sending. While it goes out its tune marches down the trace
+// as a formation of sprites, one in each note's column: Captain Proton's
+// rocket ships for the pentatonic scale, Chaotica's invaders for the
+// tritone scales.
+struct GlissandoScopeSent
+{
+    double symbolSeconds = 0.16;
+    int voice = 0;                  // a duet's second voice sings alongside the first
+    bool heroes = true;             // pentatonic
+    std::array<double, 8> notesHz{};
+    std::vector<int> melody;        // note index of every symbol
+};
+
 class GlissandoScope : public wxControl
 {
 public:
@@ -101,6 +114,12 @@ public:
 
     // Writes a decoded frame on the trace.
     void addHeard(const GlissandoScopeFrame& frame);
+
+    // Queues a frame about to be sent, in the order they go out. Its notes
+    // are drawn as they are played, which is while setActivity() says we
+    // are transmitting; clearSent() forgets what has not been played yet.
+    void addSent(const GlissandoScopeSent& frame);
+    void clearSent();
 
     // Seconds on the steady clock, the clock GlissandoScopeFrame uses.
     static double steadySeconds();
@@ -144,6 +163,12 @@ private:
     void sizeHistory();
     void renderTrace(wxImage& image);
     void paintHeard(wxGraphicsContext* gc, const wxRect& trace);
+    void paintSent(wxGraphicsContext* gc, const wxRect& trace);
+
+    // Plays the queued sent frames forward to the transmit clock, gathering
+    // their notes into formations.
+    void advanceSent(double now);
+    double formationSeconds() const;
 
     SpectrumSource source_;
     wxTimer timer_;
@@ -179,6 +204,37 @@ private:
     // Frames written on the trace, oldest first, until they scroll off.
     std::deque<GlissandoScopeFrame> heard_;
     std::vector<float> spectrum_;
+
+    // Frames being sent, oldest first, each placed on the transmit clock:
+    // seconds spent transmitting, which stands still while the radio is let
+    // go between keyings.
+    struct Sending
+    {
+        GlissandoScopeSent frame;
+        double offset = 0.0;
+        size_t next = 0;            // the first symbol not yet played
+    };
+    std::deque<Sending> sending_;
+    double sendClock_;
+    double sendEnd_;                // where the next frame starts on the transmit clock
+    double sendStart_;              // where the last first voice started
+    double lastTick_;
+    double lastTransmitting_;
+
+    // Sprites drawn across the trace: the notes sung in `window` seconds
+    // ending at `seconds` on the steady clock, one sprite each.
+    struct Formation
+    {
+        double seconds = 0.0;
+        double window = 0.0;
+        bool heroes = true;
+        int serial = 0;
+        std::vector<double> notesHz;
+    };
+    std::deque<Formation> formations_;
+    Formation gathering_;           // notes played since the last formation
+    double gatheringFrom_;          // on the transmit clock; negative while empty
+    int formationSerial_;
 };
 
 #endif // GUI_GLISSANDO__GLISSANDO_SCOPE_H

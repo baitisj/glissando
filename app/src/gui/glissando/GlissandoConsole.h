@@ -88,6 +88,10 @@ public:
     // Frames decoded since the last call, to write on the visi-scope.
     virtual std::vector<GlissandoScopeFrame> glissandoHeardFrames() = 0;
 
+    // Our own frames made ready to send since the last call, in the order
+    // they go out.
+    virtual std::vector<GlissandoScopeSent> glissandoSentFrames() = 0;
+
     virtual void glissandoSetAudioRunning(bool running) = 0;
 
     // Stops what is being transmitted now: the radio unkeys at once and the

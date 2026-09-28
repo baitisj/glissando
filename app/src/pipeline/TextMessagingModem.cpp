@@ -322,6 +322,25 @@ bool TextMessagingModem::modulate(const std::vector<OutgoingBurst>& bursts,
             std::vector<Glissando::Payload> voices(payloads.begin() + first,
                                                    payloads.begin() + first + gear.voices);
             std::vector<float> audio = Glissando::modulate(voices, settings);
+            {
+                std::lock_guard<std::mutex> lock(glissandoMutex_);
+                for (int v = 0; v < gear.voices; v++)
+                {
+                    GlissandoSent sent;
+                    sent.gear = settings.gear;
+                    sent.scale = settings.scale;
+                    sent.voice = v;
+                    sent.notesHz = Glissando::scaleNotes(settings.scale, v);
+                    for (double& hz : sent.notesHz) hz += settings.tuningOffsetHz;
+                    sent.melody = Glissando::payloadMelody(voices[v]);
+                    glissandoSent_.push_back(sent);
+                }
+                if (glissandoSent_.size() > GLISSANDO_SENT_LIMIT)
+                {
+                    glissandoSent_.erase(glissandoSent_.begin(),
+                                         glissandoSent_.end() - GLISSANDO_SENT_LIMIT);
+                }
+            }
             for (float sample : audio)
             {
                 samplesOut.push_back((short)std::lround(sample * GLISSANDO_PEAK));
@@ -691,6 +710,14 @@ std::vector<TextMessagingModem::GlissandoHeard> TextMessagingModem::takeGlissand
     std::vector<GlissandoHeard> heard;
     heard.swap(glissandoHeard_);
     return heard;
+}
+
+std::vector<TextMessagingModem::GlissandoSent> TextMessagingModem::takeGlissandoSent()
+{
+    std::lock_guard<std::mutex> lock(glissandoMutex_);
+    std::vector<GlissandoSent> sent;
+    sent.swap(glissandoSent_);
+    return sent;
 }
 
 TextMessagingModem& textMessagingModem()
