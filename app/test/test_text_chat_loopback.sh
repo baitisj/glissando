@@ -46,7 +46,7 @@ ALL_CABLES="$CABLE_A_TO_B $CABLE_B_TO_A"
 
 findBinary () {
     if [ -n "${FREEDV_BINARY:-}" ]; then echo "$FREEDV_BINARY"; return; fi
-    for candidate in "$(pwd)/src/freedv" "$REPO_ROOT/build/src/freedv"; do
+    for candidate in "$(pwd)/src/glissando" "$REPO_ROOT/build/src/glissando"; do
         if [ -x "$candidate" ]; then echo "$candidate"; return; fi
     done
     echo ""
@@ -103,7 +103,7 @@ startStation () {
 doUp () {
     BINARY="$(findBinary)"
     if [ -z "$BINARY" ]; then
-        echo "ERROR: no freedv binary. Build first, or set FREEDV_BINARY." >&2
+        echo "ERROR: no glissando binary. Build first, or set FREEDV_BINARY." >&2
         exit 1
     fi
     if ! pactl info >/dev/null 2>&1; then

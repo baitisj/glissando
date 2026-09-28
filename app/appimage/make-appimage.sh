@@ -1,7 +1,7 @@
 #!/bin/bash -e
 
 export APPNAME="FreeDV"
-export APPEXEC=../build_linux/src/freedv
+export APPEXEC=../build_linux/src/glissando
 
 DESKTOP_FILE="$APPNAME.desktop"
 APPDIR="$APPNAME.AppDir"

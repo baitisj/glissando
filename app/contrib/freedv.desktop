@@ -1,7 +1,7 @@
 [Desktop Entry]
 Version=1.0
 Name=FreeDV
-Exec=freedv
+Exec=glissando
 Icon=freedv
 Type=Application
 Terminal=false
