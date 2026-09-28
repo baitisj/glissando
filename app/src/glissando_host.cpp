@@ -15,8 +15,11 @@
 #include "main.h"
 #include "gui/dialogs/dlg_text_messaging.h"
 #include "pipeline/TextMessagingModem.h"
+#include "pipeline/TextMessagingTransport.h"
 #include "text_messaging/TextMessagingSession.h"
 #include "util/logging/ulog.h"
+
+extern paCallBackData* g_rxUserdata;
 
 extern std::atomic<bool> g_tx;
 extern FreeDVInterface freedvInterface;
@@ -172,6 +175,9 @@ GlissandoTelemetry MainFrame::glissandoTelemetry()
     telemetry.advisedGear = status.advisedGear;
     telemetry.receiving = status.haveReport && telemetry.secondsSinceHeard < RECEIVING_LAMP_SECONDS;
     telemetry.transmitting = m_RxRunning && g_tx.load(std::memory_order_relaxed);
+    telemetry.transmitBusy = telemetry.transmitting ||
+                             (m_RxRunning && m_textMessagingTransport != nullptr &&
+                              m_textMessagingTransport->isTransmitting());
     telemetry.audioRunning = m_RxRunning;
 
     int64_t frequency = wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency;
@@ -198,6 +204,23 @@ void MainFrame::glissandoSetAudioRunning(bool running)
     wxCommandEvent event(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, m_togBtnOnOff->GetId());
     event.SetEventObject(m_togBtnOnOff);
     OnTogBtnOnOff(event);
+}
+
+void MainFrame::glissandoAbortTransmit()
+{
+    log_info("Transmission aborted by the operator");
+
+    // The protocol first, so that it cannot take the cut-off burst for a
+    // finished one and wait for an acknowledgement, then retry it.
+    TextMessaging::TextMessagingSession::instance().protocol().abortTransmission();
+
+    // Drops the rest of the burst, keyings still to come included, and
+    // unkeys.
+    if (m_textMessagingTransport != nullptr) m_textMessagingTransport->abort();
+
+    // And what the sound card has not played yet: the radio lets go as soon
+    // as the output runs dry, rather than after up to a second of tune.
+    if (g_rxUserdata != nullptr && g_rxUserdata->outfifo1 != nullptr) g_rxUserdata->outfifo1->reset();
 }
 
 void MainFrame::glissandoSetRigFrequency(double hz)

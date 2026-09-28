@@ -278,7 +278,8 @@ enum class MessageDirection
 // Transmitting -> AwaitingAck -> Acknowledged, falling into Retrying on each
 // timeout and Failed once the retries are used up. Broadcasts stop at Sent
 // because nothing acknowledges them. Received messages are created Received.
-// A message waiting to go out when transmitting is inhibited ends NotSent.
+// A message waiting to go out when transmitting is inhibited ends NotSent;
+// one the operator stops, on the air or waiting behind it, ends Aborted.
 enum class MessageStatus
 {
     Queued,
@@ -290,6 +291,7 @@ enum class MessageStatus
     Sent,
     Received,
     NotSent,     // discarded unsent: the station may not transmit where it is
+    Aborted,     // stopped by the operator, part way through or before it went out
 };
 
 // Chat lines are what the operator typed; system lines are the small PING and

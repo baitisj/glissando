@@ -59,6 +59,7 @@ struct GlissandoTelemetry
     int advisedGear = 0;            // what the last report recommends, 0 none
     bool receiving = false;         // a melody was heard just now
     bool transmitting = false;
+    bool transmitBusy = false;      // a chat burst on the air, pauses included
     bool audioRunning = false;
     bool rigFrequencyKnown = false;
     double rigFrequencyHz = 0.0;
@@ -86,6 +87,10 @@ public:
     virtual bool glissandoSpectrum(std::vector<float>& magnitudesDb, double& nyquistHz) = 0;
 
     virtual void glissandoSetAudioRunning(bool running) = 0;
+
+    // Stops what is being transmitted now: the radio unkeys at once and the
+    // message is dropped, not retried. The audio keeps running.
+    virtual void glissandoAbortTransmit() = 0;
     virtual void glissandoSetRigFrequency(double hz) = 0;
 
     // The operator's list of favourite dial frequencies, in Hz.
@@ -157,6 +162,7 @@ private:
     Chaotica::Button* listenAllButton_;
     Chaotica::Button* wideButton_;
     Chaotica::Button* engageButton_;
+    bool engageAborts_ = false;     // the button reads Abort
     Chaotica::Button* chatButton_;
     Chaotica::Button* preferencesButton_;
     Chaotica::Lamp* engagedLamp_;

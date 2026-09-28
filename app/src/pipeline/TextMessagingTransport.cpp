@@ -486,9 +486,17 @@ void TextMessagingTransport::unkey()
     if (txLogEnabled())
     {
         uint64_t held = monotonicMs() - keyedAtMs_;
-        log_info("TX: +%llu ms unkey requested (audio was %llu ms, %lld ms of it silence)",
-                 (unsigned long long)held, (unsigned long long)burstMs_,
-                 (long long)held - (long long)burstMs_);
+        if (held < burstMs_)
+        {
+            log_info("TX: +%llu ms unkey requested, cutting off the rest of %llu ms of audio",
+                     (unsigned long long)held, (unsigned long long)burstMs_);
+        }
+        else
+        {
+            log_info("TX: +%llu ms unkey requested (audio was %llu ms, %lld ms of it silence)",
+                     (unsigned long long)held, (unsigned long long)burstMs_,
+                     (long long)held - (long long)burstMs_);
+        }
     }
 
     // The receivers have been frozen since we keyed; whatever they were

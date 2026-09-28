@@ -79,13 +79,13 @@ function Test-FreeDV {
     $tmp_file = New-TemporaryFile
     $conf_tmpl | Set-Content -Path $tmp_file.FullName
 
-    # Start freedv.exe
+    # Start glissando.exe
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.CreateNoWindow = $true
     $psi.UseShellExecute = $false
     $psi.RedirectStandardError = $true
     $psi.RedirectStandardOutput = $true
-    $psi.FileName = "$current_loc\freedv.exe"
+    $psi.FileName = "$current_loc\glissando.exe"
     $psi.WorkingDirectory = $current_loc
     $quoted_tmp_filename = "`"" + $tmp_file.FullName + "`""
     $psi.Arguments = @("/f $quoted_tmp_filename /ut txrx /utmode $ModeToTest /txtime 60")

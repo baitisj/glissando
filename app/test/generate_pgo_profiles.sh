@@ -8,7 +8,7 @@ if [ "$OPERATING_SYSTEM" == "Darwin" ]; then
     PYTHON_BINARY=${PYTHON_BINARY:-src/FreeDV.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3}
 else
     SOX_DRIVER=alsa
-    FREEDV_BINARY=${FREEDV_BINARY:-src/freedv}
+    FREEDV_BINARY=${FREEDV_BINARY:-src/glissando}
     PYTHON_BINARY=${PYTHON_BINARY:-python3}
 fi
 

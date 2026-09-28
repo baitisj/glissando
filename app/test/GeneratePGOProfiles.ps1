@@ -10,7 +10,7 @@
   enabled, so each run will emit a *.profraw file that can later be merged and used to guide a
   final optimized build.
 
-  This script must be run from the folder containing freedv.exe, and expects freedv-pgo.conf.tmpl
+  This script must be run from the folder containing glissando.exe, and expects freedv-pgo.conf.tmpl
   to be present in that same folder.
 
   .INPUTS
@@ -128,7 +128,7 @@ $psi.CreateNoWindow = $true
 $psi.UseShellExecute = $false
 $psi.RedirectStandardError = $true
 $psi.RedirectStandardOutput = $true
-$psi.FileName = "$current_loc\freedv.exe"
+$psi.FileName = "$current_loc\glissando.exe"
 $psi.WorkingDirectory = $current_loc
 $psi.Arguments = @("/f $quoted_conf_filename /ut tx /utmode RADEV1 /txfile `"$current_loc\tx_in.wav`" /txfeaturefile `"$current_loc\txfeatures.f32`"")
 

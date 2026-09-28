@@ -23,7 +23,7 @@ set(CMAKE_GET_RUNTIME_DEPENDENCIES_COMMAND ${CMAKE_OBJDUMP})
 #message("dependency tool: ${CMAKE_GET_RUNTIME_DEPENDENCIES_TOOL}")
 #message("dependency command: ${CMAKE_GET_RUNTIME_DEPENDENCIES_COMMAND}")
 
-set(FREEDV_EXE ${CMAKE_BINARY_DIR}/src/freedv.exe)
+set(FREEDV_EXE ${CMAKE_BINARY_DIR}/src/glissando.exe)
 
 # Implement our own GetDependencies because the CMake one
 # isn't working for some reason when using LLVM.

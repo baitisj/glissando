@@ -11,7 +11,7 @@ if [ "$OPERATING_SYSTEM" == "Darwin" ]; then
     FREEDV_BINARY=${FREEDV_BINARY:-src/FreeDV.app/Contents/MacOS/FreeDV}
 else
     SOX_DRIVER=alsa
-    FREEDV_BINARY=${FREEDV_BINARY:-src/freedv}
+    FREEDV_BINARY=${FREEDV_BINARY:-src/glissando}
 fi
 
 createVirtualAudioCable () {

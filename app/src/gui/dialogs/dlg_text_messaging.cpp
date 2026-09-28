@@ -203,6 +203,10 @@ DeliveryChip deliveryChip(const TextMessage& message)
             chip.label = _("NOT SENT");
             chip.background = smoke;
             break;
+        case DeliveryChipKind::Aborted:
+            chip.label = _("ABORTED");
+            chip.background = "#8E2A20";
+            break;
     }
 
     // How many fragments the far end has, out of how many there are.

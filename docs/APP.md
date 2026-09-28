@@ -38,7 +38,7 @@ Then, from the top of the repository:
 
     cmake -S app -B build -DUSE_NATIVE_AUDIO=1 -DUNITTEST=ON -DCMAKE_BUILD_TYPE=Release
     cmake --build build -j
-    ./build/src/freedv
+    ./build/src/glissando
 
 Without a build type the build is Debug, and an unoptimised receiver cannot
 keep up with listening on every tempo at once: decodes fall further and
@@ -167,5 +167,5 @@ Press Engage in both consoles and send from either chat window.
 ## Packaging
 
 `app/appimage/make-appimage.sh` already carries the console, since it is
-part of the `freedv` binary. A Glissando-first AppImage needs a desktop
-entry that runs `freedv`, an icon, and a CI job to build it.
+part of the `glissando` binary. A Glissando-first AppImage needs a desktop
+entry that runs `glissando`, an icon, and a CI job to build it.
