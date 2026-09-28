@@ -203,16 +203,15 @@ void TextMessagingProtocol::discardQueuedLocked(std::vector<PendingEvent>& event
     dropOutboxLocked(MessageStatus::NotSent, false, events);
 }
 
-// Drops what is waiting for the transmitter and, with onTheAirToo, what is on
-// the air now, leaving each chat line with the given status. Anything already
-// sent and waiting for its acknowledgement stays.
-void TextMessagingProtocol::dropOutboxLocked(MessageStatus status, bool onTheAirToo,
+// Drops what is waiting for the transmitter and, with everything, what is on
+// the air and what is waiting for its acknowledgement too, leaving each chat
+// line with the given status.
+void TextMessagingProtocol::dropOutboxLocked(MessageStatus status, bool everything,
                                              std::vector<PendingEvent>& events)
 {
     for (auto it = outbox_.begin(); it != outbox_.end();)
     {
-        bool drop = it->state == TransmissionState::Queued ||
-                    (onTheAirToo && it->state == TransmissionState::Transmitting);
+        bool drop = everything || it->state == TransmissionState::Queued;
         if (!drop)
         {
             ++it;
