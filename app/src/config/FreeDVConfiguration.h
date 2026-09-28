@@ -72,7 +72,6 @@ public:
 
     
     ConfigurationDataElement<bool> halfDuplexMode;
-    ConfigurationDataElement<bool> multipleReceiveEnabled;
 
     // Text chat transmits only where US rules permit a data emission (47 CFR
     // 97.305), and not at all while the operating frequency is unknown. On by
@@ -103,11 +102,8 @@ public:
     ConfigurationDataElement<long> glissandoWindowTop;
     ConfigurationDataElement<long> glissandoWindowWidth;
     ConfigurationDataElement<long> glissandoWindowHeight;
-    ConfigurationDataElement<bool> multipleReceiveOnSingleThread;
     
     
-    ConfigurationDataElement<bool> freedv700Clip;
-    ConfigurationDataElement<bool> freedv700TxBPF;
     
     ConfigurationDataElement<int> noiseSNR;
     
@@ -116,7 +112,6 @@ public:
     ConfigurationDataElement<bool> snrSlow;
     
     
-    ConfigurationDataElement<unsigned int> statsResetTimeSecs;
     
     ConfigurationDataElement<int> currentFreeDVMode;
     
@@ -127,7 +122,6 @@ public:
 
     ConfigurationDataElement<int> txRxDelayMilliseconds;
 
-    ConfigurationDataElement<bool> showDecodeStats;
 
     ConfigurationDataElement<bool> autoStartOnLaunch;
 

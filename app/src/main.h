@@ -606,7 +606,6 @@ private:
         std::shared_ptr<IAudioDevice> rxInSoundDevice;
         std::shared_ptr<IAudioDevice> txOutSoundDevice;
         
-        unsigned int         m_timeSinceSyncLoss;
         bool        m_useMemory;
         wxTextCtrl* m_tc;
         int         m_zoom;

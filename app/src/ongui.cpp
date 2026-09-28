@@ -184,7 +184,7 @@ void MainFrame::OnToolsOptions(wxCommandEvent& event)
         m_freqBox->Show(isFrequencyControlEnabled_());
         
         // Show/hide stats box
-        statsBox->Show(wxGetApp().appConfiguration.showDecodeStats);
+        statsBox->Show(false);
         
         // XXX - with really short windows, wxWidgets sometimes doesn't size
         // the components properly until the user resizes the window (even if only

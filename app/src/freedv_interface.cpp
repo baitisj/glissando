@@ -228,15 +228,6 @@ void FreeDVInterface::stop()
     rxMode_.store(0, std::memory_order_release);
 }
 
-void FreeDVInterface::setRunTimeOptions(bool clip, bool bpf)
-{
-    for (auto& dv : dvObjects_)
-    {
-        freedv_set_clip(dv, clip);   // 700D/700E
-        freedv_set_tx_bpf(dv, bpf);  // 700D/700E
-    }
-}
-
 bool FreeDVInterface::usingTestFrames() const
 {
     bool result = false;

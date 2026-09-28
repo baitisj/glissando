@@ -66,7 +66,6 @@ FreeDVConfiguration::FreeDVConfiguration()
 
         
     , halfDuplexMode("/Rig/HalfDuplex", true)
-    , multipleReceiveEnabled("/Rig/MultipleRx", true)
     , textChatUsDataSegmentsOnly("/TextChat/UsDataSegmentsOnly", true)
     , data2gEnabled("/Data2G/Enabled", false)
     , data2gHost("/Data2G/Host", "127.0.0.1")
@@ -85,11 +84,8 @@ FreeDVConfiguration::FreeDVConfiguration()
     , glissandoWindowTop("/Glissando/WindowTop", -1)
     , glissandoWindowWidth("/Glissando/WindowWidth", 1040)
     , glissandoWindowHeight("/Glissando/WindowHeight", 720)
-    , multipleReceiveOnSingleThread("/Rig/SingleRxThread", true)
         
         
-    , freedv700Clip("/FreeDV700/txClip", true)
-    , freedv700TxBPF("/FreeDV700/txBPF", true)
         
     , noiseSNR("/Noise/noise_snr", 2)
         
@@ -98,7 +94,6 @@ FreeDVConfiguration::FreeDVConfiguration()
     , snrSlow("/Audio/snrSlow", false)
         
         
-    , statsResetTimeSecs("/Stats/ResetTime", 10)
         
     , currentFreeDVMode("/Audio/mode", FREEDV_MODE_700D)
         
@@ -109,7 +104,6 @@ FreeDVConfiguration::FreeDVConfiguration()
 
     , txRxDelayMilliseconds("/Audio/TxRxDelayMilliseconds", 0)
 
-    , showDecodeStats("/Debug/showDecodeStats", false)
     , autoStartOnLaunch("/Modem/autoStartOnLaunch", false)
 {
     // empty
@@ -151,7 +145,6 @@ void FreeDVConfiguration::load(wxConfigBase* config)
 
     
     load_(config, halfDuplexMode);
-    load_(config, multipleReceiveEnabled);
     load_(config, textChatUsDataSegmentsOnly);
     load_(config, data2gEnabled);
     load_(config, data2gHost);
@@ -170,10 +163,7 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     load_(config, glissandoWindowTop);
     load_(config, glissandoWindowWidth);
     load_(config, glissandoWindowHeight);
-    load_(config, multipleReceiveOnSingleThread);
     
-    load_(config, freedv700Clip);
-    load_(config, freedv700TxBPF);
     
     load_(config, noiseSNR);
     
@@ -183,7 +173,6 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     
     
     
-    load_(config, statsResetTimeSecs);
     load_(config, currentFreeDVMode);
     
     
@@ -194,7 +183,6 @@ void FreeDVConfiguration::load(wxConfigBase* config)
 
     load_(config, txRxDelayMilliseconds);
 
-    load_(config, showDecodeStats);
     load_(config, autoStartOnLaunch);
 
     load_(config, txAttenByBand);
@@ -237,7 +225,6 @@ void FreeDVConfiguration::save(wxConfigBase* config)
 
     
     save_(config, halfDuplexMode);
-    save_(config, multipleReceiveEnabled);
     save_(config, textChatUsDataSegmentsOnly);
     save_(config, data2gEnabled);
     save_(config, data2gHost);
@@ -256,11 +243,8 @@ void FreeDVConfiguration::save(wxConfigBase* config)
     save_(config, glissandoWindowTop);
     save_(config, glissandoWindowWidth);
     save_(config, glissandoWindowHeight);
-    save_(config, multipleReceiveOnSingleThread);
     
     
-    save_(config, freedv700Clip);
-    save_(config, freedv700TxBPF);
     
     save_(config, noiseSNR);
     
@@ -270,7 +254,6 @@ void FreeDVConfiguration::save(wxConfigBase* config)
     
     
     
-    save_(config, statsResetTimeSecs);
     save_(config, currentFreeDVMode);
     
     
@@ -280,7 +263,6 @@ void FreeDVConfiguration::save(wxConfigBase* config)
 
     save_(config, txRxDelayMilliseconds);
 
-    save_(config, showDecodeStats);
     save_(config, autoStartOnLaunch);
 
     save_(config, txAttenByBand);

@@ -275,53 +275,20 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     wxBoxSizer* sizerModem = new wxBoxSizer(wxVERTICAL);
     
     //------------------------------
-    // FreeDV 700 Options
+    // Operation
     //------------------------------
 
-    wxStaticBoxSizer* sbSizer_freedv700;
-    wxStaticBox *sb_freedv700 = new wxStaticBox(m_modemTab, wxID_ANY, _("Modem Options"));
-    sbSizer_freedv700 = new wxStaticBoxSizer(sb_freedv700, wxHORIZONTAL);
+    wxStaticBox *sb_operation = new wxStaticBox(m_modemTab, wxID_ANY, _("Operation"));
+    wxStaticBoxSizer* sbSizer_operation = new wxStaticBoxSizer(sb_operation, wxHORIZONTAL);
 
-    m_ckboxFreeDV700txClip = new wxCheckBox(sb_freedv700, wxID_ANY, _("Clipping"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    sbSizer_freedv700->Add(m_ckboxFreeDV700txClip, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
+    m_ckboxAutoStartOnLaunch = new wxCheckBox(sb_operation, wxID_ANY, _("Start Automatically on Launch"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
+    sbSizer_operation->Add(m_ckboxAutoStartOnLaunch, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
 
-    m_ckboxFreeDV700txBPF = new wxCheckBox(sb_freedv700, wxID_ANY, _("TX Band Pass Filter"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    sbSizer_freedv700->Add(m_ckboxFreeDV700txBPF, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
+    m_ckHalfDuplex = new wxCheckBox(sb_operation, wxID_ANY, _("Half Duplex"), wxDefaultPosition, wxSize(-1,-1), 0);
+    m_ckHalfDuplex->SetToolTip(_("Mutes the receiver while transmitting, so Glissando does not hear itself."));
+    sbSizer_operation->Add(m_ckHalfDuplex, 0, static_cast<int>(wxALL) | wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL, 5);
 
-    m_ckboxAutoStartOnLaunch = new wxCheckBox(sb_freedv700, wxID_ANY, _("Start Automatically on Launch"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    sbSizer_freedv700->Add(m_ckboxAutoStartOnLaunch, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
-
-    sizerModem->Add(sbSizer_freedv700, 0, static_cast<int>(wxALL)|static_cast<int>(wxEXPAND), 5);
-
-    //------------------------------
-    // Half/Full duplex selection
-    //------------------------------
-
-    wxStaticBox *sb_duplex = new wxStaticBox(m_modemTab, wxID_ANY, _("Half/Full Duplex Operation"));
-    wxStaticBoxSizer* sbSizer_duplex = new wxStaticBoxSizer(sb_duplex, wxHORIZONTAL);
-
-    m_ckHalfDuplex = new wxCheckBox(sb_duplex, wxID_ANY, _("Half Duplex"), wxDefaultPosition, wxSize(-1,-1), 0);
-    sbSizer_duplex->Add(m_ckHalfDuplex, 0, static_cast<int>(wxALL) | wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL, 5);
-
-    sizerModem->Add(sbSizer_duplex,0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
-
-    //------------------------------
-    // Multiple RX selection
-    //------------------------------
-    wxStaticBox *sb_multirx = new wxStaticBox(m_modemTab, wxID_ANY, _("Multiple RX Operation"));
-    wxStaticBoxSizer* sbSizer_multirx = new wxStaticBoxSizer(sb_multirx, wxVERTICAL);
-
-    wxBoxSizer* sbSizer_simultaneousDecode = new wxBoxSizer(wxHORIZONTAL);
-    m_ckboxMultipleRx = new wxCheckBox(sb_multirx, wxID_ANY, _("Simultaneously Decode All HF Modes"), wxDefaultPosition, wxSize(-1,-1), 0);
-    sbSizer_simultaneousDecode->Add(m_ckboxMultipleRx, 0, static_cast<int>(wxALL) | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL, 5);
-    sbSizer_multirx->Add(sbSizer_simultaneousDecode, 0, wxALIGN_LEFT, 0);
-    
-    wxBoxSizer* sbSizer_singleThread = new wxBoxSizer(wxHORIZONTAL);
-    m_ckboxSingleRxThread = new wxCheckBox(sb_multirx, wxID_ANY, _("Use single thread for multiple RX operation"), wxDefaultPosition, wxSize(-1,-1), 0);
-    sbSizer_singleThread->Add(m_ckboxSingleRxThread, 0, static_cast<int>(wxALL) | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL, 5);
-    sbSizer_multirx->Add(sbSizer_singleThread, 0, wxALIGN_LEFT, 0);
-    
-    sizerModem->Add(sbSizer_multirx,0, static_cast<int>(wxALL)|static_cast<int>(wxEXPAND), 5);
+    sizerModem->Add(sbSizer_operation, 0, static_cast<int>(wxALL)|static_cast<int>(wxEXPAND), 5);
 
     //------------------------------
     // Text chat
@@ -334,9 +301,9 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
         wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
     m_ckboxTextChatUsDataSegmentsOnly->SetToolTip(
         _("Text chat is sent as data, and US rules permit data only in certain segments of "
-          "the amateur bands, not the phone segments where FreeDV voice is usually worked. "
+          "the amateur bands, not the phone segments. "
           "While this is checked, text chat transmits only with the dial at least 3 kHz inside "
-          "a US amateur data segment, and not at all while FreeDV does not know the operating "
+          "a US amateur data segment, and not at all while Glissando does not know the operating "
           "frequency; it still receives."));
     sbSizer_textChat->Add(m_ckboxTextChatUsDataSegmentsOnly, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
 
@@ -385,23 +352,6 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
 
     sizerModem->Add(sbSizer_textChat, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
     
-    wxStaticBox *sb_modemstats = new wxStaticBox(m_modemTab, wxID_ANY, _("Modem Statistics"));
-    wxStaticBoxSizer* sbSizer_modemstats = new wxStaticBoxSizer(sb_modemstats, wxVERTICAL);
-
-    m_showDecodeStats = new wxCheckBox(sb_modemstats, wxID_ANY, _("Show Decode Stats"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    sbSizer_modemstats->Add(m_showDecodeStats, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5); 
-    
-    wxBoxSizer* sbSizer_statsResetTime = new wxBoxSizer(wxHORIZONTAL);
-    wxStaticText *m_staticTextResetTime = new wxStaticText(sb_modemstats, wxID_ANY, _("Time before resetting stats (in seconds):"), wxDefaultPosition, wxDefaultSize, 0);
-    sbSizer_statsResetTime->Add(m_staticTextResetTime, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-
-    m_statsResetTime = new wxTextCtrl(sb_modemstats, wxID_ANY,  wxEmptyString, wxDefaultPosition, wxSize(50,-1), 0, wxTextValidator(wxFILTER_DIGITS));
-    sbSizer_statsResetTime->Add(m_statsResetTime, 0, static_cast<int>(wxALL) | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL, 5);
-
-    sbSizer_modemstats->Add(sbSizer_statsResetTime, 0, wxALIGN_LEFT, 0);
-    
-    sizerModem->Add(sbSizer_modemstats,0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
-        
     m_modemTab->SetSizer(sizerModem);
     
     // Simulation tab
@@ -566,7 +516,6 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     m_ckboxTestFrame->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxScrollEventHandler(OptionsDlg::OnTestFrame), NULL, this);
     m_ckboxChannelNoise->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxScrollEventHandler(OptionsDlg::OnChannelNoise), NULL, this);
 
-    m_ckboxFreeDV700txClip->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxScrollEventHandler(OptionsDlg::OnFreeDV700txClip), NULL, this);
 
 #ifdef __WXMSW__
     m_ckboxDebugConsole->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxScrollEventHandler(OptionsDlg::OnDebugConsole), NULL, this);
@@ -580,7 +529,6 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
 
     m_ckboxTone->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnToneStateEnable), NULL, this);
     
-    m_ckboxMultipleRx->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnMultipleRxEnable), NULL, this);
     
 
     m_ckboxEnableSpacebarForPTT->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnEnableSpacebarForPTT), NULL, this);
@@ -617,7 +565,6 @@ OptionsDlg::~OptionsDlg()
     m_ckboxTestFrame->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxScrollEventHandler(OptionsDlg::OnTestFrame), NULL, this);
     m_ckboxChannelNoise->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxScrollEventHandler(OptionsDlg::OnChannelNoise), NULL, this);
 
-    m_ckboxFreeDV700txClip->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxScrollEventHandler(OptionsDlg::OnFreeDV700txClip), NULL, this);
     m_buttonChooseCsvLogFilePath->Disconnect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(OptionsDlg::OnChooseCsvLogFilePath), NULL, this);
 
     m_BtnFifoReset->Disconnect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(OptionsDlg::OnFifoReset), NULL, this);
@@ -628,7 +575,6 @@ OptionsDlg::~OptionsDlg()
     
     m_ckboxTone->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnToneStateEnable), NULL, this);
     
-    m_ckboxMultipleRx->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnMultipleRxEnable), NULL, this);
     
 
     m_ckboxEnableSpacebarForPTT->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnEnableSpacebarForPTT), NULL, this);
@@ -684,8 +630,6 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         
         m_ckHalfDuplex->SetValue(wxGetApp().appConfiguration.halfDuplexMode);
 
-        m_ckboxMultipleRx->SetValue(wxGetApp().appConfiguration.multipleReceiveEnabled);
-        m_ckboxSingleRxThread->SetValue(wxGetApp().appConfiguration.multipleReceiveOnSingleThread);
         m_ckboxTextChatUsDataSegmentsOnly->SetValue(wxGetApp().appConfiguration.textChatUsDataSegmentsOnly);
         m_ckboxGlissandoChords->SetValue(wxGetApp().appConfiguration.glissandoChords);
         m_ckboxData2G->SetValue(wxGetApp().appConfiguration.data2gEnabled);
@@ -709,10 +653,7 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
 
         m_txtCtrlFifoSize->SetValue(wxString::Format(wxT("%i"),wxGetApp().appConfiguration.fifoSizeMs.get()));
 
-        m_showDecodeStats->SetValue(wxGetApp().appConfiguration.showDecodeStats);
 
-        m_ckboxFreeDV700txClip->SetValue(wxGetApp().appConfiguration.freedv700Clip);
-        m_ckboxFreeDV700txBPF->SetValue(wxGetApp().appConfiguration.freedv700TxBPF);
         m_ckboxAutoStartOnLaunch->SetValue(wxGetApp().appConfiguration.autoStartOnLaunch);
 
 #ifdef __WXMSW__
@@ -725,7 +666,6 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         m_txtCtrlCsvLogFilePath->SetValue(wxGetApp().appConfiguration.reportingConfiguration.csvLogFilePath);
 
         // Stats reset time
-        m_statsResetTime->SetValue(wxString::Format(wxT("%i"), wxGetApp().appConfiguration.statsResetTimeSecs.get()));
         
         if (wxGetApp().appConfiguration.reportingConfiguration.reportingFrequencyAsKhz)
         {
@@ -741,7 +681,6 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         updateChannelNoiseState();
         updateAttnCarrierState();
         updateToneState();
-        updateMultipleRxState();
         updateRigControlState();
 
         wxCommandEvent tmpEvent;
@@ -777,8 +716,6 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqChangesOnly = m_rbFrequencyControl->GetValue();
         
         wxGetApp().appConfiguration.halfDuplexMode = m_ckHalfDuplex->GetValue();
-        wxGetApp().appConfiguration.multipleReceiveEnabled = m_ckboxMultipleRx->GetValue();
-        wxGetApp().appConfiguration.multipleReceiveOnSingleThread = m_ckboxSingleRxThread->GetValue();
         wxGetApp().appConfiguration.textChatUsDataSegmentsOnly = m_ckboxTextChatUsDataSegmentsOnly->GetValue();
         wxGetApp().appConfiguration.glissandoChords = m_ckboxGlissandoChords->GetValue();
         wxGetApp().appConfiguration.data2gEnabled = m_ckboxData2G->GetValue();
@@ -816,9 +753,6 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         wxGetApp().appConfiguration.fifoSizeMs = (int)FifoSize_ms;
 
 
-        wxGetApp().appConfiguration.showDecodeStats = m_showDecodeStats->GetValue();
-        wxGetApp().appConfiguration.freedv700Clip = m_ckboxFreeDV700txClip->GetValue();
-        wxGetApp().appConfiguration.freedv700TxBPF = m_ckboxFreeDV700txBPF->GetValue();
         wxGetApp().appConfiguration.autoStartOnLaunch = m_ckboxAutoStartOnLaunch->GetValue();
 
 #ifdef __WXMSW__
@@ -830,11 +764,6 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         // CSV log file path
         wxGetApp().appConfiguration.reportingConfiguration.csvLogFilePath = m_txtCtrlCsvLogFilePath->GetValue();
 
-        // Stats reset time
-        long resetTime;
-        m_statsResetTime->GetValue().ToLong(&resetTime);
-        wxGetApp().appConfiguration.statsResetTimeSecs = resetTime;
-        
         if (storePersistent) {
             wxGetApp().appConfiguration.save(pConfig);
             
@@ -947,10 +876,6 @@ void OptionsDlg::OnChooseCsvLogFilePath(wxCommandEvent&) {
     m_txtCtrlCsvLogFilePath->SetValue(fileDialog.GetPath());
 }
 
-void OptionsDlg::OnFreeDV700txClip(wxScrollEvent&) {
-    wxGetApp().appConfiguration.freedv700Clip = m_ckboxFreeDV700txClip->GetValue();
-}
-
 void OptionsDlg::OnDebugConsole(wxScrollEvent&) {
     wxGetApp().appConfiguration.debugConsoleEnabled = m_ckboxDebugConsole->GetValue();
 #ifdef __WXMSW__
@@ -997,21 +922,6 @@ void OptionsDlg::updateToneState()
     m_txtToneAmplitude->Enable(m_ckboxTone->GetValue());
 }
 
-void OptionsDlg::updateMultipleRxState()
-{
-    if (!sessionActive_)
-    {
-        m_ckboxMultipleRx->Enable(true);
-        m_ckboxSingleRxThread->Enable(m_ckboxMultipleRx->GetValue());
-    }
-    else
-    {
-        // Multi-RX settings cannot be updated during a session.
-        m_ckboxMultipleRx->Enable(false);
-        m_ckboxSingleRxThread->Enable(false);
-    }
-}
-
 void OptionsDlg::updateRigControlState()
 {
     if (!sessionActive_)
@@ -1034,11 +944,6 @@ void OptionsDlg::updateRigControlState()
 void OptionsDlg::OnToneStateEnable(wxCommandEvent&)
 {
     updateToneState();
-}
-
-void OptionsDlg::OnMultipleRxEnable(wxCommandEvent&)
-{
-    updateMultipleRxState();
 }
 
 void OptionsDlg::OnEnableSpacebarForPTT(wxCommandEvent&)

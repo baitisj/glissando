@@ -60,7 +60,6 @@ public:
     int getTxMode() const { return txMode_; }
     bool isRunning() const { return dvObjects_.size() > 0; }
     bool isModeActive(int mode) const { return std::find(enabledModes_.begin(), enabledModes_.end(), mode) != enabledModes_.end(); }
-    void setRunTimeOptions(bool clip, bool bpf);
     
     const char* getCurrentModeStr() const;
     const char* getCurrentTxModeStr() const;

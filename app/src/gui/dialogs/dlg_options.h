@@ -61,13 +61,11 @@ class OptionsDlg : public wxDialog
  
         void    OnTestFrame(wxScrollEvent& event);
         void    OnChannelNoise(wxScrollEvent& event);
-        void    OnFreeDV700txClip(wxScrollEvent& event);
         void    OnDebugConsole(wxScrollEvent& event);
 
         void    OnFifoReset(wxCommandEvent& event);
         
         void    OnToneStateEnable(wxCommandEvent& event);
-        void    OnMultipleRxEnable(wxCommandEvent& event);
         void    OnEnableSpacebarForPTT(wxCommandEvent& event);
         void    OnSetPTTKey(wxCommandEvent& event);
         void    OnTOTTimerEnable(wxCommandEvent& event);
@@ -113,8 +111,6 @@ class OptionsDlg : public wxDialog
         wxTextCtrl   *m_txtToneFreqHz;
         wxTextCtrl   *m_txtToneAmplitude;
 
-        wxCheckBox   *m_ckboxFreeDV700txClip;
-        wxCheckBox   *m_ckboxFreeDV700txBPF;
         wxCheckBox   *m_ckboxAutoStartOnLaunch;
 
         wxTextCtrl    *m_txt_callsign;
@@ -126,7 +122,6 @@ class OptionsDlg : public wxDialog
         wxStaticText  *m_textPA1;
         wxStaticText  *m_textPA2;
         wxTextCtrl    *m_txtCtrlFifoSize;
-        wxCheckBox    *m_showDecodeStats;
         
         wxButton*     m_sdbSizer5OK;
         wxButton*     m_sdbSizer5Cancel;
@@ -134,8 +129,6 @@ class OptionsDlg : public wxDialog
 
         wxCheckBox   *m_ckboxDebugConsole;
 
-        wxCheckBox*  m_ckboxMultipleRx;
-        wxCheckBox*  m_ckboxSingleRxThread;
         wxCheckBox*  m_ckboxTextChatUsDataSegmentsOnly;
         wxCheckBox*  m_ckboxGlissandoChords;
         wxCheckBox*  m_ckboxData2G;
@@ -144,7 +137,6 @@ class OptionsDlg : public wxDialog
         wxCheckBox*  m_ckboxData2GCommandPort;
         wxTextCtrl*  m_txtData2GCommandPort;
         void updateData2GControls_();
-        wxTextCtrl*  m_statsResetTime;
         
         wxListBox*  m_freqList;
         wxStaticText* m_labelEnterFreq;
@@ -170,7 +162,6 @@ class OptionsDlg : public wxDialog
          void updateChannelNoiseState();
          void updateAttnCarrierState();
          void updateToneState();
-         void updateMultipleRxState();
          void updateRigControlState();
          
          bool sessionActive_;

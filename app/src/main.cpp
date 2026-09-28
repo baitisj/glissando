@@ -134,7 +134,6 @@ std::atomic<bool>  g_half_duplex;
 // tx/rx processing states
 std::atomic<int>                 g_State, g_prev_State;
 paCallBackData     *g_rxUserdata;
-time_t              g_sync_time;
 
 // FIFOs used for plotting waveforms
 constexpr int PLOT_BUF_MULTIPLIER=8;
@@ -1079,7 +1078,7 @@ void MainFrame::loadConfiguration_()
     
     
     
-    statsBox->Show(wxGetApp().appConfiguration.showDecodeStats);
+    statsBox->Show(false);
 }
 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=--=-=-=-=
@@ -1291,9 +1290,6 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("FreeDV ")
 
     optionsDlg = new OptionsDlg(NULL);
     m_schedule_restore = false;
-
-
-    m_timeSinceSyncLoss = 0;
 
     // Init optional Windows debug console so we can see all those printfs
 
@@ -2049,34 +2045,7 @@ void MainFrame::OnTimer(wxTimerEvent &evt)
                 if (g_prev_State.load(std::memory_order_acquire) == 0) 
                 {
                     g_resyncs++;
-                
-                    // Auto-reset stats if we've gone long enough since losing sync.
-                    // NOTE: m_timeSinceSyncLoss is in milliseconds.
-                    if (m_timeSinceSyncLoss >= wxGetApp().appConfiguration.statsResetTimeSecs * 1000)
-                    {
-                        resetStats_();
-                        
-                        // Clear RX text to reduce the incidence of incorrect callsigns extracted with
-                        // the PSK Reporter callsign extraction logic.
-                        m_txtCtrlCallSign->SetValue(EMPTY_STR);
-                        m_cboLastReportedCallsigns->SetValue(EMPTY_STR);
-                        m_cboLastReportedCallsigns->Enable(m_lastReportedCallsignListView->GetItemCount() > 0);
-                        memset(m_callsign, 0, MAX_CALLSIGN);
-                        m_pcallsign = m_callsign;
-            
-                        // Get current time to enforce minimum sync time requirement for PSK Reporter.
-                        g_sync_time = time(0);
-            
-                        freedvInterface.resetReliableText();
-                    }
                 }
-                m_timeSinceSyncLoss = 0;
-            }
-            else
-            {
-                // Counts the amount of time since losing sync. Once we exceed
-                // wxGetApp().appConfiguration.statsResetTimeSecs, we will reset the stats. 
-                m_timeSinceSyncLoss += _REFRESH_TIMER_PERIOD;
             }
         
             if (oldColor != newColor)
@@ -2087,11 +2056,6 @@ void MainFrame::OnTimer(wxTimerEvent &evt)
             }
         }
         g_prev_State.store(state, std::memory_order_release);
-
-        // set some run time options (if applicable)
-        freedvInterface.setRunTimeOptions(
-            (int)wxGetApp().appConfiguration.freedv700Clip,
-            (int)wxGetApp().appConfiguration.freedv700TxBPF);
 
         // Test Frame Bit Error Updates ------------------------------------
 
@@ -2338,7 +2302,6 @@ void MainFrame::performFreeDVOn_()
     endingTx.store(false, std::memory_order_release);
     g_tx.store(false, std::memory_order_release);
     
-    m_timeSinceSyncLoss = 0;
     syncState_ = false;
 
     executeOnUiThreadAndWait_([&]() 
@@ -2384,41 +2347,17 @@ void MainFrame::performFreeDVOn_()
         wxCommandEvent tmpEvent;
         OnChangeTxMode(tmpEvent);
 
-        if (!wxGetApp().appConfiguration.multipleReceiveEnabled)
-        {
-            m_rb1600->Disable();
-            m_rb700d->Disable();
-            m_rb700e->Disable();
-            freedvInterface.addRxMode(g_mode);
-        }
-        else
-        {
-            int rxModes[] = {
-                FREEDV_MODE_1600,
-                FREEDV_MODE_700E,
-                FREEDV_MODE_700D,
-            };
-
-            for (auto& mode : rxModes)
-            {
-                freedvInterface.addRxMode(mode);
-            }
-        
-            // If we're receive-only, it doesn't make sense to be able to change TX mode.
-            if (g_nSoundCards <= 1)
-            {
-                m_rb1600->Disable();
-                m_rb700d->Disable();
-                m_rb700e->Disable();
-            }
-        }
+        m_rb1600->Disable();
+        m_rb700d->Disable();
+        m_rb700e->Disable();
+        freedvInterface.addRxMode(g_mode);
         
         // Default voice keyer sample rate to 8K. The exact voice keyer
         // sample rate will be determined when the .wav file is loaded.
         g_sfTxFs.store(FS, std::memory_order_release);
     
         wxGetApp().m_prevMode = g_mode;
-        freedvInterface.start(g_mode, wxGetApp().appConfiguration.fifoSizeMs, !wxGetApp().appConfiguration.multipleReceiveEnabled || wxGetApp().appConfiguration.multipleReceiveOnSingleThread, false);
+        freedvInterface.start(g_mode, wxGetApp().appConfiguration.fifoSizeMs, true, false);
 
         g_error_hist = new short[MODEM_STATS_NC_MAX*2];
         g_error_histn = new short[MODEM_STATS_NC_MAX*2];
