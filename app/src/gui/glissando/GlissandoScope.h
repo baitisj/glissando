@@ -66,10 +66,10 @@ struct GlissandoScopeFrame
     bool completed = false;         // this frame finished a chat frame
 };
 
-// A frame we are sending. While it goes out its tune marches down the trace
-// as a formation of sprites, one in each note's column: Captain Proton's
-// rocket ships for the pentatonic scale, Chaotica's invaders for the
-// tritone scales.
+// A frame we are sending. While it goes out its tune is printed into the
+// waterfall itself as rows of pixel art ships, one in each note's column:
+// Captain Proton's rocket ships for the pentatonic scale, Chaotica's
+// invaders for the tritone scales.
 struct GlissandoScopeSent
 {
     double symbolSeconds = 0.16;
@@ -163,12 +163,14 @@ private:
     void sizeHistory();
     void renderTrace(wxImage& image);
     void paintHeard(wxGraphicsContext* gc, const wxRect& trace);
-    void paintSent(wxGraphicsContext* gc, const wxRect& trace);
 
     // Plays the queued sent frames forward to the transmit clock, gathering
-    // their notes into formations.
+    // the notes sung for the next row of ships.
     void advanceSent(double now);
-    double formationSeconds() const;
+
+    // Paints the next line of the row of ships being printed, if any, into
+    // the newest row of history.
+    void printShips(unsigned char* row);
 
     SpectrumSource source_;
     wxTimer timer_;
@@ -221,20 +223,15 @@ private:
     double lastTick_;
     double lastTransmitting_;
 
-    // Sprites drawn across the trace: the notes sung in `window` seconds
-    // ending at `seconds` on the steady clock, one sprite each.
-    struct Formation
-    {
-        double seconds = 0.0;
-        double window = 0.0;
-        bool heroes = true;
-        int serial = 0;
-        std::vector<double> notesHz;
-    };
-    std::deque<Formation> formations_;
-    Formation gathering_;           // notes played since the last formation
-    double gatheringFrom_;          // on the transmit clock; negative while empty
-    int formationSerial_;
+    // Ships are printed a line per row of history, bottom line first, so
+    // they scroll into view the right way up. The notes sung while one row
+    // of ships prints make up the next.
+    std::vector<double> gatheringHz_;
+    bool gatheringHeroes_;
+    std::vector<double> printingHz_;
+    bool printingHeroes_;
+    int printingLine_;              // lines printed of the current row; -1 none
+    int shipSerial_;
 };
 
 #endif // GUI_GLISSANDO__GLISSANDO_SCOPE_H
