@@ -125,10 +125,11 @@ public:
     void setTransmitInhibited(const std::string& reason);
     std::string transmitInhibitedReason() const;
 
-    // The operator has stopped the transmitter. What was on the air and
-    // everything waiting behind it is dropped as aborted, so nothing keys
-    // again on its own; the transport stops the keying itself. A message
-    // already sent and waiting for its acknowledgement is left to it.
+    // The operator has stopped the transmitter. Everything outstanding is
+    // dropped as aborted, so nothing keys again on its own: what was on the
+    // air, what was waiting behind it, and what was sent and waiting for an
+    // acknowledgement, which would otherwise retry. The transport stops the
+    // keying itself.
     void abortTransmission();
 
     // Replaces the clocks the protocol reads. Milliseconds must be monotonic
@@ -263,7 +264,7 @@ private:
                             std::vector<PendingEvent>& events);
     void purgeStaleReassembliesLocked(uint64_t nowMs);
     void discardQueuedLocked(std::vector<PendingEvent>& events);
-    void dropOutboxLocked(MessageStatus status, bool onTheAirToo, std::vector<PendingEvent>& events);
+    void dropOutboxLocked(MessageStatus status, bool everything, std::vector<PendingEvent>& events);
 
     // Holds the transmitter off until the far end has had its turn. Never
     // shortens a wait that is already running. The first holds everything;

@@ -895,31 +895,41 @@ void testRepliesDoNotWaitForTheAnsweredStationsTurn()
           decodeOne(replier.transport.transmissions.back()[0]).type == FrameType::MessageAck);
 }
 
-// Abort stops the message on the air and the one queued behind it, and
-// neither keys again on its own afterwards, however long the station waits.
-void testAbortDropsWhatIsOnTheAirAndQueued()
+// Abort stops the message on the air, the one queued behind it and the retries
+// of one already sent and waiting for its acknowledgement, and none of them
+// keys again on its own afterwards, however long the station waits.
+void testAbortDropsEverythingOutstanding()
 {
     std::string error;
 
     Station station("VK3ABC");
+    CHECK(station.protocol.sendMessage("sent earlier", "W1AW", error));
+    int64_t sentEarlier = station.observer.added[0].id;
+    station.completeOneTransmission();
+    CHECK(station.transport.transmissions.size() == 1);
+    const TextMessage* update = station.observer.lastUpdateFor(sentEarlier);
+    CHECK(update != nullptr && update->status == MessageStatus::AwaitingAck);
+
     CHECK(station.protocol.sendMessage("on the air", "W1AW", error));
     CHECK(station.protocol.sendMessage("waiting", "W1AW", error));
-    int64_t onAir = station.observer.added[0].id;
-    int64_t waiting = station.observer.added[1].id;
+    int64_t onAir = station.observer.added[1].id;
+    int64_t waiting = station.observer.added[2].id;
 
     station.nowMs += std::max(MAX_TURNAROUND_MILLISECONDS, MAX_RETRY_BACKOFF_MILLISECONDS) + 1;
     station.protocol.tick();
-    CHECK(station.transport.transmissions.size() == 1);
+    CHECK(station.transport.transmissions.size() == 2);
     CHECK(station.transport.transmitting);
 
     station.protocol.abortTransmission();
     station.transport.transmitting = false; // the transport has unkeyed
     CHECK(station.protocol.pendingCount() == 0);
 
-    const TextMessage* update = station.observer.lastUpdateFor(onAir);
+    update = station.observer.lastUpdateFor(onAir);
     CHECK(update != nullptr && update->status == MessageStatus::Aborted);
     CHECK(update != nullptr && deliveryChipState(*update).kind == DeliveryChipKind::Aborted);
     update = station.observer.lastUpdateFor(waiting);
+    CHECK(update != nullptr && update->status == MessageStatus::Aborted);
+    update = station.observer.lastUpdateFor(sentEarlier);
     CHECK(update != nullptr && update->status == MessageStatus::Aborted);
 
     for (int i = 0; i < 20; i++)
@@ -927,7 +937,7 @@ void testAbortDropsWhatIsOnTheAirAndQueued()
         station.nowMs += 60 * 1000;
         station.protocol.tick();
     }
-    CHECK(station.transport.transmissions.size() == 1);
+    CHECK(station.transport.transmissions.size() == 2);
 }
 
 // A station on a frequency where it may not send data transmits nothing at
@@ -1802,7 +1812,7 @@ int main()
     testOwnTrafficWaitsUntilListenersLetGo();
     testRepliesDoNotWaitForTheAnsweredStationsTurn();
     testInhibitedStationTransmitsNothing();
-    testAbortDropsWhatIsOnTheAirAndQueued();
+    testAbortDropsEverythingOutstanding();
     testInhibitingLeavesSentMessagesToTheirAnswers();
     testFragmentsStillToComeReserveTheChannel();
     testReservationFollowsTheBurstsStillToCome();
