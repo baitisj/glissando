@@ -34,7 +34,7 @@ double timeSearch(const std::vector<float>& window, int gear, long long firstSta
         std::vector<const detail::VoiceTemplates*> hypotheses;
         for (Scale scale : listenedScales(Scale::Pentatonic, anyScale))
         {
-            held.push_back(detail::voiceTemplates(scale, voice, gear, 0.0));
+            held.push_back(detail::voiceTemplates(scale, voice, gear, 0, 0.0));
             hypotheses.push_back(held.back().get());
         }
         detail::VoiceDecode d = detail::receiveVoice(z, info, hypotheses, firstStart, firstStart + hop, 25.0, 3);
@@ -61,10 +61,10 @@ int main()
 
         // Build the templates first; that happens once per gear, not per search.
         auto built = std::chrono::steady_clock::now();
-        for (int voice = 0; voice < info.voices; voice++) detail::voiceTemplates(Scale::Pentatonic, voice, gear, 0.0);
+        for (int voice = 0; voice < info.voices; voice++) detail::voiceTemplates(Scale::Pentatonic, voice, gear, 0, 0.0);
         double buildSeconds = secondsSince(built);
         for (int voice = 0; voice < info.voices; voice++)
-            for (int scale = 0; scale < SCALE_COUNT; scale++) detail::voiceTemplates((Scale)scale, voice, gear, 0.0);
+            for (int scale = 0; scale < SCALE_COUNT; scale++) detail::voiceTemplates((Scale)scale, voice, gear, 0, 0.0);
 
         std::vector<float> noise((size_t)length);
         for (float& v : noise) v = (float)(0.3 * rng.gaussian());

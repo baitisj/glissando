@@ -226,7 +226,8 @@ void TextMessagingProtocol::dropOutboxLocked(MessageStatus status, bool everythi
 
 AirTiming AirTiming::forFrameSeconds(double frameSeconds, int bytesPerFrame,
                                      double decodeLatencySeconds, double replyFrameSeconds,
-                                     double replyDecodeLatencySeconds)
+                                     double replyDecodeLatencySeconds, double burstStartSeconds,
+                                     double burstBookendSeconds)
 {
     AirTiming timing;
     if (frameSeconds <= 0.0 || bytesPerFrame <= 0) return timing;
@@ -234,13 +235,13 @@ AirTiming AirTiming::forFrameSeconds(double frameSeconds, int bytesPerFrame,
     auto ms = [](double seconds) { return (int)std::lround(seconds * 1000.0); };
     auto frames = [bytesPerFrame](int bytes) { return (bytes + bytesPerFrame - 1) / bytesPerFrame; };
 
-    double signallingAir = frames(SIGNALLING_FRAME_BYTES) * frameSeconds;
-    double textAir = frames(TEXT_FRAME_BYTES) * frameSeconds;
+    double signallingAir = frames(SIGNALLING_FRAME_BYTES) * frameSeconds + burstBookendSeconds;
+    double textAir = frames(TEXT_FRAME_BYTES) * frameSeconds + burstBookendSeconds;
 
     // The far end hears a burst of ours only once its first frame has been
     // decoded, a frame and a search after it began, and we hear its answer
     // the same way; the codec2 waits stay as they are on top of that.
-    double seen = frameSeconds + decodeLatencySeconds;
+    double seen = frameSeconds + burstStartSeconds + decodeLatencySeconds;
 
     // With the far end's tempo given, answers are waited for as it sends
     // them. It decodes our last frame, turns around, and having heard us on

@@ -80,8 +80,16 @@ FreeDVConfiguration::FreeDVConfiguration()
     , glissandoGear("/Glissando/Gear", 3)
     , glissandoAutoGear("/Glissando/AutoGear", true)
     , glissandoScale("/Glissando/Scale", "pentatonic")
+    , glissandoScaleDegree("/Glissando/ScaleDegree", 0)
+    , glissandoChorus("/Glissando/Chorus", false)
     , glissandoTuningDeciHz("/Glissando/TuningDeciHz", 0)
     , glissandoListenAllGears("/Glissando/ListenAllGears", true)
+    , glissandoChordBookendsEnabled("/Glissando/ChordBookendsEnabled", false)
+    , glissandoChordBookendDeciSeconds("/Glissando/ChordBookendDeciSeconds", 10)
+    , glissandoChordPreambleEnabled("/Glissando/ChordPreambleEnabled", false)
+    , glissandoChordTailEnabled("/Glissando/ChordTailEnabled", false)
+    , glissandoChordPreambleDeciSeconds("/Glissando/ChordPreambleDeciSeconds", 10)
+    , glissandoChordTailDeciSeconds("/Glissando/ChordTailDeciSeconds", 10)
     , glissandoScanRateDeci("/Glissando/ScanRateDeci", 40)
     , glissandoScopeLens("/Glissando/ScopeLens", true)
     , glissandoWindowLeft("/Glissando/WindowLeft", -1)
@@ -215,8 +223,26 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     load_(config, glissandoGear);
     load_(config, glissandoAutoGear);
     load_(config, glissandoScale);
+    load_(config, glissandoScaleDegree);
+    load_(config, glissandoChorus);
     load_(config, glissandoTuningDeciHz);
     load_(config, glissandoListenAllGears);
+    load_(config, glissandoChordBookendsEnabled);
+    load_(config, glissandoChordBookendDeciSeconds);
+    bool hasPreambleSetting = config->HasEntry("/Glissando/ChordPreambleEnabled");
+    bool hasTailSetting = config->HasEntry("/Glissando/ChordTailEnabled");
+    bool hasPreambleDuration = config->HasEntry("/Glissando/ChordPreambleDeciSeconds");
+    bool hasTailDuration = config->HasEntry("/Glissando/ChordTailDeciSeconds");
+    load_(config, glissandoChordPreambleEnabled);
+    load_(config, glissandoChordTailEnabled);
+    load_(config, glissandoChordPreambleDeciSeconds);
+    load_(config, glissandoChordTailDeciSeconds);
+    if (!hasPreambleSetting) glissandoChordPreambleEnabled = (bool)glissandoChordBookendsEnabled;
+    if (!hasTailSetting) glissandoChordTailEnabled = (bool)glissandoChordBookendsEnabled;
+    if (!hasPreambleDuration)
+        glissandoChordPreambleDeciSeconds = (int)glissandoChordBookendDeciSeconds;
+    if (!hasTailDuration)
+        glissandoChordTailDeciSeconds = (int)glissandoChordBookendDeciSeconds;
     load_(config, glissandoScanRateDeci);
     load_(config, glissandoScopeLens);
     load_(config, glissandoWindowLeft);
@@ -317,8 +343,14 @@ void FreeDVConfiguration::save(wxConfigBase* config)
     save_(config, glissandoGear);
     save_(config, glissandoAutoGear);
     save_(config, glissandoScale);
+    save_(config, glissandoScaleDegree);
+    save_(config, glissandoChorus);
     save_(config, glissandoTuningDeciHz);
     save_(config, glissandoListenAllGears);
+    save_(config, glissandoChordPreambleEnabled);
+    save_(config, glissandoChordTailEnabled);
+    save_(config, glissandoChordPreambleDeciSeconds);
+    save_(config, glissandoChordTailDeciSeconds);
     save_(config, glissandoScanRateDeci);
     save_(config, glissandoScopeLens);
     save_(config, glissandoWindowLeft);

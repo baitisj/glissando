@@ -65,6 +65,8 @@ constexpr float GLISSANDO_PEAK = 16384.0f;
 
 // Allowance for a receiver search to finish once its audio is in.
 constexpr double GLISSANDO_SEARCH_SECONDS = 1.0;
+constexpr uint64_t CHORUS_ANNOUNCE_INTERVAL_MS = 60000;
+constexpr uint64_t CHORUS_STATION_TIMEOUT_MS = 300000;
 
 // Automatic gear shifting follows the last frame heard for this long, then
 // falls back to the tempo chosen by hand: an old report says nothing about
@@ -108,6 +110,69 @@ float modemSnr(struct freedv* modem)
     float snr = 0.0f;
     freedv_get_modem_stats(modem, &sync, &snr);
     return snr;
+}
+
+uint8_t packChorusChannel(int gear, Glissando::Scale scale, int degree)
+{
+    int degreeIndex = 0;
+    for (; degreeIndex < Glissando::SCALE_DEGREE_COUNT; ++degreeIndex)
+        if (Glissando::SCALE_DEGREES[degreeIndex] == degree) break;
+    if (gear < Glissando::MIN_GEAR || gear > Glissando::MAX_GEAR ||
+        degreeIndex >= Glissando::SCALE_DEGREE_COUNT)
+        return 0;
+    return (uint8_t)(((gear - 1) << 5) | ((int)scale << 3) | (degreeIndex << 1) | 1);
+}
+
+bool unpackChorusChannel(uint8_t packed, int& gear, Glissando::Scale& scale, int& degree);
+
+Glissando::Payload makeChorusBeacon(const std::string& callsign, int gear,
+                                    Glissando::Scale scale, int degree)
+{
+    Glissando::Payload payload{};
+    uint8_t packedCallsign[6]{};
+    FrameCodec::packCallsign(callsign, packedCallsign);
+    uint8_t body[Glissando::SEGMENT_DATA_BYTES]{};
+    body[0] = 0xC7;
+    std::memcpy(body + 1, packedCallsign, sizeof(packedCallsign));
+    body[7] = packChorusChannel(gear, scale, degree);
+    body[8] = 0xA5;
+    payload[0] = 0; // signalling
+    payload[1] = payload[2] = payload[3] = 1; // reserved segment index 7
+    payload[4] = 1; // final segment
+    int bit = Glissando::SEGMENT_HEADER_BITS;
+    for (uint8_t byte : body)
+        for (int shift = 7; shift >= 0; --shift)
+            payload[bit++] = (byte >> shift) & 1;
+    return payload;
+}
+
+bool decodeChorusBeacon(const Glissando::Payload& payload, std::string& callsign,
+                        int& gear, Glissando::Scale& scale, int& degree)
+{
+    if (payload[0] != 0 || payload[1] != 1 || payload[2] != 1 ||
+        payload[3] != 1 || payload[4] != 1) return false;
+    uint8_t body[Glissando::SEGMENT_DATA_BYTES]{};
+    int bit = Glissando::SEGMENT_HEADER_BITS;
+    for (uint8_t& byte : body)
+        for (int shift = 7; shift >= 0; --shift)
+            byte |= (payload[bit++] & 1) << shift;
+    if (body[0] != 0xC7 || body[8] != 0xA5 ||
+        !unpackChorusChannel(body[7], gear, scale, degree)) return false;
+    callsign = FrameCodec::unpackCallsign(body + 1);
+    return !callsign.empty();
+}
+
+bool unpackChorusChannel(uint8_t packed, int& gear, Glissando::Scale& scale, int& degree)
+{
+    if ((packed & 1) == 0) return false; // version 1
+    int gearCode = (packed >> 5) & 7;
+    int scaleCode = (packed >> 3) & 3;
+    int degreeIndex = (packed >> 1) & 3;
+    if (gearCode >= Glissando::MAX_GEAR || degreeIndex >= Glissando::SCALE_DEGREE_COUNT) return false;
+    gear = gearCode + Glissando::MIN_GEAR;
+    scale = (Glissando::Scale)scaleCode;
+    degree = Glissando::SCALE_DEGREES[degreeIndex];
+    return true;
 }
 
 } // namespace
@@ -302,13 +367,62 @@ bool TextMessagingModem::modulate(const std::vector<OutgoingBurst>& bursts,
     if (glissandoOn_.load(std::memory_order_acquire))
     {
         Glissando::ModemSettings settings;
+        bool announceChorus = false;
+        std::string announceCallsign;
+        bool chordPreambleEnabled = false;
+        bool chordTailEnabled = false;
+        double chordPreambleSeconds = 1.0;
+        double chordTailSeconds = 1.0;
         {
             std::lock_guard<std::mutex> lock(glissandoMutex_);
             settings.gear = transmitGearLocked();
             settings.scale = glissando_.scale;
+            settings.scaleDegree = transmitScaleDegreeLocked();
             settings.tuningOffsetHz = glissando_.tuningOffsetHz;
+
+            chordPreambleEnabled = glissando_.chordPreambleEnabled;
+            chordTailEnabled = glissando_.chordTailEnabled;
+            chordPreambleSeconds = glissando_.chordPreambleSeconds;
+            chordTailSeconds = glissando_.chordTailSeconds;
+            settings.chordPreambleSeconds = chordPreambleSeconds;
+            settings.chordTailSeconds = chordTailSeconds;
+
+            uint64_t now = steadyMs();
+            bool changed = settings.gear != lastAnnouncedGear_ || settings.scale != lastAnnouncedScale_ ||
+                           settings.scaleDegree != lastAnnouncedDegree_ ||
+                           glissando_.callsign != lastAnnouncedCallsign_;
+            if (glissando_.chorus && !glissando_.callsign.empty() &&
+                (changed || now - lastChorusAnnouncementMs_ >= CHORUS_ANNOUNCE_INTERVAL_MS))
+            {
+                uint8_t channel = packChorusChannel(settings.gear, settings.scale, settings.scaleDegree);
+                if (channel != 0)
+                {
+                    announceChorus = true;
+                    announceCallsign = glissando_.callsign;
+                    lastChorusAnnouncementMs_ = now;
+                    lastAnnouncedGear_ = settings.gear;
+                    lastAnnouncedScale_ = settings.scale;
+                    lastAnnouncedDegree_ = settings.scaleDegree;
+                    lastAnnouncedCallsign_ = glissando_.callsign;
+                }
+            }
+
         }
         const Glissando::GearInfo& gear = Glissando::gearInfo(settings.gear);
+
+        if (announceChorus)
+        {
+            Glissando::ModemSettings control;
+            control.gear = 4;
+            control.scale = Glissando::Scale::Pentatonic;
+            control.scaleDegree = 0;
+            control.tuningOffsetHz = settings.tuningOffsetHz;
+            std::vector<float> audio = Glissando::modulate(
+                {makeChorusBeacon(announceCallsign, settings.gear, settings.scale, settings.scaleDegree)}, control);
+            for (float sample : audio) samplesOut.push_back((short)std::lround(sample * GLISSANDO_PEAK));
+            if (frameEndsOut != nullptr) frameEndsOut->push_back(samplesOut.size());
+            samplesOut.resize(samplesOut.size() + (size_t)(MODEM_SAMPLE_RATE * INTER_BURST_GAP_MS / 1000), 0);
+        }
 
         std::vector<Glissando::LinkBurst> linkBursts;
         for (const OutgoingBurst& burst : bursts)
@@ -319,9 +433,12 @@ bool TextMessagingModem::modulate(const std::vector<OutgoingBurst>& bursts,
 
         for (size_t first = 0; first + gear.voices <= payloads.size(); first += gear.voices)
         {
+            Glissando::ModemSettings frameSettings = settings;
+            frameSettings.chordPreambleEnabled = chordPreambleEnabled && first == 0;
+            frameSettings.chordTailEnabled = chordTailEnabled && first + gear.voices >= payloads.size();
             std::vector<Glissando::Payload> voices(payloads.begin() + first,
                                                    payloads.begin() + first + gear.voices);
-            std::vector<float> audio = Glissando::modulate(voices, settings);
+            std::vector<float> audio = Glissando::modulate(voices, frameSettings);
             {
                 std::lock_guard<std::mutex> lock(glissandoMutex_);
                 for (int v = 0; v < gear.voices; v++)
@@ -330,7 +447,9 @@ bool TextMessagingModem::modulate(const std::vector<OutgoingBurst>& bursts,
                     sent.gear = settings.gear;
                     sent.scale = settings.scale;
                     sent.voice = v;
-                    sent.notesHz = Glissando::scaleNotes(settings.scale, v);
+                    sent.notesHz = Glissando::scaleDegreeNotes(
+                      settings.scale, v, settings.scaleDegree
+                    );
                     for (double& hz : sent.notesHz) hz += settings.tuningOffsetHz;
                     sent.melody = Glissando::payloadMelody(voices[v]);
                     glissandoSent_.push_back(sent);
@@ -521,23 +640,33 @@ bool TextMessagingModem::isReceiving() const
 
 void TextMessagingModem::setGlissando(const GlissandoConfig& config)
 {
+    GlissandoConfig normalized = config;
+    normalized.scaleDegree = Glissando::normalizeScaleDegree(config.scaleDegree);
+    normalized.callsign = FrameCodec::normalizeCallsign(config.callsign);
+    normalized.chordPreambleSeconds = std::isfinite(config.chordPreambleSeconds)
+        ? std::min(10.0, std::max(0.1, config.chordPreambleSeconds)) : 1.0;
+    normalized.chordTailSeconds = std::isfinite(config.chordTailSeconds)
+        ? std::min(10.0, std::max(0.1, config.chordTailSeconds)) : 1.0;
     bool wasOn = false;
     {
         std::lock_guard<std::mutex> lock(glissandoMutex_);
         wasOn = glissando_.enabled;
+        if (normalized.chorus && !glissando_.chorus) lastAnnouncedDegree_ = -1;
         // A frame half heard in the old scale or tuning will not be
         // finished in the new one. Listening for every scale, our own scale
         // only changes what we send.
-        bool rescaled = config.scale != glissando_.scale && !(config.listenAllScales && glissando_.listenAllScales);
-        bool retuned = rescaled || config.listenAllScales != glissando_.listenAllScales ||
-                       config.tuningOffsetHz != glissando_.tuningOffsetHz;
-        glissando_ = config;
+        bool rescaled = normalized.scale != glissando_.scale &&
+                        !(normalized.listenAllScales && glissando_.listenAllScales);
+        bool retuned = rescaled || normalized.listenAllScales != glissando_.listenAllScales ||
+                       normalized.tuningOffsetHz != glissando_.tuningOffsetHz ||
+                       normalized.chorus != glissando_.chorus;
+        glissando_ = normalized;
         glissandoStatus_.transmitGear = transmitGearLocked();
         configureGlissandoReceiverLocked();
-        if (retuned || wasOn != config.enabled) reassembler_.reset();
+        if (retuned || wasOn != normalized.enabled) reassembler_.reset();
     }
-    if (wasOn != config.enabled) glissandoRx_->reset();
-    glissandoOn_.store(config.enabled, std::memory_order_release);
+    if (wasOn != normalized.enabled) glissandoRx_->reset();
+    glissandoOn_.store(normalized.enabled, std::memory_order_release);
 }
 
 TextMessagingModem::GlissandoConfig TextMessagingModem::glissandoConfig() const
@@ -551,6 +680,11 @@ TextMessagingModem::GlissandoStatus TextMessagingModem::glissandoStatus() const
     std::lock_guard<std::mutex> lock(glissandoMutex_);
     GlissandoStatus status = glissandoStatus_;
     status.transmitGear = transmitGearLocked();
+    status.transmitScaleDegree = transmitScaleDegreeLocked();
+    uint64_t now = steadyMs();
+    status.chorusParticipants = 0;
+    for (const auto& entry : chorusStations_)
+        if (now - entry.second.heardAtMs <= CHORUS_STATION_TIMEOUT_MS) ++status.chorusParticipants;
     return status;
 }
 
@@ -560,33 +694,29 @@ AirTiming TextMessagingModem::airTiming() const
 
     int gear = 0;
     double slowestFrameSeconds = 0.0;
+    bool preambleEnabled = false;
+    double preambleSeconds = 0.0;
+    double bookendSeconds = 0.0;
     {
         std::lock_guard<std::mutex> lock(glissandoMutex_);
         gear = transmitGearLocked();
-
-        // An answer can come in any tempo the receiver is listening for.
+        preambleEnabled = glissando_.chordPreambleEnabled;
+        preambleSeconds = glissando_.chordPreambleSeconds;
+        bookendSeconds = (glissando_.chordPreambleEnabled ? glissando_.chordPreambleSeconds : 0.0) +
+                         (glissando_.chordTailEnabled ? glissando_.chordTailSeconds : 0.0);
         std::vector<int> listening;
         if (glissando_.listenAllGears)
-        {
-            for (int g = Glissando::MIN_GEAR; g <= Glissando::MAX_GEAR; g++) listening.push_back(g);
-        }
-        else
-        {
-            listening = {glissando_.gear, gear};
-        }
+            for (int g = Glissando::MIN_GEAR; g <= Glissando::MAX_GEAR; ++g) listening.push_back(g);
+        else listening = {glissando_.gear, gear};
         for (int g : listening)
-        {
             slowestFrameSeconds = std::max(slowestFrameSeconds, Glissando::gearInfo(g).frameSeconds());
-        }
     }
     const Glissando::GearInfo& info = Glissando::gearInfo(gear);
-    // The receiver searches every quarter frame, and a search takes a
-    // moment on top of that.
     auto decodeLatency = [](double frameSeconds) { return frameSeconds / 4.0 + GLISSANDO_SEARCH_SECONDS; };
-    return AirTiming::forFrameSeconds(info.frameSeconds(),
-                                      Glissando::SEGMENT_DATA_BYTES * info.voices,
+    return AirTiming::forFrameSeconds(info.frameSeconds(), Glissando::SEGMENT_DATA_BYTES * info.voices,
                                       decodeLatency(info.frameSeconds()), slowestFrameSeconds,
-                                      decodeLatency(slowestFrameSeconds));
+                                      decodeLatency(slowestFrameSeconds),
+                                      preambleEnabled ? preambleSeconds : 0.0, bookendSeconds);
 }
 
 double TextMessagingModem::glissandoMessageSeconds(size_t textBytes) const
@@ -594,15 +724,17 @@ double TextMessagingModem::glissandoMessageSeconds(size_t textBytes) const
     if (!glissandoOn_.load(std::memory_order_acquire) || textBytes == 0) return 0.0;
 
     int gear = 0;
+    bool chorus = false;
+    double bookendSeconds = 0.0;
     {
         std::lock_guard<std::mutex> lock(glissandoMutex_);
         gear = transmitGearLocked();
+        chorus = glissando_.chorus;
+        bookendSeconds = (glissando_.chordPreambleEnabled ? glissando_.chordPreambleSeconds : 0.0) +
+                         (glissando_.chordTailEnabled ? glissando_.chordTailSeconds : 0.0);
     }
     const Glissando::GearInfo& info = Glissando::gearInfo(gear);
 
-    // The link trims a frame's zero padding off before cutting it into
-    // segments, so a fragment costs its header and its text, as the protocol
-    // cuts the message in sendMessage().
     textBytes = std::min(textBytes, (size_t)MAX_MESSAGE_TEXT_BYTES);
     std::vector<Glissando::LinkBurst> bursts;
     for (size_t offset = 0; offset < textBytes; offset += TEXT_BYTES_PER_FRAGMENT)
@@ -611,33 +743,87 @@ double TextMessagingModem::glissandoMessageSeconds(size_t textBytes) const
         bursts.push_back({true, std::vector<uint8_t>(TEXT_HEADER_BYTES + chunk, 0xFF)});
     }
 
-    return Glissando::framesForBursts(bursts, info.voices) * info.frameSeconds();
+    size_t frames = Glissando::framesForBursts(bursts, info.voices);
+    double seconds = frames * info.frameSeconds() + (frames != 0 ? bookendSeconds : 0.0);
+    if (chorus) seconds += Glissando::gearInfo(4).frameSeconds() + INTER_BURST_GAP_MS / 1000.0;
+    return seconds;
 }
 
 int TextMessagingModem::transmitGearLocked() const
 {
+    int gear = glissando_.gear;
     if (glissando_.autoGear && glissandoStatus_.haveReport && glissandoStatus_.advisedGear != 0 &&
         steadyMs() - glissandoStatus_.heardAtMs < (uint64_t)GLISSANDO_REPORT_LIFETIME_MS)
     {
-        return glissandoStatus_.advisedGear;
+        gear = glissandoStatus_.advisedGear;
     }
-    return glissando_.gear;
+    // The +3/+4 step positions put the duet's high voice above a 4 kHz
+    // channel. Keep those choices on a single-voice gear even in auto mode.
+    if (transmitScaleDegreeLocked() >= 3) gear = std::min(gear, 4);
+    return gear;
+}
+
+int TextMessagingModem::transmitScaleDegreeLocked() const
+{
+    if (!glissando_.chorus || glissando_.callsign.empty()) return glissando_.scaleDegree;
+
+    std::vector<std::string> callsigns{glissando_.callsign};
+    uint64_t now = steadyMs();
+    for (const auto& entry : chorusStations_)
+    {
+        if (entry.first != glissando_.callsign && entry.second.scale == glissando_.scale &&
+            now - entry.second.heardAtMs <= CHORUS_STATION_TIMEOUT_MS)
+            callsigns.push_back(entry.first);
+    }
+    std::sort(callsigns.begin(), callsigns.end());
+    auto own = std::find(callsigns.begin(), callsigns.end(), glissando_.callsign);
+    size_t slot = (size_t)std::distance(callsigns.begin(), own) % Glissando::SCALE_DEGREE_COUNT;
+    return Glissando::SCALE_DEGREES[slot];
+}
+
+void TextMessagingModem::updateChorusReceiverLocked()
+{
+    const uint64_t now = steadyMs();
+    for (auto it = chorusStations_.begin(); it != chorusStations_.end();)
+    {
+        if (it->first == glissando_.callsign || now - it->second.heardAtMs > CHORUS_STATION_TIMEOUT_MS)
+            it = chorusStations_.erase(it);
+        else
+            ++it;
+    }
+
+    std::vector<int> gears;
+    std::vector<Glissando::ReceiveHypothesis> hypotheses;
+    if (glissando_.chorus)
+    {
+        // Discovery must see any gear. Once participants announce themselves,
+        // StreamingReceiver uses only their tuples outside scheduled scans.
+        for (int gear = Glissando::MIN_GEAR; gear <= Glissando::MAX_GEAR; ++gear) gears.push_back(gear);
+        for (const auto& entry : chorusStations_)
+            hypotheses.push_back({entry.second.gear, entry.second.scale, entry.second.scaleDegree});
+        // All Chorus stations listen for profile announcements on this shared control lane.
+        hypotheses.push_back({4, Glissando::Scale::Pentatonic, 0});
+    }
+    else
+    {
+        if (glissando_.listenAllGears)
+        {
+            for (int gear = Glissando::MIN_GEAR; gear <= Glissando::MAX_GEAR; ++gear) gears.push_back(gear);
+        }
+        else
+        {
+            gears.push_back(glissando_.gear);
+            int current = transmitGearLocked();
+            if (current != glissando_.gear) gears.push_back(current);
+        }
+    }
+    glissandoRx_->configure(gears, glissando_.scale, glissando_.tuningOffsetHz,
+                            glissando_.listenAllScales, glissando_.chorus, hypotheses);
 }
 
 void TextMessagingModem::configureGlissandoReceiverLocked()
 {
-    std::vector<int> gears;
-    if (glissando_.listenAllGears)
-    {
-        for (int gear = Glissando::MIN_GEAR; gear <= Glissando::MAX_GEAR; gear++) gears.push_back(gear);
-    }
-    else
-    {
-        gears.push_back(glissando_.gear);
-        int current = transmitGearLocked();
-        if (current != glissando_.gear) gears.push_back(current);
-    }
-    glissandoRx_->configure(gears, glissando_.scale, glissando_.tuningOffsetHz, glissando_.listenAllScales);
+    updateChorusReceiverLocked();
 }
 
 void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode)
@@ -645,15 +831,28 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
     const Glissando::Decode& d = decode.decode;
     Glissando::LinkBurst burst;
     bool complete = false;
+    bool chorusBeacon = false;
+    int announcedGear = 0, announcedDegree = 0;
+    Glissando::Scale announcedScale = Glissando::Scale::Pentatonic;
+    std::string announcedCallsign;
     float snr = (float)d.report.snrDb;
     {
         std::lock_guard<std::mutex> lock(glissandoMutex_);
-        glissandoStatus_.haveReport = true;
-        glissandoStatus_.report = d.report;
-        glissandoStatus_.heardGear = decode.gear;
-        glissandoStatus_.heardScale = d.scale;
-        glissandoStatus_.heardAtMs = steadyMs();
-        glissandoStatus_.advisedGear = Glissando::recommendGear(d.report.snrDb, d.report.dopplerHz);
+        chorusBeacon = glissando_.chorus &&
+            decodeChorusBeacon(d.payload, announcedCallsign, announcedGear, announcedScale, announcedDegree);
+        // The fixed G4 lane carries control data, not a peer's chosen data
+        // gear. Feeding its report to Auto Shift makes a clean loopback choose
+        // G5 repeatedly and can mask the station's normal channel conditions.
+        if (!chorusBeacon)
+        {
+            glissandoStatus_.haveReport = true;
+            glissandoStatus_.report = d.report;
+            glissandoStatus_.heardGear = decode.gear;
+            glissandoStatus_.heardScale = d.scale;
+            glissandoStatus_.heardScaleDegree = d.scaleDegree;
+            glissandoStatus_.heardAtMs = steadyMs();
+            glissandoStatus_.advisedGear = Glissando::recommendGear(d.report.snrDb, d.report.dopplerHz);
+        }
 
         // The same waveform can be decoded as more than one tempo (Presto
         // and the duet's low voice), or by two overlapping searches.
@@ -670,21 +869,37 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
             heard.gear = decode.gear;
             heard.scale = d.scale;
             heard.voice = d.voice;
-            heard.notesHz = Glissando::scaleNotes(d.scale, d.voice);
+            heard.notesHz = Glissando::scaleDegreeNotes(d.scale, d.voice, d.scaleDegree);
             for (double& hz : heard.notesHz) hz += glissando_.tuningOffsetHz + d.frequencyOffsetHz;
             heard.melody = Glissando::payloadMelody(d.payload);
             heard.snrDb = d.report.snrDb;
             if (glissandoHeard_.size() >= GLISSANDO_HEARD_LIMIT) glissandoHeard_.erase(glissandoHeard_.begin());
             glissandoHeard_.push_back(std::move(heard));
         }
+        if (chorusBeacon)
+        {
+            if (announcedCallsign != glissando_.callsign)
+            {
+                chorusStations_[announcedCallsign] =
+                    {announcedGear, announcedScale, announcedDegree, steadyMs()};
+                updateChorusReceiverLocked();
+            }
+        }
     }
     if (complete) completedFrameEnd_.store(glissandoRx_->lastFrameEnd(), std::memory_order_release);
     lastSyncMs_.store(steadyMs(), std::memory_order_release);
-
+    if (chorusBeacon)
+    {
+        if (rxLogEnabled()) log_info("RX: Chorus participant %s on G%d %s degree %d",
+            announcedCallsign.c_str(), announcedGear, Glissando::scaleName(announcedScale),
+            Glissando::scaleDegreeNumber(announcedDegree));
+        return;
+    }
     if (rxLogEnabled())
     {
-        log_info("RX: Glissando %s %s voice %d, %.1f dB, %.2f Hz Doppler, offset %+.1f Hz%s",
-                 Glissando::gearInfo(decode.gear).tempo, Glissando::scaleName(d.scale), d.voice, d.report.snrDb,
+        log_info("RX: Glissando %s %s scale degree %d voice %d, %.1f dB, %.2f Hz Doppler, offset %+.1f Hz%s",
+                 Glissando::gearInfo(decode.gear).tempo, Glissando::scaleName(d.scale),
+                 Glissando::scaleDegreeNumber(d.scaleDegree), d.voice, d.report.snrDb,
                  d.report.dopplerHz, d.frequencyOffsetHz, complete ? ", burst complete" : "");
     }
     if (!complete) return;

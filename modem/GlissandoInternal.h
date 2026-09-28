@@ -50,7 +50,7 @@ void pitchTrack(double fa, double fb, int L, double glide, double* f);
 std::array<int, SYMBOLS_PER_FRAME> frameNotes(const CodedFrame& coded);
 
 // Note frequencies of one voice, tuning offset included.
-std::array<double, NOTES> voiceFrequencies(Scale scale, int voice, double tuningOffsetHz);
+std::array<double, NOTES> voiceFrequencies(Scale scale, int voice, int degree, double tuningOffsetHz);
 
 // Complex samples as separate real and imaginary arrays, which keeps the
 // inner loops simple enough for the compiler to vectorise.
@@ -103,7 +103,8 @@ struct VoiceTemplates
     double freqStepHz = 0.0;
 };
 
-std::shared_ptr<const VoiceTemplates> voiceTemplates(Scale scale, int voice, int gear, double tuningOffsetHz);
+std::shared_ptr<const VoiceTemplates> voiceTemplates(Scale scale, int voice, int gear, int degree,
+                                                     double tuningOffsetHz);
 
 // Everything the receiver works out about one voice of one frame.
 struct VoiceDecode

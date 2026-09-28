@@ -196,6 +196,38 @@ void testMelody()
     CHECK(isMotifSymbol(0) && isMotifSymbol(45) && !isMotifSymbol(46) && isMotifSymbol(85));
 }
 
+void testChordBookends()
+{
+    ModemSettings settings;
+    settings.gear = 3;
+    settings.chordPreambleSeconds = 0.25;
+    settings.chordTailSeconds = 0.5;
+    Payload payload{};
+    const size_t frameSamples = (size_t)gearInfo(settings.gear).frameSamples();
+    // The default stays byte-for-byte the original frame length.
+    std::vector<float> plain = modulate({payload}, settings);
+    CHECK(plain.size() == frameSamples);
+
+    settings.chordPreambleEnabled = true;
+    settings.chordTailEnabled = true;
+    std::vector<float> bookended = modulate({payload}, settings);
+    const size_t preambleSamples = (size_t)std::lround(settings.chordPreambleSeconds * SAMPLE_RATE_HZ);
+    const size_t tailSamples = (size_t)std::lround(settings.chordTailSeconds * SAMPLE_RATE_HZ);
+    CHECK(bookended.size() == frameSamples + preambleSamples + tailSamples);
+    if (bookended.size() == frameSamples + preambleSamples + tailSamples)
+    {
+        CHECK(std::fabs(bookended[0]) < 1e-7);
+        CHECK(std::fabs(bookended[preambleSamples - 1]) < 1e-7);
+        CHECK(std::fabs(bookended[preambleSamples + frameSamples + 100]) > 1e-5);
+        CHECK(std::fabs(bookended.back()) < 1e-7);
+        CHECK(std::fabs(bookended[preambleSamples + 100] - plain[100]) < 1e-7);
+    }
+    auto chord = scaleChordNotes(Scale::Pentatonic, 0);
+    CHECK(std::fabs(chord[0] - 440.0) < 1e-9);
+    CHECK(std::fabs(chord[1] - 523.25) < 1e-9);
+    CHECK(std::fabs(chord[2] - 659.26) < 1e-9);
+}
+
 } // namespace
 
 int main()
@@ -205,6 +237,7 @@ int main()
     testScales();
     testTuningOffset();
     testMelody();
+    testChordBookends();
     if (failures == 0) printf("glissando modulation tests passed\n");
     return failures == 0 ? 0 : 1;
 }

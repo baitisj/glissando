@@ -24,6 +24,7 @@
 
 #include "../../main.h"
 #include "defines.h"
+#include <wx/spinctrl.h>
 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=--=-=-=-=
 // Class OptionsDlg
@@ -187,6 +188,10 @@ class OptionsDlg : public wxDialog
         wxCheckBox*  m_ckboxMultipleRx;
         wxCheckBox*  m_ckboxSingleRxThread;
         wxCheckBox*  m_ckboxTextChatUsDataSegmentsOnly;
+        wxCheckBox*  m_ckboxGlissandoChordPreamble;
+        wxSpinCtrlDouble* m_spinGlissandoChordPreambleSeconds;
+        wxCheckBox*  m_ckboxGlissandoChordTail;
+        wxSpinCtrlDouble* m_spinGlissandoChordTailSeconds;
         wxCheckBox*  m_ckboxData2G;
         wxTextCtrl*  m_txtData2GHost;
         wxTextCtrl*  m_txtData2GKissPort;

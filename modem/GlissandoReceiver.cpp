@@ -36,6 +36,7 @@ constexpr long long HILBERT_GUARD = 256;
 // not moved on every push.
 constexpr size_t PENDING_LIMIT = 60 * SAMPLE_RATE_HZ;
 constexpr long long HISTORY_SLACK = SAMPLE_RATE_HZ;
+constexpr long long CHORUS_DISCOVERY_PERIOD = 5 * 60 * SAMPLE_RATE_HZ;
 
 // Geometry of one gear's search.
 struct Geometry
@@ -104,6 +105,8 @@ struct StreamingReceiver::Impl
     Scale scale = Scale::Pentatonic;
     double tuningOffsetHz = 0.0;
     bool anyScale = false;
+    bool chorusSearch = false;
+    std::vector<ReceiveHypothesis> chorusHypotheses;
 
     std::mutex callbackMutex;
     DecodeCallback callback;
@@ -125,6 +128,8 @@ struct StreamingReceiver::Impl
     unsigned seenGeneration = 0;
     double activeTuning = 0.0;
     std::vector<Scale> activeScales{Scale::Pentatonic};
+    bool activeChorusSearch = false;
+    std::vector<ReceiveHypothesis> activeChorusHypotheses;
 
     void run();
     void applyConfig(const std::vector<int>& newGears);
@@ -145,7 +150,9 @@ StreamingReceiver::~StreamingReceiver()
     delete impl_;
 }
 
-void StreamingReceiver::configure(const std::vector<int>& gears, Scale scale, double tuningOffsetHz, bool anyScale)
+void StreamingReceiver::configure(const std::vector<int>& gears, Scale scale, double tuningOffsetHz, bool anyScale,
+                                  bool chorusSearch,
+                                  const std::vector<ReceiveHypothesis>& chorusHypotheses)
 {
     std::vector<int> valid;
     for (int g : gears)
@@ -160,6 +167,8 @@ void StreamingReceiver::configure(const std::vector<int>& gears, Scale scale, do
     impl_->scale = scale;
     impl_->tuningOffsetHz = tuningOffsetHz;
     impl_->anyScale = anyScale;
+    impl_->chorusSearch = chorusSearch;
+    impl_->chorusHypotheses = chorusHypotheses;
     impl_->configChanged = true;
     impl_->wake.notify_one();
 }
@@ -301,6 +310,8 @@ void StreamingReceiver::Impl::run()
                 newGears = gears;
                 activeTuning = tuningOffsetHz;
                 activeScales = listenedScales(scale, anyScale);
+                activeChorusSearch = chorusSearch;
+                activeChorusHypotheses = chorusHypotheses;
                 configChanged = false;
                 haveNewConfig = true;
             }
@@ -446,13 +457,46 @@ void StreamingReceiver::Impl::search(GearState& state, unsigned generation)
     long long reportAt = -1;
     for (int voice = 0; voice < info.voices; voice++)
     {
+        bool broadSearch = !activeChorusSearch || activeChorusHypotheses.empty();
+        if (!broadSearch)
+        {
+            long long phase = first % CHORUS_DISCOVERY_PERIOD;
+            if (phase < 0) phase += CHORUS_DISCOVERY_PERIOD;
+            // For one gear-frame of candidate start times every five minutes,
+            // rediscover stations missed on their first Chorus announcement.
+            broadSearch = phase < geo.frame;
+        }
         std::vector<std::shared_ptr<const detail::VoiceTemplates>> held;
         std::vector<const detail::VoiceTemplates*> hypotheses;
-        for (Scale scale : activeScales)
+        std::vector<Scale> hypothesisScales;
+        std::vector<int> hypothesisDegrees;
+        if (!broadSearch)
         {
-            held.push_back(detail::voiceTemplates(scale, voice, state.gear, activeTuning));
-            hypotheses.push_back(held.back().get());
+            for (const ReceiveHypothesis& channel : activeChorusHypotheses)
+            {
+                if (channel.gear != state.gear) continue;
+                held.push_back(detail::voiceTemplates(channel.scale, voice, state.gear,
+                                                       channel.scaleDegree, activeTuning));
+                hypotheses.push_back(held.back().get());
+                hypothesisScales.push_back(channel.scale);
+                hypothesisDegrees.push_back(channel.scaleDegree);
+            }
         }
+        else
+        {
+            for (Scale scale : activeScales)
+            {
+                for (int i = 0; i < SCALE_DEGREE_COUNT; ++i)
+                {
+                    const int degree = SCALE_DEGREES[i];
+                    held.push_back(detail::voiceTemplates(scale, voice, state.gear, degree, activeTuning));
+                    hypotheses.push_back(held.back().get());
+                    hypothesisScales.push_back(scale);
+                    hypothesisDegrees.push_back(degree);
+                }
+            }
+        }
+        if (hypotheses.empty()) continue;
         detail::VoiceDecode result = detail::receiveVoice(z, info, hypotheses, first - 2 * geo.step - windowStart,
                                                           first + geo.hop - windowStart, MAX_OFFSET_HZ, CANDIDATES);
         if (!result.haveCandidate) continue;
@@ -474,7 +518,8 @@ void StreamingReceiver::Impl::search(GearState& state, unsigned generation)
         decode.gear = state.gear;
         decode.decode = result.decode;
         decode.decode.voice = voice;
-        decode.decode.scale = activeScales[(size_t)result.hypothesis];
+        decode.decode.scale = hypothesisScales[(size_t)result.hypothesis];
+        decode.decode.scaleDegree = hypothesisDegrees[(size_t)result.hypothesis];
         decode.decode.startSample = start;
         found.push_back(decode);
     }

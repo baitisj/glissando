@@ -84,6 +84,8 @@ GlissandoConsoleSettings MainFrame::loadGlissandoSettings_() const
     settings.autoGear = config.glissandoAutoGear;
     Glissando::Scale scale;
     if (Glissando::scaleFromName(((wxString)config.glissandoScale).ToStdString(), scale)) settings.scale = scale;
+    settings.scaleDegree = Glissando::normalizeScaleDegree((int)config.glissandoScaleDegree);
+    settings.chorus = config.glissandoChorus;
     settings.tuningOffsetHz = config.glissandoTuningDeciHz / 10.0;
     settings.listenAllGears = config.glissandoListenAllGears;
     settings.scanRate = std::max(0.5, config.glissandoScanRateDeci / 10.0);
@@ -149,8 +151,15 @@ void MainFrame::applyGlissandoToModem_(bool enabled)
     modemConfig.autoGear = config.glissandoAutoGear;
     Glissando::Scale scale;
     if (Glissando::scaleFromName(((wxString)config.glissandoScale).ToStdString(), scale)) modemConfig.scale = scale;
+    modemConfig.scaleDegree = Glissando::normalizeScaleDegree((int)config.glissandoScaleDegree);
+    modemConfig.chorus = config.glissandoChorus;
+    modemConfig.callsign = config.reportingConfiguration.reportingCallsign->ToStdString();
     modemConfig.tuningOffsetHz = config.glissandoTuningDeciHz / 10.0;
     modemConfig.listenAllGears = config.glissandoListenAllGears;
+    modemConfig.chordPreambleEnabled = config.glissandoChordPreambleEnabled;
+    modemConfig.chordTailEnabled = config.glissandoChordTailEnabled;
+    modemConfig.chordPreambleSeconds = config.glissandoChordPreambleDeciSeconds / 10.0;
+    modemConfig.chordTailSeconds = config.glissandoChordTailDeciSeconds / 10.0;
     textMessagingModem().setGlissando(modemConfig);
 
     // Automatic shifting can change the tempo at any frame heard, and every
@@ -173,6 +182,8 @@ void MainFrame::glissandoSettingsChanged(const GlissandoConsoleSettings& setting
     config.glissandoGear = settings.gear;
     config.glissandoAutoGear = settings.autoGear;
     config.glissandoScale = wxString(Glissando::scaleName(settings.scale));
+    config.glissandoScaleDegree = Glissando::normalizeScaleDegree(settings.scaleDegree);
+    config.glissandoChorus = settings.chorus;
     config.glissandoTuningDeciHz = (int)std::lround(settings.tuningOffsetHz * 10.0);
     config.glissandoListenAllGears = settings.listenAllGears;
     config.glissandoScanRateDeci = (int)std::lround(settings.scanRate * 10.0);
@@ -193,6 +204,9 @@ GlissandoTelemetry MainFrame::glissandoTelemetry()
     telemetry.dopplerHz = status.report.dopplerHz;
     telemetry.heardGear = status.heardGear;
     telemetry.heardScale = status.heardScale;
+    telemetry.heardScaleDegree = status.heardScaleDegree;
+    telemetry.chorusParticipants = status.chorusParticipants;
+    telemetry.transmitScaleDegree = status.transmitScaleDegree;
     telemetry.secondsSinceHeard = status.haveReport ? (steadyNowMs() - status.heardAtMs) / 1000.0 : 0.0;
     telemetry.transmitGear = status.transmitGear;
     telemetry.advisedGear = status.advisedGear;

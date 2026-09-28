@@ -100,8 +100,16 @@ public:
     ConfigurationDataElement<int> glissandoGear;
     ConfigurationDataElement<bool> glissandoAutoGear;
     ConfigurationDataElement<wxString> glissandoScale;
+    ConfigurationDataElement<int> glissandoScaleDegree;
+    ConfigurationDataElement<bool> glissandoChorus;
     ConfigurationDataElement<int> glissandoTuningDeciHz;
     ConfigurationDataElement<bool> glissandoListenAllGears;
+    ConfigurationDataElement<bool> glissandoChordBookendsEnabled; // legacy combined setting for migration
+    ConfigurationDataElement<int> glissandoChordBookendDeciSeconds; // legacy shared duration
+    ConfigurationDataElement<bool> glissandoChordPreambleEnabled;
+    ConfigurationDataElement<bool> glissandoChordTailEnabled;
+    ConfigurationDataElement<int> glissandoChordPreambleDeciSeconds;
+    ConfigurationDataElement<int> glissandoChordTailDeciSeconds;
     ConfigurationDataElement<int> glissandoScanRateDeci;
     ConfigurationDataElement<bool> glissandoScopeLens;
     ConfigurationDataElement<long> glissandoWindowLeft;
