@@ -106,6 +106,30 @@ const char* scaleName(Scale scale)
     return SCALE_NAMES[index];
 }
 
+int scaleDegreeNumber(int scaleDegree)
+{
+    static const int degreeNumbers[SCALE_DEGREE_COUNT] = {1, 4, 5};
+    for (int i = 0; i < SCALE_DEGREE_COUNT; ++i)
+        if (SCALE_DEGREES[i] == scaleDegree) return degreeNumbers[i];
+    return 1;
+}
+
+int normalizeScaleDegree(int scaleDegree)
+{
+    int best = SCALE_DEGREES[0];
+    int distance = std::abs(scaleDegree - best);
+    for (int i = 1; i < SCALE_DEGREE_COUNT; ++i)
+    {
+        int candidateDistance = std::abs(scaleDegree - SCALE_DEGREES[i]);
+        if (candidateDistance < distance)
+        {
+            best = SCALE_DEGREES[i];
+            distance = candidateDistance;
+        }
+    }
+    return best;
+}
+
 bool scaleFromName(const std::string& name, Scale& scaleOut)
 {
     for (int i = 0; i < SCALE_COUNT; i++)
@@ -149,6 +173,55 @@ std::array<double, NOTES> scaleNotes(Scale scale, int voice)
     return notes;
 }
 
+std::array<double, NOTES> scaleDegreeNotes(Scale scale, int voice, int degree)
+{
+    std::array<double, NOTES> notes = scaleNotes(scale, voice);
+    degree = normalizeScaleDegree(degree);
+    if (degree == 0) return notes;
+
+    // Derive this voice's pitch classes from its actual scale notes. The
+    // duet's high pentatonic voice is a different pentatonic collection from
+    // the low voice, so using a fixed interval list would transpose it badly.
+    const double rootMidi = 69.0 + 12.0 * std::log2(notes[0] / 440.0);
+    const int root = (int)std::lround(rootMidi);
+    std::vector<int> steps;
+    for (double hz : notes)
+    {
+        int relative = (int)std::lround(69.0 + 12.0 * std::log2(hz / 440.0)) - root;
+        int pitch = relative % 12;
+        if (pitch < 0) pitch += 12;
+        if (std::find(steps.begin(), steps.end(), pitch) == steps.end()) steps.push_back(pitch);
+    }
+    std::sort(steps.begin(), steps.end());
+    const int count = (int)steps.size();
+    for (double& hz : notes)
+    {
+        const double midi = 69.0 + 12.0 * std::log2(hz / 440.0);
+        int relative = (int)std::lround(midi - rootMidi);
+        int octave = relative / 12;
+        int pitch = relative % 12;
+        if (pitch < 0) { pitch += 12; --octave; }
+        int index = 0;
+        while (index + 1 < count && steps[(size_t)index + 1] <= pitch) ++index;
+        int target = index + degree;
+        octave += target / count;
+        target %= count;
+        hz = 440.0 * std::pow(2.0, (rootMidi + octave * 12 + steps[(size_t)target] - 69.0) / 12.0);
+    }
+    return notes;
+}
+
+std::array<double, 3> scaleChordNotes(Scale scale, int voice)
+{
+    // Each scale's tonic triad: A minor for A minor pentatonic, augmented
+    // for whole tone, diminished for half-whole, and E major for Diabolus.
+    static const int indices[SCALE_COUNT][3] = {{2, 3, 5}, {0, 2, 4}, {0, 2, 4}, {0, 1, 3}};
+    int s = (int)scale;
+    if (s < 0 || s >= SCALE_COUNT) s = 0;
+    auto notes = scaleNotes(scale, voice);
+    return {notes[indices[s][0]], notes[indices[s][1]], notes[indices[s][2]]};
+}
+
 namespace detail
 {
 
@@ -167,9 +240,9 @@ void pitchTrack(double fa, double fb, int L, double glide, double* f)
     }
 }
 
-std::array<double, NOTES> voiceFrequencies(Scale scale, int voice, double tuningOffsetHz)
+std::array<double, NOTES> voiceFrequencies(Scale scale, int voice, int degree, double tuningOffsetHz)
 {
-    std::array<double, NOTES> notes = scaleNotes(scale, voice);
+    std::array<double, NOTES> notes = scaleDegreeNotes(scale, voice, degree);
     for (double& note : notes) note += tuningOffsetHz;
     return notes;
 }
@@ -205,7 +278,16 @@ std::array<int, SYMBOLS_PER_FRAME> frameNotes(const CodedFrame& coded)
 std::vector<float> modulate(const std::vector<Payload>& payloads, const ModemSettings& settings)
 {
     const GearInfo& gear = gearInfo(settings.gear);
-    size_t length = (size_t)gear.frameSamples();
+    const size_t frameLength = (size_t)gear.frameSamples();
+    const bool preamble = settings.chordPreambleEnabled;
+    const bool tail = settings.chordTailEnabled;
+    const double preambleSeconds = std::isfinite(settings.chordPreambleSeconds)
+                                       ? std::min(10.0, std::max(0.0, settings.chordPreambleSeconds)) : 0.0;
+    const double tailSeconds = std::isfinite(settings.chordTailSeconds)
+                                  ? std::min(10.0, std::max(0.0, settings.chordTailSeconds)) : 0.0;
+    const size_t preambleLength = preamble ? (size_t)std::lround(preambleSeconds * SAMPLE_RATE_HZ) : 0;
+    const size_t tailLength = tail ? (size_t)std::lround(tailSeconds * SAMPLE_RATE_HZ) : 0;
+    const size_t length = preambleLength + frameLength + tailLength;
     std::vector<float> audio(length, 0.0f);
 
     for (int voice = 0; voice < gear.voices; voice++)
@@ -214,22 +296,45 @@ std::vector<float> modulate(const std::vector<Payload>& payloads, const ModemSet
         Payload payload{};
         if ((size_t)voice < payloads.size()) payload = payloads[(size_t)voice];
         std::array<int, SYMBOLS_PER_FRAME> notes = detail::frameNotes(encodeFrame(payload));
-        modulateVoice(notes, detail::voiceFrequencies(settings.scale, voice, settings.tuningOffsetHz), gear,
-                      audio.data());
+        modulateVoice(notes,
+                      detail::voiceFrequencies(settings.scale, voice, settings.scaleDegree, settings.tuningOffsetHz),
+                      gear, audio.data() + preambleLength);
     }
 
     // Short raised cosine fade in and out (10 ms), which keeps the key-down
     // click off the air.
     const int ramp = SAMPLE_RATE_HZ / 100;
-    for (size_t n = 0; n < length; n++)
+    for (size_t n = 0; n < frameLength; n++)
     {
         double w = 1.0;
         if (n < (size_t)ramp)
             w = 0.5 - 0.5 * std::cos(PI * (double)n / ramp);
-        else if (n >= length - ramp)
-            w = 0.5 - 0.5 * std::cos(PI * (double)(length - 1 - n) / ramp);
-        audio[n] = (float)(audio[n] / gear.voices * w);
+        else if (n >= frameLength - ramp)
+            w = 0.5 - 0.5 * std::cos(PI * (double)(frameLength - 1 - n) / ramp);
+        audio[preambleLength + n] = (float)(audio[preambleLength + n] / gear.voices * w);
     }
+    auto synthesizeChord = [&](size_t offset, size_t count, bool fadeIn, bool fadeOut) {
+        const size_t rampLength = std::min((size_t)(SAMPLE_RATE_HZ / 100), count / 2);
+        for (int voice = 0; voice < gear.voices; ++voice)
+        {
+            auto notes = scaleChordNotes(settings.scale, voice);
+            for (double& frequency : notes) frequency += settings.tuningOffsetHz;
+            for (size_t n = 0; n < count; ++n)
+            {
+                double gain = 1.0;
+                if (fadeIn && n < rampLength)
+                    gain *= 0.5 - 0.5 * std::cos(PI * (double)n / rampLength);
+                if (fadeOut && n >= count - rampLength)
+                    gain *= 0.5 - 0.5 * std::cos(PI * (double)(count - 1 - n) / rampLength);
+                double sample = 0.0;
+                for (double frequency : notes)
+                    sample += std::sin(2.0 * PI * frequency * (double)n / SAMPLE_RATE_HZ);
+                audio[offset + n] += (float)(gain * sample / (3.0 * gear.voices));
+            }
+        }
+    };
+    if (preambleLength != 0) synthesizeChord(0, preambleLength, true, true);
+    if (tailLength != 0) synthesizeChord(preambleLength + frameLength, tailLength, true, true);
     return audio;
 }
 
@@ -264,16 +369,25 @@ std::vector<Decode> receive(const float* audio, size_t numSamples, const ModemSe
     {
         std::vector<std::shared_ptr<const detail::VoiceTemplates>> held;
         std::vector<const detail::VoiceTemplates*> hypotheses;
+        std::vector<Scale> hypothesisScales;
+        std::vector<int> hypothesisDegrees;
         for (Scale scale : scales)
         {
-            held.push_back(detail::voiceTemplates(scale, voice, gear.number, settings.tuningOffsetHz));
-            hypotheses.push_back(held.back().get());
+            for (int i = 0; i < SCALE_DEGREE_COUNT; ++i)
+            {
+                const int degree = SCALE_DEGREES[i];
+                held.push_back(detail::voiceTemplates(scale, voice, gear.number, degree, settings.tuningOffsetHz));
+                hypotheses.push_back(held.back().get());
+                hypothesisScales.push_back(scale);
+                hypothesisDegrees.push_back(degree);
+            }
         }
         detail::VoiceDecode result =
             detail::receiveVoice(z, gear, hypotheses, searchFrom, searchTo, maxOffsetHz, candidates);
         decodes[(size_t)voice] = result.decode;
         decodes[(size_t)voice].voice = voice;
-        decodes[(size_t)voice].scale = scales[(size_t)result.hypothesis];
+        decodes[(size_t)voice].scale = hypothesisScales[(size_t)result.hypothesis];
+        decodes[(size_t)voice].scaleDegree = hypothesisDegrees[(size_t)result.hypothesis];
     }
     return decodes;
 }

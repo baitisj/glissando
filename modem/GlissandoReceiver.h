@@ -30,6 +30,13 @@ struct StreamDecode
     Decode decode;          // startSample counts samples since start()
 };
 
+struct ReceiveHypothesis
+{
+    int gear = 0;
+    Scale scale = Scale::Pentatonic;
+    int scaleDegree = 0;
+};
+
 class StreamingReceiver
 {
 public:
@@ -42,10 +49,12 @@ public:
     StreamingReceiver& operator=(const StreamingReceiver&) = delete;
 
     // Which gears to listen for (any of 1..5), in which scale (or, with
-    // anyScale, in every scale; StreamDecode::decode.scale says which) and
-    // at which tuning offset. Takes effect at the next search; buffered
-    // audio is kept.
-    void configure(const std::vector<int>& gears, Scale scale, double tuningOffsetHz, bool anyScale = false);
+    // anyScale, in every scale; StreamDecode::decode.scale says which), all
+    // supported scale degrees, and at which tuning offset. Takes effect at
+    // the next search; buffered audio is kept.
+    void configure(const std::vector<int>& gears, Scale scale, double tuningOffsetHz, bool anyScale = false,
+                   bool chorusSearch = false,
+                   const std::vector<ReceiveHypothesis>& chorusHypotheses = {});
 
     // Called on the worker thread for every CRC-valid frame.
     void setDecodeCallback(DecodeCallback callback);

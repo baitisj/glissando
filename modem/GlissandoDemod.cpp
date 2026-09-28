@@ -410,10 +410,10 @@ private:
 // separated peaks, then each re-searched every L/256 samples around its
 // start with a parabolic fit to the frequency peak.
 //
-// `voices` holds one hypothesis per scale listened for. Each hypothesis's
+// `voices` holds one hypothesis per scale and degree listened for. Each hypothesis's
 // scores are normalised by their own median, which makes them comparable,
 // and the best `top` peaks are taken from all of them together. So
-// listening for four scales costs four coarse searches (a small part of a
+// listening for four scales and three degrees costs twelve coarse searches (a small part of a
 // search) but no more candidates to refine and decode, and no more chances
 // for a CRC to pass by luck, than listening for one.
 std::vector<SyncCandidate> syncSearch(const ComplexSignal& z, const GearInfo& gear,
@@ -972,13 +972,14 @@ void analyticSignal(const float* x, size_t n, ComplexSignal& out)
     }
 }
 
-std::shared_ptr<const VoiceTemplates> voiceTemplates(Scale scale, int voice, int gear, double tuningOffsetHz)
+std::shared_ptr<const VoiceTemplates> voiceTemplates(Scale scale, int voice, int gear, int degree,
+                                                     double tuningOffsetHz)
 {
     // G4 and voice 0 of G5 share their templates: the key is what the
     // waveform depends on, not the gear number.
     const GearInfo& info = gearInfo(gear);
-    using Key = std::tuple<int, int, int, double, double>;
-    Key key((int)scale, voice, info.samplesPerSymbol(), info.glide, tuningOffsetHz);
+    using Key = std::tuple<int, int, int, int, double, double>;
+    Key key((int)scale, voice, info.samplesPerSymbol(), degree, info.glide, tuningOffsetHz);
 
     static std::mutex mutex;
     static std::map<Key, std::shared_ptr<const VoiceTemplates>> cache;
@@ -992,15 +993,16 @@ std::shared_ptr<const VoiceTemplates> voiceTemplates(Scale scale, int voice, int
     // Built outside the lock: a G1 set takes a moment and other threads may
     // want other entries meanwhile. Two threads building the same entry at
     // once is harmless.
-    std::shared_ptr<const VoiceTemplates> built = buildTemplates(voiceFrequencies(scale, voice, tuningOffsetHz), info);
+    std::shared_ptr<const VoiceTemplates> built =
+        buildTemplates(voiceFrequencies(scale, voice, degree, tuningOffsetHz), info);
 
     std::lock_guard<std::mutex> lock(mutex);
     auto it = cache.find(key);
     if (it != cache.end()) return it->second;
-    // A few MB per G1 entry; keep enough for every gear and voice of every
-    // scale (a receiver listening for all of them) at two tunings, and
+    // Keep enough for every gear and voice of every scale/degree hypothesis
+    // at two tunings, and
     // forget the oldest beyond that.
-    const size_t MAX_ENTRIES = 2 * SCALE_COUNT * 6;
+    const size_t MAX_ENTRIES = 2 * SCALE_COUNT * SCALE_DEGREE_COUNT * 6;
     while (cache.size() >= MAX_ENTRIES && !age.empty())
     {
         cache.erase(age.front());

@@ -40,7 +40,9 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <map>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "FrameCodec.h"
@@ -123,9 +125,16 @@ public:
         int gear = 3;                   // chosen by hand
         bool autoGear = true;           // shift from the last report
         Glissando::Scale scale = Glissando::Scale::Pentatonic;    // the scale we send in
+        int scaleDegree = 0;
+        bool chorus = false;
+        std::string callsign;
         double tuningOffsetHz = 0.0;
         bool listenAllGears = true;
         bool listenAllScales = true;    // hear stations singing in any scale, not just ours
+        bool chordPreambleEnabled = false;
+        bool chordTailEnabled = false;
+        double chordPreambleSeconds = 1.0;
+        double chordTailSeconds = 1.0;
     };
 
     void setGlissando(const GlissandoConfig& config);
@@ -137,6 +146,9 @@ public:
         Glissando::ChannelReport report;
         int heardGear = 0;
         Glissando::Scale heardScale = Glissando::Scale::Pentatonic;
+        int heardScaleDegree = 0;
+        int chorusParticipants = 0;
+        int transmitScaleDegree = 0;
         uint64_t heardAtMs = 0;         // steady clock
         int advisedGear = 0;            // recommendGear() of the report, 0 none
         int transmitGear = 3;           // the tempo modulate() will use now
@@ -208,12 +220,28 @@ private:
     void onGlissandoDecode(const Glissando::StreamDecode& decode);
     void configureGlissandoReceiverLocked();
     int transmitGearLocked() const;
+    int transmitScaleDegreeLocked() const;
+    void updateChorusReceiverLocked();
+
+    struct ChorusStation
+    {
+        int gear = 3;
+        Glissando::Scale scale = Glissando::Scale::Pentatonic;
+        int scaleDegree = 0;
+        uint64_t heardAtMs = 0;
+    };
 
     mutable std::mutex glissandoMutex_;
     GlissandoConfig glissando_;
     GlissandoStatus glissandoStatus_;
     Glissando::Reassembler reassembler_;
     std::vector<GlissandoHeard> glissandoHeard_;
+    std::map<std::string, ChorusStation> chorusStations_;
+    uint64_t lastChorusAnnouncementMs_ = 0;
+    std::string lastAnnouncedCallsign_;
+    int lastAnnouncedGear_ = 0;
+    Glissando::Scale lastAnnouncedScale_ = Glissando::Scale::Pentatonic;
+    int lastAnnouncedDegree_ = -1;
     std::unique_ptr<Glissando::StreamingReceiver> glissandoRx_;
     std::atomic<bool> glissandoOn_;
 

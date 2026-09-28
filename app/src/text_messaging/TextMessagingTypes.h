@@ -267,7 +267,9 @@ struct AirTiming
     static AirTiming forFrameSeconds(double frameSeconds, int bytesPerFrame,
                                      double decodeLatencySeconds,
                                      double replyFrameSeconds = 0.0,
-                                     double replyDecodeLatencySeconds = 0.0);
+                                     double replyDecodeLatencySeconds = 0.0,
+                                     double burstStartSeconds = 0.0,
+                                     double burstBookendSeconds = 0.0);
 };
 
 // What the station is currently waiting to hear back, which is what the chat
