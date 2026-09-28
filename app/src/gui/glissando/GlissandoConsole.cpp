@@ -587,6 +587,7 @@ void GlissandoConsole::refreshTelemetry()
                                          : _("Start or stop the audio."));
     }
     engageButton_->SetChecked(t.audioRunning);
+    engageButton_->SetAlarm(aborts);
     engageButton_->SetLabel(aborts ? _("Abort") : t.audioRunning ? _("Disengage") : _("Engage"));
     engagedLamp_->SetLit(t.audioRunning);
     receivingLamp_->SetLit(t.receiving);

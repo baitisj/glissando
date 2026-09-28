@@ -146,6 +146,7 @@ Button::Button(wxWindow* parent, wxWindowID id, const wxString& label, bool togg
     , toggle_(toggle)
     , checked_(false)
     , hinted_(false)
+    , alarm_(false)
     , pressed_(false)
 {
     SetCursor(wxCursor(wxCURSOR_HAND));
@@ -180,6 +181,13 @@ void Button::SetHinted(bool hinted)
 {
     if (hinted_ == hinted) return;
     hinted_ = hinted;
+    Refresh();
+}
+
+void Button::SetAlarm(bool alarm)
+{
+    if (alarm_ == alarm) return;
+    alarm_ = alarm;
     Refresh();
 }
 
@@ -239,13 +247,19 @@ void Button::paint(wxGraphicsContext* gc, const wxSize& size)
     double x = 3, y = 3, w = size.x - 6, h = size.y - 6;
     double r = h / 2.0;
 
-    // Chrome rim, then the face: dark bakelite, or glowing white when lit.
+    // Chrome rim, then the face: dark bakelite, or glowing white when lit
+    // (red, for an alarm).
     gc->SetPen(*wxTRANSPARENT_PEN);
     gc->SetBrush(gc->CreateLinearGradientBrush(x, y, x, y + h, Colour::Chrome, Colour::PlateShadow));
     gc->DrawRoundedRectangle(x, y, w, h, r);
 
     double inset = 2.5;
-    if (lit)
+    if (lit && alarm_)
+    {
+        gc->SetBrush(gc->CreateLinearGradientBrush(x, y, x, y + h, wxColour(255, 120, 104),
+                                                   wxColour(150, 30, 24)));
+    }
+    else if (lit)
     {
         gc->SetBrush(gc->CreateLinearGradientBrush(x, y, x, y + h, Colour::Glow, Colour::Chrome));
     }
@@ -257,7 +271,10 @@ void Button::paint(wxGraphicsContext* gc, const wxSize& size)
     gc->DrawRoundedRectangle(x + inset, y + inset + (pressed_ ? 1 : 0), w - 2 * inset,
                              h - 2 * inset, r - inset);
 
-    wxColour ink = !IsEnabled() ? Colour::Dim : (lit ? Colour::Bakelite : Colour::Bone);
+    wxColour ink = !IsEnabled() ? Colour::Dim
+                 : lit          ? Colour::Bakelite
+                 : alarm_       ? Colour::Alarm
+                                : Colour::Bone;
     gc->SetFont(font(FontRole::Button), ink);
     double tw = 0, th = 0;
     gc->GetTextExtent("X", &tw, &th);

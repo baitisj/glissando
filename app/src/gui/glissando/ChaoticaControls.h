@@ -75,6 +75,9 @@ public:
     // Faintly lit without being checked: "this is what automatic chose".
     void SetHinted(bool hinted);
 
+    // Red instead of white: for a button that stops the transmitter.
+    void SetAlarm(bool alarm);
+
     // A smaller second line under the label, in its own colour; empty for
     // none.
     void SetNote(const wxString& note, const wxColour& colour);
@@ -96,6 +99,7 @@ private:
     bool toggle_;
     bool checked_;
     bool hinted_;
+    bool alarm_;
     bool pressed_;
 };
 

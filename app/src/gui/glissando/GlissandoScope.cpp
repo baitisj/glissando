@@ -399,13 +399,16 @@ void GlissandoScope::OnPaint(wxPaintEvent&)
         gc->StrokeLine(x, trace.y, x, trace.y + trace.height);
     }
 
-    // Activity: a band across the top edge, like the screen flaring.
+    // Activity: a band across the top edge, like the screen flaring; white
+    // while hearing a frame, red while on the air.
     if (receiving_ || transmitting_)
     {
+        wxColour flare = transmitting_ ? Colour::Alarm : wxColour(255, 255, 255);
         gc->SetPen(*wxTRANSPARENT_PEN);
-        gc->SetBrush(gc->CreateLinearGradientBrush(trace.x, trace.y, trace.x, trace.y + 30,
-                                                   wxColour(255, 255, 255, transmitting_ ? 120 : 70),
-                                                   wxColour(255, 255, 255, 0)));
+        gc->SetBrush(gc->CreateLinearGradientBrush(
+            trace.x, trace.y, trace.x, trace.y + 30,
+            wxColour(flare.Red(), flare.Green(), flare.Blue(), transmitting_ ? 170 : 70),
+            wxColour(flare.Red(), flare.Green(), flare.Blue(), 0)));
         gc->DrawRectangle(trace.x, trace.y, trace.width, 30);
     }
 
