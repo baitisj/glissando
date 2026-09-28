@@ -63,10 +63,7 @@ public:
     
     const char* getCurrentModeStr() const;
     const char* getCurrentTxModeStr() const;
-    bool usingTestFrames() const;
-    void resetTestFrameStats();
     void resetBitStats();
-    void setTestFrames(bool testFrames, bool combine);
     
     int getTotalBits();
     int getTotalBitErrors();
@@ -98,7 +95,6 @@ public:
     
     void setSquelch(bool enable, float level) FREEDV_NONBLOCKING;
     
-    void setCarrierAmplitude(int c, float amp);
 
     float getCurrentRxModemOffset();
     
@@ -116,8 +112,6 @@ public:
     IPipelineStep* createReceivePipeline(
         int inputSampleRate, int outputSampleRate,
         realtime_fp<std::atomic<int>*()> const& getRxStateFn,
-        realtime_fp<int()> const& getChannelNoiseFn,
-        realtime_fp<int()> const& getChannelNoiseSnrFn,
         realtime_fp<float()> const& getFreqOffsetFn,
         realtime_fp<float*()> const& getSigPwrAvgFn,
         std::shared_ptr<IRealtimeHelper> realtimeHelper
@@ -129,8 +123,6 @@ private:
     struct ReceivePipelineState
     {
         realtime_fp<std::atomic<int>*()> getRxStateFn;
-        realtime_fp<int()> getChannelNoiseFn;
-        realtime_fp<int()> getChannelNoiseSnrFn;
         realtime_fp<float()> getFreqOffsetFn;
         realtime_fp<float*()> getSigPwrAvgFn;
         realtime_fp<int(ParallelStep*)> preProcessFn;

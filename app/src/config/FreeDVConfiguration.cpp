@@ -87,7 +87,6 @@ FreeDVConfiguration::FreeDVConfiguration()
         
         
         
-    , noiseSNR("/Noise/noise_snr", 2)
         
     , debugConsoleEnabled("/Debug/console", false)
         
@@ -165,7 +164,6 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     load_(config, glissandoWindowHeight);
     
     
-    load_(config, noiseSNR);
     
     load_(config, debugConsoleEnabled);
     
@@ -246,7 +244,6 @@ void FreeDVConfiguration::save(wxConfigBase* config)
     
     
     
-    save_(config, noiseSNR);
     
     save_(config, debugConsoleEnabled);
     

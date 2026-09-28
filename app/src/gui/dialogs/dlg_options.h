@@ -59,13 +59,10 @@ class OptionsDlg : public wxDialog
         void    OnClose(wxCloseEvent& event);
         void    OnInitDialog(wxInitDialogEvent& event);
  
-        void    OnTestFrame(wxScrollEvent& event);
-        void    OnChannelNoise(wxScrollEvent& event);
         void    OnDebugConsole(wxScrollEvent& event);
 
         void    OnFifoReset(wxCommandEvent& event);
         
-        void    OnToneStateEnable(wxCommandEvent& event);
         void    OnEnableSpacebarForPTT(wxCommandEvent& event);
         void    OnSetPTTKey(wxCommandEvent& event);
         void    OnTOTTimerEnable(wxCommandEvent& event);
@@ -80,7 +77,6 @@ class OptionsDlg : public wxDialog
         wxNotebookPage *m_reportingTab; // Station: callsign, stations heard log
         wxNotebookPage *m_rigControlTab; // Rig Control
         wxNotebookPage *m_modemTab; // 700/OFDM/duplex
-        wxNotebookPage *m_simulationTab; // testing/interference
         wxNotebookPage *m_debugTab; // Debug
         
         /* Hamlib options */
@@ -101,15 +97,7 @@ class OptionsDlg : public wxDialog
         
         /* test frames, other simulated channel impairments */
 
-        wxCheckBox   *m_ckboxTestFrame;
-        wxCheckBox   *m_ckboxChannelNoise;
-        wxTextCtrl   *m_txtNoiseSNR;
-        wxCheckBox   *m_ckboxAttnCarrierEn;
-        wxTextCtrl   *m_txtAttnCarrier;
 
-        wxCheckBox   *m_ckboxTone;
-        wxTextCtrl   *m_txtToneFreqHz;
-        wxTextCtrl   *m_txtToneAmplitude;
 
         wxCheckBox   *m_ckboxAutoStartOnLaunch;
 
@@ -159,9 +147,6 @@ class OptionsDlg : public wxDialog
         
      private:
          void updateReportingState();
-         void updateChannelNoiseState();
-         void updateAttnCarrierState();
-         void updateToneState();
          void updateRigControlState();
          
          bool sessionActive_;

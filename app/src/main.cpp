@@ -102,14 +102,11 @@ int                 g_clip;
 std::atomic<bool>   g_queueResync;
 
 // test Frames
-int                 g_testFrames;
 int                 g_test_frame_sync_state;
 int                 g_test_frame_count;
-std::atomic<int>    g_channel_noise;
 int                 g_resyncs;
 float               g_sig_pwr_av = 0.0;
 short              *g_error_hist, *g_error_histn;
-std::atomic<float>    g_tone_phase;
 
 // time averaged magnitude spectrum used for waterfall and spectrum display
 GenericFIFO<float>  g_avmag(MODEM_STATS_NSPEC * 10 / DT); // 1s worth
@@ -982,17 +979,8 @@ void MainFrame::loadConfiguration_()
     
     // -----------------------------------------------------------------------
 
-    wxGetApp().m_FreeDV700Combine = 1;
-
     ulog_set_level(LOG_INFO);
 
-    wxGetApp().m_attn_carrier_en = 0;
-    wxGetApp().m_attn_carrier    = 0;
-
-    wxGetApp().m_tone = 0;
-    wxGetApp().m_tone_freq_hz = 1000;
-    wxGetApp().m_tone_amplitude = 500;
-    
     // General reporting parameters
 
     // wxString::Format() doesn't respect locale but C++ iomanip should. Use the latter instead.
@@ -1281,12 +1269,8 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("FreeDV ")
 
     g_tx.store(false, std::memory_order_release);
 
-    g_testFrames = 0;
     g_test_frame_sync_state = 0;
     g_resyncs = 0;
-    wxGetApp().m_testFrames = false;
-    wxGetApp().m_channel_noise = false;
-    g_tone_phase.store(0.0f, std::memory_order_relaxed);
 
     optionsDlg = new OptionsDlg(NULL);
     m_schedule_restore = false;
@@ -2056,17 +2040,6 @@ void MainFrame::OnTimer(wxTimerEvent &evt)
             }
         }
         g_prev_State.store(state, std::memory_order_release);
-
-        // Test Frame Bit Error Updates ------------------------------------
-
-        // Toggle test frame mode at run time
-
-        if (!freedvInterface.usingTestFrames() && wxGetApp().m_testFrames) {
-            // reset stats on check box off to on transition
-            freedvInterface.resetTestFrameStats();
-        }
-        freedvInterface.setTestFrames(wxGetApp().m_testFrames, wxGetApp().m_FreeDV700Combine);
-        g_channel_noise.store(wxGetApp().m_channel_noise, std::memory_order_release);
 
         // update stats on main page
         wxString modeString = wxString::Format(MODE_FORMAT_STR, freedvInterface.getCurrentModeStr());

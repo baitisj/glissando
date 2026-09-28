@@ -10,7 +10,6 @@ add_library(fdv_audio_pipeline STATIC
     ResampleStep.cpp
     RNNoiseStep.cpp
     TapStep.cpp
-    ToneInterfererStep.cpp
 )
 
 target_compile_options(fdv_audio_pipeline PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})

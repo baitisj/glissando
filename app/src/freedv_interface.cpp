@@ -228,40 +228,12 @@ void FreeDVInterface::stop()
     rxMode_.store(0, std::memory_order_release);
 }
 
-bool FreeDVInterface::usingTestFrames() const
-{
-    bool result = false;
-    for (auto& dv : dvObjects_)
-    {
-        result |= freedv_get_test_frames(dv);
-    }
-    return result;
-}
-
-void FreeDVInterface::resetTestFrameStats()
-{
-    for (auto& dv : dvObjects_)
-    {
-        freedv_set_test_frames(dv, 1);
-    }
-    resetBitStats();
-}
-
 void FreeDVInterface::resetBitStats()
 {
     for (auto& dv : dvObjects_)
     {
         freedv_set_total_bits(dv, 0);
         freedv_set_total_bit_errors(dv, 0);
-    }
-}
-
-void FreeDVInterface::setTestFrames(bool testFrames, bool combine)
-{
-    for (auto& dv : dvObjects_)
-    {
-        freedv_set_test_frames(dv, testFrames);
-        freedv_set_test_frames_diversity(dv, combine);
     }
 }
 
@@ -371,14 +343,6 @@ void FreeDVInterface::setSync(int val) FREEDV_NONBLOCKING
 int FreeDVInterface::getSync() const
 {
     return sync_.load(std::memory_order_acquire);
-}
-
-void FreeDVInterface::setCarrierAmplitude(int c, float amp)
-{
-    for (auto& dv : dvObjects_)
-    {
-        freedv_set_carrier_ampl(dv, c, amp);
-    }
 }
 
 void FreeDVInterface::setVerbose(bool val)
@@ -595,8 +559,6 @@ IPipelineStep* FreeDVInterface::createTransmitPipeline(
 IPipelineStep* FreeDVInterface::createReceivePipeline(
     int inputSampleRate, int outputSampleRate,
     realtime_fp<std::atomic<int>*()> const& getRxStateFn,
-    realtime_fp<int()> const& getChannelNoiseFn,
-    realtime_fp<int()> const& getChannelNoiseSnrFn,
     realtime_fp<float()> const& getFreqOffsetFn,
     realtime_fp<float*()> const& getSigPwrAvgFn,
     std::shared_ptr<IRealtimeHelper> realtimeHelper)
@@ -607,8 +569,6 @@ IPipelineStep* FreeDVInterface::createReceivePipeline(
     assert(state != nullptr);
 
     state->getRxStateFn = getRxStateFn;
-    state->getChannelNoiseFn = getChannelNoiseFn;
-    state->getChannelNoiseSnrFn = getChannelNoiseSnrFn;
     state->getFreqOffsetFn = getFreqOffsetFn;
     state->getSigPwrAvgFn = getSigPwrAvgFn;
    
@@ -659,7 +619,6 @@ int FreeDVInterface::preProcessRxFn_(ParallelStep* stepObj) FREEDV_NONBLOCKING
         
         FreeDVReceiveStep* castedStep = (FreeDVReceiveStep*)step;
         castedStep->setSigPwrAvg(*state->getSigPwrAvgFn());
-        castedStep->setChannelNoiseEnable(state->getChannelNoiseFn(), state->getChannelNoiseSnrFn());
         castedStep->setFreqOffset(state->getFreqOffsetFn());
     }
     

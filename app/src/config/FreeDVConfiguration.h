@@ -105,7 +105,6 @@ public:
     
     
     
-    ConfigurationDataElement<int> noiseSNR;
     
     ConfigurationDataElement<bool> debugConsoleEnabled; // note: Windows only
     

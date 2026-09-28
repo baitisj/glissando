@@ -44,8 +44,6 @@ extern void freq_shift_coh(COMP rx_fdm_fcorr[], COMP rx_fdm[], float foff, float
 FreeDVReceiveStep::FreeDVReceiveStep(struct freedv* dv)
     : dv_(dv)
     , inputSampleFifo_(nullptr)
-    , channelNoiseEnabled_(false)
-    , channelNoiseSnr_(0)
     , freqOffsetHz_(0)
 {
     assert(syncState_.is_lock_free());
@@ -119,11 +117,6 @@ short* FreeDVReceiveStep::execute(short* inputSamples, int numInputSamples, int*
             for(int i=0; i<nin; i++) {
                 rxFdm_[i].real = (float)inputBuf_[i];
                 rxFdm_[i].imag = 0.0;
-            }
-
-            // Optional channel noise
-            if (channelNoiseEnabled_.load(std::memory_order_acquire)) {
-                fdmdv_simulate_channel(&sigPwrAvg_, rxFdm_, nin, channelNoiseSnr_.load(std::memory_order_acquire));
             }
 
             // Optional frequency shifting

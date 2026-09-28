@@ -62,11 +62,6 @@ public:
     void setSigPwrAvg(float newVal) { sigPwrAvg_ = newVal; }
     float getSigPwrAvg() const { return sigPwrAvg_; }
     int getSync() const { return syncState_.load(std::memory_order_acquire); }
-    void setChannelNoiseEnable(bool enabled, int snr) 
-    { 
-        channelNoiseEnabled_.store(enabled, std::memory_order_release); 
-        channelNoiseSnr_.store(snr, std::memory_order_release);
-    }
     void setFreqOffset(float freq) { freqOffsetHz_.store(freq, std::memory_order_release); }
 
 private:
@@ -75,8 +70,6 @@ private:
     struct FIFO* inputSampleFifo_;
     COMP rxFreqOffsetPhaseRectObjs_;
     float sigPwrAvg_;
-    std::atomic<bool> channelNoiseEnabled_;
-    std::atomic<int> channelNoiseSnr_;
     std::atomic<float> freqOffsetHz_;
 
     std::unique_ptr<short[]> outputSamples_;

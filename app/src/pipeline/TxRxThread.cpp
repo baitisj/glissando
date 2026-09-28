@@ -59,7 +59,6 @@ using namespace std::chrono_literals;
 #include "LevelAdjustStep.h"
 #include "FreeDVTransmitStep.h"
 #include "RecordStep.h"
-#include "ToneInterfererStep.h"
 #include "ComputeRfSpectrumStep.h"
 #include "FreeDVReceiveStep.h"
 #include "MuteStep.h"
@@ -111,10 +110,8 @@ extern std::atomic<bool>     g_totBeepActive;
 extern std::atomic<bool> g_loopPlayFileFromRadio;
 extern int g_SquelchActive;
 extern float g_SquelchLevel;
-extern std::atomic<float> g_tone_phase;
 extern GenericFIFO<float> g_avmag;
 extern std::atomic<int> g_State;
-extern std::atomic<int> g_channel_noise;
 extern std::atomic<float> g_RxFreqOffsetHz;
 extern float g_sig_pwr_av;
 
@@ -238,21 +235,6 @@ void TxRxThread::initializePipeline_()
         auto resampleForPlotTap = new TapStep(inputSampleRate_, resampleForPlotPipeline);
         activeRxPipeline->appendPipelineStep(resampleForPlotTap);
 
-        // Tone interferer step (optional)
-        auto bypassToneInterferer = new AudioPipeline(inputSampleRate_, inputSampleRate_);
-        auto toneInterfererStep = new ToneInterfererStep(
-            inputSampleRate_,
-            +[]() FREEDV_NONBLOCKING { return (float)NonblockingWxGetApp().m_tone_freq_hz; },
-            +[]() FREEDV_NONBLOCKING { return (float)NonblockingWxGetApp().m_tone_amplitude; },
-            +[]() FREEDV_NONBLOCKING { return &g_tone_phase; }
-        );
-        auto eitherOrToneInterferer = new EitherOrStep(
-            +[]() FREEDV_NONBLOCKING { return NonblockingWxGetApp().m_tone; },
-            toneInterfererStep,
-            bypassToneInterferer
-        );
-        activeRxPipeline->appendPipelineStep(eitherOrToneInterferer);
-        
         // RF spectrum computation step
         auto computeRfSpectrumStep = new ComputeRfSpectrumStep(
             +[]() FREEDV_NONBLOCKING { return freedvInterface.getCurrentRxModemStats(); },
@@ -275,8 +257,6 @@ void TxRxThread::initializePipeline_()
         auto rfDemodulationStep = freedvInterface.createReceivePipeline(
             inputSampleRate_, outputSampleRate_,
             +[]() FREEDV_NONBLOCKING { return &g_State; },
-            +[]() FREEDV_NONBLOCKING { return g_channel_noise.load(std::memory_order_acquire); },
-            +[]() FREEDV_NONBLOCKING { return NonblockingWxGetApp().appConfiguration.noiseSNR.getWithoutProcessing(); },
             +[]() FREEDV_NONBLOCKING { return g_RxFreqOffsetHz.load(std::memory_order_relaxed); },
             +[]() FREEDV_NONBLOCKING { return &g_sig_pwr_av; },
             helper_

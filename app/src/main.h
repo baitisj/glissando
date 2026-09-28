@@ -204,26 +204,18 @@ class MainApp : public wxApp
 
         // misc
 
-        bool       m_testFrames;
-        bool       m_channel_noise;
         float      m_channel_snr_dB;
 
         int        FilterEvent(wxEvent& event);
         MainFrame *frame;
 
         // 700 options
-        bool       m_FreeDV700Combine;
 
         // carrier attenuation
 
-        bool       m_attn_carrier_en;
-        int        m_attn_carrier;
 
         // tone interferer simulation
 
-        bool       m_tone;
-        int        m_tone_freq_hz;
-        int        m_tone_amplitude;
 
         // debugging 700D audio break up
 
