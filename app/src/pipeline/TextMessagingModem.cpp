@@ -478,6 +478,13 @@ bool TextMessagingModem::isReceiving() const
 
     if (glissandoOn_.load(std::memory_order_acquire))
     {
+        // A burst whose last frame has been heard is over: the far end is
+        // waiting for an answer, and holding the channel for another frame
+        // and a half kept it waiting 68 s at Adagio before it could have one.
+        // A message with more bursts to come holds the channel in the
+        // protocol, from what its frames say.
+        if (glissandoRx_->lastFrameEnd() == completedFrameEnd_.load(std::memory_order_acquire)) return false;
+
         // A frame of a burst decodes one frame length after the one before
         // it, plus the search; hold the channel across that gap.
         int gear = 0;
@@ -533,16 +540,34 @@ AirTiming TextMessagingModem::airTiming() const
     if (!glissandoOn_.load(std::memory_order_acquire)) return AirTiming();
 
     int gear = 0;
+    double slowestFrameSeconds = 0.0;
     {
         std::lock_guard<std::mutex> lock(glissandoMutex_);
         gear = transmitGearLocked();
+
+        // An answer can come in any tempo the receiver is listening for.
+        std::vector<int> listening;
+        if (glissando_.listenAllGears)
+        {
+            for (int g = Glissando::MIN_GEAR; g <= Glissando::MAX_GEAR; g++) listening.push_back(g);
+        }
+        else
+        {
+            listening = {glissando_.gear, gear};
+        }
+        for (int g : listening)
+        {
+            slowestFrameSeconds = std::max(slowestFrameSeconds, Glissando::gearInfo(g).frameSeconds());
+        }
     }
     const Glissando::GearInfo& info = Glissando::gearInfo(gear);
     // The receiver searches every quarter frame, and a search takes a
     // moment on top of that.
+    auto decodeLatency = [](double frameSeconds) { return frameSeconds / 4.0 + GLISSANDO_SEARCH_SECONDS; };
     return AirTiming::forFrameSeconds(info.frameSeconds(),
                                       Glissando::SEGMENT_DATA_BYTES * info.voices,
-                                      info.frameSeconds() / 4.0 + GLISSANDO_SEARCH_SECONDS);
+                                      decodeLatency(info.frameSeconds()), slowestFrameSeconds,
+                                      decodeLatency(slowestFrameSeconds));
 }
 
 double TextMessagingModem::glissandoMessageSeconds(size_t textBytes) const
@@ -616,6 +641,7 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
         long long duplicate = Glissando::gearInfo(decode.gear).samplesPerSymbol();
         complete = reassembler_.add(d.payload, d.startSample, duplicate, burst);
     }
+    if (complete) completedFrameEnd_.store(glissandoRx_->lastFrameEnd(), std::memory_order_release);
     lastSyncMs_.store(steadyMs(), std::memory_order_release);
 
     if (rxLogEnabled())

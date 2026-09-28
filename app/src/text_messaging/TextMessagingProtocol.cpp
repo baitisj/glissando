@@ -225,7 +225,8 @@ void TextMessagingProtocol::dropOutboxLocked(MessageStatus status, bool onTheAir
 }
 
 AirTiming AirTiming::forFrameSeconds(double frameSeconds, int bytesPerFrame,
-                                     double decodeLatencySeconds)
+                                     double decodeLatencySeconds, double replyFrameSeconds,
+                                     double replyDecodeLatencySeconds)
 {
     AirTiming timing;
     if (frameSeconds <= 0.0 || bytesPerFrame <= 0) return timing;
@@ -241,7 +242,22 @@ AirTiming AirTiming::forFrameSeconds(double frameSeconds, int bytesPerFrame,
     // the same way; the codec2 waits stay as they are on top of that.
     double seen = frameSeconds + decodeLatencySeconds;
 
-    timing.replyWindowMs = REPLY_WINDOW_MILLISECONDS + ms(seen);
+    // With the far end's tempo given, answers are waited for as it sends
+    // them. It decodes our last frame, turns around, and having heard us on
+    // the channel draws its jitter (TURNAROUND_JITTER plus half its own
+    // frame) before keying. The first frame of its answer can be decoded here
+    // one frame and one search after that, and nothing of it can be sensed
+    // before then. On the air a ping at Presto duet gave up 29 s after it
+    // ended, and the far end's Allegro answer was first heard 9 s later.
+    bool farEndGiven = replyFrameSeconds > 0.0;
+    auto farEndKeysAfter = [&](double farFrameSeconds) {
+        return ms(decodeLatencySeconds + farFrameSeconds / 2.0) + TURNAROUND_AFTER_RX_MILLISECONDS +
+               TURNAROUND_JITTER_MILLISECONDS;
+    };
+    int firstReplyFrame =
+        farEndGiven ? farEndKeysAfter(replyFrameSeconds) + ms(replyFrameSeconds + replyDecodeLatencySeconds) : 0;
+
+    timing.replyWindowMs = REPLY_WINDOW_MILLISECONDS + std::max(ms(seen), firstReplyFrame);
     timing.turnaroundJitterMs = TURNAROUND_JITTER_MILLISECONDS + ms(frameSeconds / 2.0);
     timing.textFragmentAirMs = ms(textAir) + TEXT_FRAGMENT_AIR_MILLISECONDS;
     timing.signallingFollowedReservationMs = 2 * timing.textFragmentAirMs;
@@ -251,6 +267,14 @@ AirTiming AirTiming::forFrameSeconds(double frameSeconds, int bytesPerFrame,
     // From the end of our burst: the far end decodes it, turns around, sends
     // a signalling burst, and we decode that.
     int answer = ms(2.0 * decodeLatencySeconds + signallingAir) + TURNAROUND_AFTER_RX_MILLISECONDS;
+    if (farEndGiven)
+    {
+        // An answer at our own tempo, jitter and all; or the first frame of
+        // one at the slowest, after which the channel is busy and the
+        // protocol holds its timers until the rest has arrived.
+        int ownTempo = farEndKeysAfter(frameSeconds) + ms(signallingAir + decodeLatencySeconds);
+        answer = std::max(ownTempo, firstReplyFrame);
+    }
     timing.ackTimeoutMs = ACK_TIMEOUT_MILLISECONDS + answer;
     timing.pingTimeoutMs = PING_TIMEOUT_MILLISECONDS + answer;
     timing.retryBackoffMs = RETRY_BACKOFF_MILLISECONDS + ms(frameSeconds / 2.0);

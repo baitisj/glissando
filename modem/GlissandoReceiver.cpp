@@ -260,6 +260,11 @@ ChannelReport StreamingReceiver::lastReport(long long* atSample) const
     return impl_->lastReport;
 }
 
+long long StreamingReceiver::lastFrameEnd() const
+{
+    return impl_->lastFrameEnd;
+}
+
 bool StreamingReceiver::isBusy(long long holdSamples) const
 {
     long long end = impl_->lastFrameEnd;

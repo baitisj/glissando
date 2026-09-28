@@ -77,6 +77,11 @@ public:
     // the chat protocol. Safe from any thread.
     bool isBusy(long long holdSamples) const;
 
+    // Where the newest decoded frame ended, in samples since start(); -1
+    // before any. Set before that frame's decode callback runs. Safe from
+    // any thread.
+    long long lastFrameEnd() const;
+
 private:
     // Implementation defined in the .cpp; kept opaque so the header stays
     // light.
