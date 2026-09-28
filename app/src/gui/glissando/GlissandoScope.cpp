@@ -48,6 +48,91 @@ constexpr double LENS_SPAN_FACTOR = 8.0;
 // Captions are wrapped to this fraction of the trace's width.
 constexpr double CAPTION_WIDTH = 0.62;
 
+// Sent notes are gathered into a formation of sprites for as long as the
+// top of the trace takes to scroll this many pixels, so the newest
+// formations sit just clear of each other. Sprites are drawn at most this
+// many screen pixels to one of theirs.
+constexpr double FORMATION_PIXELS = 44.0;
+constexpr int SPRITE_SCALE = 3;
+
+// Frames queued to be sent but still not played this long after we last
+// transmitted were never going to be (the burst was dropped).
+constexpr double SENT_STALE_SECONDS = 20.0;
+
+// Pixel art, one string per row: X lit, r the rocket's exhaust.
+const char* const ROCKET[] = {
+    "....X....",
+    "...XXX...",
+    "...XXX...",
+    "..XXXXX..",
+    "..X...X..",
+    "..XX.XX..",
+    "..XXXXX..",
+    "..XXXXX..",
+    ".XXXXXXX.",
+    "XX.XXX.XX",
+    "X..XXX..X",
+    "...rrr...",
+    "....r....",
+};
+
+const char* const CRAB[] = {
+    "..X.....X..",
+    "...X...X...",
+    "..XXXXXXX..",
+    ".XX.XXX.XX.",
+    "XXXXXXXXXXX",
+    "X.XXXXXXX.X",
+    "X.X.....X.X",
+    "...XX.XX...",
+};
+
+const char* const SQUID[] = {
+    "...XX...",
+    "..XXXX..",
+    ".XXXXXX.",
+    "XX.XX.XX",
+    "XXXXXXXX",
+    "..X..X..",
+    ".X.XX.X.",
+    "X.X..X.X",
+};
+
+struct Sprite
+{
+    const char* const* rows;
+    int height;
+    int width() const { return (int)std::strlen(rows[0]); }
+};
+
+template <size_t N> Sprite sprite(const char* const (&rows)[N]) { return Sprite{rows, (int)N}; }
+
+// Draws the sprite centred on (cx, cy), `scale` pixels to one of its own,
+// each run of lit pixels in a row as one rectangle.
+void drawSprite(wxGraphicsContext* gc, const Sprite& sprite, double cx, double cy, int scale,
+                const wxColour& ink, const wxColour& exhaust)
+{
+    double x0 = std::round(cx - sprite.width() * scale / 2.0);
+    double y0 = std::round(cy - sprite.height * scale / 2.0);
+    gc->SetPen(*wxTRANSPARENT_PEN);
+    for (int j = 0; j < sprite.height; j++)
+    {
+        const char* row = sprite.rows[j];
+        for (int i = 0; row[i] != '\0';)
+        {
+            char c = row[i];
+            int run = 1;
+            while (row[i + run] == c) run++;
+            if (c != '.')
+            {
+                gc->SetBrush(wxBrush(c == 'r' ? exhaust : ink));
+                gc->DrawRectangle(x0 + i * scale, y0 + j * scale, run * scale, scale);
+            }
+            i += run;
+        }
+    }
+}
+
 wxFont captionTextFont()
 {
     return wxFont(wxFontInfo(9).Family(wxFONTFAMILY_TELETYPE).Bold());
@@ -71,6 +156,13 @@ GlissandoScope::GlissandoScope(wxWindow* parent, wxWindowID id)
     , lens_(true)
     , lensK_(1.0)
     , lensTau_(1.0)
+    , sendClock_(0.0)
+    , sendEnd_(0.0)
+    , sendStart_(0.0)
+    , lastTick_(0.0)
+    , lastTransmitting_(0.0)
+    , gatheringFrom_(-1.0)
+    , formationSerial_(0)
 {
     SetBackgroundStyle(wxBG_STYLE_PAINT);
     SetMinSize(wxSize(420, 240));
@@ -143,6 +235,78 @@ void GlissandoScope::addHeard(const GlissandoScopeFrame& frame)
     heard_.push_back(frame);
     while (heard_.size() > HEARD_LIMIT) heard_.pop_front();
     Refresh(false);
+}
+
+void GlissandoScope::addSent(const GlissandoScopeSent& frame)
+{
+    if (frame.melody.empty()) return;
+    // A second voice sings alongside the first; anything else follows on
+    // from what is queued, or starts now.
+    double offset = frame.voice > 0 ? sendStart_ : std::max(sendEnd_, sendClock_);
+    if (frame.voice == 0) sendStart_ = offset;
+    sendEnd_ = std::max(sendEnd_, offset + frame.symbolSeconds * frame.melody.size());
+    sending_.push_back(Sending{frame, offset, 0});
+}
+
+void GlissandoScope::clearSent()
+{
+    sending_.clear();
+    sendEnd_ = sendStart_ = sendClock_;
+}
+
+double GlissandoScope::formationSeconds() const
+{
+    return lens_ ? yToAge(FORMATION_PIXELS) : FORMATION_PIXELS / scanRate_;
+}
+
+void GlissandoScope::advanceSent(double now)
+{
+    double elapsed = lastTick_ > 0.0 ? std::min(1.0, std::max(0.0, now - lastTick_)) : 0.0;
+    lastTick_ = now;
+    if (transmitting_)
+    {
+        sendClock_ += elapsed;
+        lastTransmitting_ = now;
+    }
+    else if (!sending_.empty() && now - lastTransmitting_ > SENT_STALE_SECONDS)
+    {
+        clearSent();
+    }
+
+    for (Sending& sending : sending_)
+    {
+        const GlissandoScopeSent& frame = sending.frame;
+        while (sending.next < frame.melody.size() &&
+               sending.offset + sending.next * frame.symbolSeconds <= sendClock_)
+        {
+            int note = std::min(7, std::max(0, frame.melody[sending.next]));
+            double hz = frame.notesHz[note];
+            if (gatheringFrom_ < 0.0) gatheringFrom_ = sending.offset + sending.next * frame.symbolSeconds;
+            gathering_.heroes = frame.heroes;
+            if (std::find(gathering_.notesHz.begin(), gathering_.notesHz.end(), hz) == gathering_.notesHz.end())
+            {
+                gathering_.notesHz.push_back(hz);
+            }
+            sending.next++;
+        }
+    }
+    while (!sending_.empty() && sending_.front().next >= sending_.front().frame.melody.size())
+    {
+        sending_.pop_front();
+    }
+
+    // A formation is complete once it spans its time, or when the
+    // transmitter lets go.
+    double window = formationSeconds();
+    if (gatheringFrom_ >= 0.0 && (sendClock_ - gatheringFrom_ >= window || !transmitting_))
+    {
+        gathering_.seconds = now;
+        gathering_.window = window;
+        gathering_.serial = formationSerial_++;
+        formations_.push_back(gathering_);
+        gathering_.notesHz.clear();
+        gatheringFrom_ = -1.0;
+    }
 }
 
 void GlissandoScope::setLens(bool on)
@@ -273,6 +437,7 @@ void GlissandoScope::OnSize(wxSizeEvent& event)
 void GlissandoScope::OnTimer(wxTimerEvent&)
 {
     addRow();
+    advanceSent(steadySeconds());
     Refresh(false);
 }
 
@@ -292,6 +457,11 @@ void GlissandoScope::addRow()
            heard_.front().startSeconds + heard_.front().symbolSeconds * heard_.front().melody.size() < oldest)
     {
         heard_.pop_front();
+    }
+    while (!formations_.empty() && oldest > 0.0 &&
+           formations_.front().seconds - formations_.front().window < oldest)
+    {
+        formations_.pop_front();
     }
 
     unsigned char* row = history_.data();
@@ -444,6 +614,7 @@ void GlissandoScope::OnPaint(wxPaintEvent&)
     }
 
     paintHeard(gc.get(), trace);
+    paintSent(gc.get(), trace);
 
     if (hoverX_ >= 0)
     {
@@ -760,5 +931,70 @@ void GlissandoScope::renderTrace(wxImage& image)
             for (int x = 0; x < w; x++) line[(size_t)x] = std::max<unsigned>(line[(size_t)x], src[x]);
         }
         for (int x = 0; x < w; x++) put(out + x, line[(size_t)x]);
+    }
+}
+
+void GlissandoScope::paintSent(wxGraphicsContext* gc, const wxRect& trace)
+{
+    if (formations_.empty()) return;
+    const double bottom = trace.y + trace.height;
+    const wxColour hull(Colour::Glow);
+    const wxColour exhaust(255, 150, 60);
+    const wxColour henchman(Colour::Phosphor);
+
+    for (const Formation& formation : formations_)
+    {
+        // The formation fills the rows its notes were sung in; the sprites
+        // shrink to fit as the lens squeezes those rows together.
+        double yNew = trace.y + timeToY(formation.seconds);
+        double yOld = trace.y + timeToY(formation.seconds - formation.window);
+        double room = yOld - yNew;
+        if (yNew > bottom || room < 1.5) continue;
+
+        Sprite shape = formation.heroes ? sprite(ROCKET) : formation.serial % 2 ? sprite(SQUID) : sprite(CRAB);
+        int scale = std::min(SPRITE_SCALE, (int)std::floor((room - 2.0) / shape.height));
+        double cy = (yNew + yOld) / 2.0;
+        const wxColour& ink = formation.heroes ? hull : henchman;
+
+        for (size_t i = 0; i < formation.notesHz.size(); i++)
+        {
+            double cx = hzToX(formation.notesHz[i]);
+            if (scale < 1)
+            {
+                // Too far down the lens for a sprite: a speck in its place.
+                gc->SetPen(*wxTRANSPARENT_PEN);
+                gc->SetBrush(wxBrush(wxColour(ink.Red(), ink.Green(), ink.Blue(), 120)));
+                gc->DrawRectangle(cx - 1, cy - 1, 2, 2);
+                continue;
+            }
+            drawSprite(gc, shape, cx, cy, scale, ink, exhaust);
+
+            // Full size ones exchange fire: rockets shoot straight up, invaders
+            // drop zigzag bombs.
+            if (scale < SPRITE_SCALE || (i + formation.serial) % 2 != 0) continue;
+            double half = shape.height * scale / 2.0;
+            if (formation.heroes)
+            {
+                gc->SetPen(*wxTRANSPARENT_PEN);
+                for (int k = 0; k < 3; k++)
+                {
+                    gc->SetBrush(wxBrush(wxColour(ink.Red(), ink.Green(), ink.Blue(), 200 - 60 * k)));
+                    gc->DrawRectangle(cx - 1, cy - half - 11 - 9 * k, 2, 5);
+                }
+            }
+            else
+            {
+                double y = cy + half + 3;
+                wxGraphicsPath bomb = gc->CreatePath();
+                bomb.MoveToPoint(cx, y);
+                bomb.AddLineToPoint(cx + 3, y + 4);
+                bomb.AddLineToPoint(cx - 3, y + 8);
+                bomb.AddLineToPoint(cx + 3, y + 12);
+                bomb.AddLineToPoint(cx, y + 15);
+                gc->SetBrush(*wxTRANSPARENT_BRUSH);
+                gc->SetPen(wxPen(wxColour(ink.Red(), ink.Green(), ink.Blue(), 210), 2));
+                gc->StrokePath(bomb);
+            }
+        }
     }
 }

@@ -422,6 +422,7 @@ void GlissandoConsole::buildControls()
         if (engageAborts_ || host_->glissandoTelemetry().transmitBusy)
         {
             host_->glissandoAbortTransmit();
+            scope_->clearSent();
         }
         else
         {
@@ -599,6 +600,7 @@ void GlissandoConsole::refreshTelemetry()
     transmittingLamp_->SetLit(t.transmitting);
     scope_->setActivity(t.receiving, t.transmitting);
     for (const GlissandoScopeFrame& frame : host_->glissandoHeardFrames()) scope_->addHeard(frame);
+    for (const GlissandoScopeSent& frame : host_->glissandoSentFrames()) scope_->addSent(frame);
 
     snrMeter_->SetValue(t.haveReport ? t.snrDb : std::nan(""));
     dopplerReadout_->SetText(t.haveReport ? wxString::Format("%.2f Hz", t.dopplerHz) : wxString("---"));

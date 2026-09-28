@@ -278,6 +278,22 @@ std::vector<GlissandoScopeFrame> MainFrame::glissandoHeardFrames()
     return frames;
 }
 
+std::vector<GlissandoScopeSent> MainFrame::glissandoSentFrames()
+{
+    std::vector<GlissandoScopeSent> frames;
+    for (const TextMessagingModem::GlissandoSent& sent : textMessagingModem().takeGlissandoSent())
+    {
+        GlissandoScopeSent frame;
+        frame.symbolSeconds = Glissando::gearInfo(sent.gear).symbolSeconds;
+        frame.voice = sent.voice;
+        frame.heroes = sent.scale == Glissando::Scale::Pentatonic;
+        std::copy(sent.notesHz.begin(), sent.notesHz.end(), frame.notesHz.begin());
+        frame.melody.assign(sent.melody.begin(), sent.melody.end());
+        frames.push_back(std::move(frame));
+    }
+    return frames;
+}
+
 void MainFrame::glissandoSetAudioRunning(bool running)
 {
     if (running == m_RxRunning || !m_togBtnOnOff->IsEnabled()) return;
