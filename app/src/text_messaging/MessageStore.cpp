@@ -84,6 +84,7 @@ int statusToInt(MessageStatus status)
         case MessageStatus::Sent: return 6;
         case MessageStatus::Received: return 7;
         case MessageStatus::NotSent: return 8;
+        case MessageStatus::Aborted: return 9;
     }
     return 0;
 }
@@ -101,6 +102,7 @@ MessageStatus intToStatus(int value)
         case 6: return MessageStatus::Sent;
         case 7: return MessageStatus::Received;
         case 8: return MessageStatus::NotSent;
+        case 9: return MessageStatus::Aborted;
         default: return MessageStatus::Failed;
     }
 }

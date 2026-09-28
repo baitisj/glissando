@@ -56,6 +56,10 @@ if(APPLE)
     )
 else()
     add_executable(freedv WIN32 ${FREEDV_SOURCES} ${RES_FILES})
+
+    # The target keeps FreeDV's name, so everything that builds on it still
+    # works; the program it makes is glissando (glissando.exe on Windows).
+    set_target_properties(freedv PROPERTIES OUTPUT_NAME glissando)
 endif(APPLE)
 
 if(APPLE)

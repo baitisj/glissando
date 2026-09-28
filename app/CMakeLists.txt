@@ -678,7 +678,7 @@ install(
 if(WIN32)
     # Install pdb files.
     install(
-        FILES ${CMAKE_CURRENT_BINARY_DIR}/src/freedv.pdb 
+        FILES ${CMAKE_CURRENT_BINARY_DIR}/src/glissando.pdb 
         DESTINATION bin
     )
 endif(WIN32)
@@ -704,7 +704,7 @@ if(WIN32)
     # There is a bug in NSI that does not handle full unix paths properly. Make
     # sure there is at least one set of four (4) backlasshes.
     #set(CPACK_PACKAGE_ICON "${CMake_SOURCE_DIR}/Utilities/Release\\\\InstallIcon.bmp")
-    set(CPACK_NSIS_INSTALLED_ICON_NAME "bin\\\\freedv.exe")
+    set(CPACK_NSIS_INSTALLED_ICON_NAME "bin\\\\glissando.exe")
     set(CPACK_NSIS_DISPLAY_NAME "${CPACK_PACKAGE_INSTALL_DIRECTORY}")
     set(CPACK_NSIS_PACKAGE_NAME "FreeDV")
     set(CPACK_PACKAGE_EXECUTABLES freedv;FreeDV)

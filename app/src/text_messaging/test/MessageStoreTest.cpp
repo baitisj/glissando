@@ -126,6 +126,11 @@ void testMessageRoundTrip()
     CHECK(store.updateMessageStatus(sent.id, MessageStatus::NotSent, 0));
     messages = store.recentMessages(50);
     CHECK(messages[0].status == MessageStatus::NotSent);
+
+    // So does one the operator aborted.
+    CHECK(store.updateMessageStatus(sent.id, MessageStatus::Aborted, 0));
+    messages = store.recentMessages(50);
+    CHECK(messages[0].status == MessageStatus::Aborted);
 }
 
 void testMessageLimitAndPrune()
