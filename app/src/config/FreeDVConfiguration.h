@@ -103,6 +103,7 @@ public:
     ConfigurationDataElement<int> glissandoTuningDeciHz;
     ConfigurationDataElement<bool> glissandoListenAllGears;
     ConfigurationDataElement<int> glissandoScanRateDeci;
+    ConfigurationDataElement<bool> glissandoScopeLens;
     ConfigurationDataElement<long> glissandoWindowLeft;
     ConfigurationDataElement<long> glissandoWindowTop;
     ConfigurationDataElement<long> glissandoWindowWidth;

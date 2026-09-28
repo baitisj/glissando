@@ -95,6 +95,10 @@ public:
 
     void clear();
 
+    // The time lens; see above.
+    void setLens(bool on);
+    bool lens() const { return lens_; }
+
     // Writes a decoded frame on the trace.
     void addHeard(const GlissandoScopeFrame& frame);
 
@@ -119,10 +123,26 @@ private:
     int hzToX(double hz) const;
     void addRow();
 
-    // Rows down from the top of the trace at which the given steady clock
+    // Rows of history back from the newest at which the given steady clock
     // time was drawn; fractional, negative for times newer than the newest
-    // row, and at least historyHeight_ for times already scrolled off.
+    // row, and at least historyRows_ for times older than the history.
     double timeToRow(double seconds) const;
+
+    // Pixels down the trace at which a time was drawn, through the lens or
+    // not; negative for times newer than the newest row.
+    double timeToY(double seconds) const;
+
+    // The lens's scale: y = lensK_ * asinh(age / lensTau_), which is
+    // lensMagnification rows per scan row at the top and logarithmic further
+    // down. Recomputed with the trace height and the scan rate.
+    void updateLens();
+    double ageToY(double ageSeconds) const;
+    double yToAge(double y) const;
+    double lensSpanSeconds() const;
+
+    // Keeps enough history for what the trace shows, keeping what is there.
+    void sizeHistory();
+    void renderTrace(wxImage& image);
     void paintHeard(wxGraphicsContext* gc, const wxRect& trace);
 
     SpectrumSource source_;
@@ -137,10 +157,16 @@ private:
     bool transmitting_;
     int hoverX_;
 
-    // History, newest row at the top, one byte of brightness per pixel.
+    // History, newest row first, one byte of brightness per pixel. It holds
+    // more rows than the trace is tall when the lens squeezes them in.
     std::vector<unsigned char> history_;
     int historyWidth_;
-    int historyHeight_;
+    int historyRows_;
+    int traceHeight_;
+
+    bool lens_;
+    double lensK_;
+    double lensTau_;
 
     // When each row of history was drawn, steady clock seconds, newest
     // first; zero for rows from before the history began.

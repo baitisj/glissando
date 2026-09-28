@@ -86,6 +86,7 @@ GlissandoConsoleSettings MainFrame::loadGlissandoSettings_() const
     settings.tuningOffsetHz = config.glissandoTuningDeciHz / 10.0;
     settings.listenAllGears = config.glissandoListenAllGears;
     settings.scanRate = std::max(0.5, config.glissandoScanRateDeci / 10.0);
+    settings.lens = config.glissandoScopeLens;
     return settings;
 }
 
@@ -174,6 +175,7 @@ void MainFrame::glissandoSettingsChanged(const GlissandoConsoleSettings& setting
     config.glissandoTuningDeciHz = (int)std::lround(settings.tuningOffsetHz * 10.0);
     config.glissandoListenAllGears = settings.listenAllGears;
     config.glissandoScanRateDeci = (int)std::lround(settings.scanRate * 10.0);
+    config.glissandoScopeLens = settings.lens;
     applyGlissandoToModem_(m_glissandoConsole != nullptr);
 }
 

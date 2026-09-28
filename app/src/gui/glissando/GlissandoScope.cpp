@@ -12,6 +12,7 @@
 #include <memory>
 
 #include <wx/dcbuffer.h>
+#include <wx/geometry.h>
 #include <wx/graphics.h>
 
 #include "ChaoticaTheme.h"
@@ -39,6 +40,11 @@ constexpr float PEAK_RANGE_DB = 30.0f;
 // Decoded frames kept on the trace at most, however slowly it scrolls.
 constexpr size_t HEARD_LIMIT = 200;
 
+// The time lens: the newest rows are drawn this many pixels tall, and the
+// trace holds this many times the history it would without the lens.
+constexpr double LENS_MAGNIFICATION = 3.0;
+constexpr double LENS_SPAN_FACTOR = 8.0;
+
 // Captions are wrapped to this fraction of the trace's width.
 constexpr double CAPTION_WIDTH = 0.62;
 
@@ -60,7 +66,11 @@ GlissandoScope::GlissandoScope(wxWindow* parent, wxWindowID id)
     , transmitting_(false)
     , hoverX_(-1)
     , historyWidth_(0)
-    , historyHeight_(0)
+    , historyRows_(0)
+    , traceHeight_(0)
+    , lens_(true)
+    , lensK_(1.0)
+    , lensTau_(1.0)
 {
     SetBackgroundStyle(wxBG_STYLE_PAINT);
     SetMinSize(wxSize(420, 240));
@@ -82,6 +92,8 @@ void GlissandoScope::setScanRate(double rowsPerSecond)
 {
     scanRate_ = std::min(30.0, std::max(0.2, rowsPerSecond));
     timer_.Start((int)std::lround(1000.0 / scanRate_));
+    updateLens();
+    sizeHistory();
     Refresh();
 }
 
@@ -133,16 +145,85 @@ void GlissandoScope::addHeard(const GlissandoScopeFrame& frame)
     Refresh(false);
 }
 
+void GlissandoScope::setLens(bool on)
+{
+    if (on == lens_) return;
+    lens_ = on;
+    sizeHistory();
+    Refresh();
+}
+
+double GlissandoScope::lensSpanSeconds() const
+{
+    return LENS_SPAN_FACTOR * traceHeight_ / scanRate_;
+}
+
+void GlissandoScope::updateLens()
+{
+    // K asinh(age / tau) is K / tau pixels a second at the top, which is to
+    // be LENS_MAGNIFICATION times the scan rate, and reaches the bottom of
+    // the trace at the lens's whole span. K * asinh(span / tau) grows with
+    // tau, so a bisection finds it.
+    double h = std::max(1, traceHeight_);
+    double slope = LENS_MAGNIFICATION * scanRate_;
+    double span = lensSpanSeconds();
+    double lo = 1e-3, hi = std::max(1.0, span);
+    for (int i = 0; i < 60; i++)
+    {
+        double tau = 0.5 * (lo + hi);
+        if (slope * tau * std::asinh(span / tau) > h)
+            hi = tau;
+        else
+            lo = tau;
+    }
+    lensTau_ = 0.5 * (lo + hi);
+    lensK_ = slope * lensTau_;
+}
+
+double GlissandoScope::ageToY(double ageSeconds) const
+{
+    return lensK_ * std::asinh(ageSeconds / lensTau_);
+}
+
+double GlissandoScope::yToAge(double y) const
+{
+    return lensTau_ * std::sinh(y / lensK_);
+}
+
+void GlissandoScope::sizeHistory()
+{
+    if (historyWidth_ <= 0 || traceHeight_ <= 0) return;
+    // The lens reaches back lensSpanSeconds(); a little more, so the bottom
+    // pixel of the trace always has rows under it after a scan rate change.
+    int rows = traceHeight_;
+    if (lens_) rows = std::max(rows, (int)std::ceil(lensSpanSeconds() * scanRate_ * 1.1) + 2);
+    if (rows == historyRows_) return;
+    history_.resize((size_t)historyWidth_ * rows, 0);
+    rowSeconds_.resize((size_t)rows, 0.0);
+    historyRows_ = rows;
+}
+
+double GlissandoScope::timeToY(double seconds) const
+{
+    if (!lens_) return timeToRow(seconds);
+    if (rowSeconds_.empty() || rowSeconds_[0] <= 0.0) return traceHeight_ + 1.0;
+    double age = rowSeconds_[0] - seconds;
+    if (age < 0.0) return age * LENS_MAGNIFICATION * scanRate_;
+    // Past the history there is nothing to draw on.
+    if (timeToRow(seconds) >= historyRows_) return traceHeight_ + 1.0;
+    return ageToY(age);
+}
+
 double GlissandoScope::timeToRow(double seconds) const
 {
-    if (rowSeconds_.empty() || rowSeconds_[0] <= 0.0) return historyHeight_;
+    if (rowSeconds_.empty() || rowSeconds_[0] <= 0.0) return historyRows_;
     if (seconds >= rowSeconds_[0]) return -(seconds - rowSeconds_[0]) * scanRate_;
 
     // Rows are newest first: find the first drawn at or before `seconds`.
     auto it = std::lower_bound(rowSeconds_.begin(), rowSeconds_.end(), seconds,
                                [](double row, double t) { return row > t; });
     size_t i = (size_t)(it - rowSeconds_.begin());
-    if (i >= rowSeconds_.size() || rowSeconds_[i] <= 0.0) return historyHeight_;
+    if (i >= rowSeconds_.size() || rowSeconds_[i] <= 0.0) return historyRows_;
     double newer = rowSeconds_[i - 1];
     double older = rowSeconds_[i];
     return (double)(i - 1) + (newer - seconds) / std::max(1e-6, newer - older);
@@ -171,12 +252,19 @@ int GlissandoScope::hzToX(double hz) const
 void GlissandoScope::OnSize(wxSizeEvent& event)
 {
     wxRect r = traceRect();
-    if (r.width != historyWidth_ || r.height != historyHeight_)
+    if (r.width != historyWidth_ || r.height != traceHeight_)
     {
+        // A new width is a new picture; a new height keeps the rows.
+        if (r.width != historyWidth_)
+        {
+            history_.clear();
+            rowSeconds_.clear();
+            historyRows_ = 0;
+        }
         historyWidth_ = r.width;
-        historyHeight_ = r.height;
-        history_.assign((size_t)historyWidth_ * historyHeight_, 0);
-        rowSeconds_.assign((size_t)historyHeight_, 0.0);
+        traceHeight_ = r.height;
+        updateLens();
+        sizeHistory();
     }
     Refresh();
     event.Skip();
@@ -190,11 +278,11 @@ void GlissandoScope::OnTimer(wxTimerEvent&)
 
 void GlissandoScope::addRow()
 {
-    if (historyWidth_ <= 0 || historyHeight_ <= 0) return;
+    if (historyWidth_ <= 0 || historyRows_ <= 0) return;
 
     // Scroll everything down one row.
     std::memmove(history_.data() + historyWidth_, history_.data(),
-                 (size_t)historyWidth_ * (historyHeight_ - 1));
+                 (size_t)historyWidth_ * (historyRows_ - 1));
     std::move_backward(rowSeconds_.begin(), rowSeconds_.end() - 1, rowSeconds_.end());
     rowSeconds_[0] = steadySeconds();
 
@@ -277,17 +365,10 @@ void GlissandoScope::OnPaint(wxPaintEvent&)
 
     // The trace itself, blitted as an image: phosphor white with a faint
     // blue-grey tint in the dark, like an old cathode ray tube.
-    if (historyWidth_ == trace.width && historyHeight_ == trace.height && !history_.empty())
+    if (historyWidth_ == trace.width && traceHeight_ == trace.height && !history_.empty())
     {
-        wxImage image(historyWidth_, historyHeight_, false);
-        unsigned char* rgb = image.GetData();
-        for (size_t i = 0; i < history_.size(); i++)
-        {
-            unsigned v = history_[i];
-            rgb[3 * i + 0] = (unsigned char)(8 + v * 224 / 255);
-            rgb[3 * i + 1] = (unsigned char)(9 + v * 227 / 255);
-            rgb[3 * i + 2] = (unsigned char)(12 + v * 218 / 255);
-        }
+        wxImage image(historyWidth_, traceHeight_, false);
+        renderTrace(image);
         dc.DrawBitmap(wxBitmap(image), trace.x, trace.y);
     }
 
@@ -328,6 +409,37 @@ void GlissandoScope::OnPaint(wxPaintEvent&)
         gc->DrawRectangle(trace.x, trace.y, trace.width, 30);
     }
 
+    // The lens: a sheen of glass over the magnified rows, and its rim
+    // where the scale passes one row a pixel and starts to squeeze.
+    if (lens_)
+    {
+        double rimAge = lensTau_ * std::sqrt(LENS_MAGNIFICATION * LENS_MAGNIFICATION - 1.0);
+        double rim = trace.y + ageToY(rimAge);
+        gc->SetPen(*wxTRANSPARENT_PEN);
+        gc->SetBrush(gc->CreateLinearGradientBrush(trace.x, trace.y, trace.x, rim,
+                                                   wxColour(255, 255, 255, 24), wxColour(255, 255, 255, 0)));
+        gc->DrawRectangle(trace.x, trace.y, trace.width, rim - trace.y);
+
+        double x0 = trace.x, x1 = trace.x + trace.width, mid = trace.x + trace.width / 2.0;
+        wxGraphicsPath edge = gc->CreatePath();
+        edge.MoveToPoint(x0, rim - 6);
+        edge.AddQuadCurveToPoint(mid, rim + 10, x1, rim - 6);
+        gc->SetBrush(*wxTRANSPARENT_BRUSH);
+        gc->SetPen(wxPen(wxColour(200, 198, 192, 110), 1));
+        gc->StrokePath(edge);
+        wxGraphicsPath reflection = gc->CreatePath();
+        reflection.MoveToPoint(x0, rim - 2);
+        reflection.AddQuadCurveToPoint(mid, rim + 14, x1, rim - 2);
+        gc->SetPen(wxPen(wxColour(200, 198, 192, 28), 3));
+        gc->StrokePath(reflection);
+
+        gc->SetFont(font(FontRole::Caption), wxColour(200, 198, 192, 150));
+        wxString label = wxString::Format(_("TIME LENS x%.0f"), LENS_MAGNIFICATION);
+        double tw = 0, th = 0;
+        gc->GetTextExtent(label, &tw, &th);
+        gc->DrawText(label, x1 - tw - 8, rim - th - 8);
+    }
+
     paintHeard(gc.get(), trace);
 
     if (hoverX_ >= 0)
@@ -361,15 +473,35 @@ void GlissandoScope::OnPaint(wxPaintEvent&)
         gc->DrawText(label, x - tw / 2, trace.y + trace.height + 7);
     }
 
-    // Time scale down the left: seconds ago, from the scan rate.
-    double seconds = trace.height / scanRate_;
-    double step = seconds > 240 ? 60 : seconds > 60 ? 15 : seconds > 20 ? 5 : 1;
-    for (double s = 0; s <= seconds; s += step)
+    // Time scale down the left: seconds ago, from the scan rate, or through
+    // the lens at round ages spaced out enough to read.
+    std::vector<double> ages;
+    if (lens_)
     {
-        int y = trace.y + (int)std::lround(s * scanRate_);
+        static const double NICE[] = {0, 1, 2, 5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240, 300, 420,
+                                      600, 900, 1200, 1800, 2400, 3600, 5400, 7200};
+        double lastY = -1e9;
+        for (double a : NICE)
+        {
+            double y = ageToY(a);
+            if (y > trace.height) break;
+            if (y - lastY < 16) continue;
+            ages.push_back(a);
+            lastY = y;
+        }
+    }
+    else
+    {
+        double seconds = trace.height / scanRate_;
+        double step = seconds > 240 ? 60 : seconds > 60 ? 15 : seconds > 20 ? 5 : 1;
+        for (double a = 0; a <= seconds; a += step) ages.push_back(a);
+    }
+    for (double s : ages)
+    {
+        int y = trace.y + (int)std::lround(lens_ ? ageToY(s) : s * scanRate_);
         gc->SetPen(wxPen(Colour::Dim, 1));
         gc->StrokeLine(trace.x - 9, y, trace.x - 5, y);
-        wxString label = s >= 60 ? wxString::Format("%.0fm", s / 60) : wxString::Format("%.0fs", s);
+        wxString label = s >= 120 ? wxString::Format("%.0fm", s / 60) : wxString::Format("%.0fs", s);
         double tw = 0, th = 0;
         gc->GetTextExtent(label, &tw, &th);
         gc->DrawText(label, trace.x - 11 - tw, y - th / 2);
@@ -404,8 +536,15 @@ void GlissandoScope::OnPaint(wxPaintEvent&)
 
 void GlissandoScope::paintHeard(wxGraphicsContext* gc, const wxRect& trace)
 {
-    auto yOf = [&](double seconds) { return trace.y + timeToRow(seconds); };
+    auto yOf = [&](double seconds) { return trace.y + timeToY(seconds); };
     const double bottom = trace.y + trace.height;
+
+    struct Placed
+    {
+        const GlissandoScopeFrame* frame;
+        double yFirst, yLast;
+    };
+    std::vector<Placed> placed;
 
     for (const GlissandoScopeFrame& frame : heard_)
     {
@@ -433,6 +572,9 @@ void GlissandoScope::paintHeard(wxGraphicsContext* gc, const wxRect& trace)
             if (y1 > bottom + 2 || y0 < trace.y - 2) continue;
 
             bool isMotif = k < frame.motif.size() && frame.motif[k];
+            // Squeezed below a few tenths of a pixel a note, only the
+            // motifs are kept: enough to see a frame was there.
+            if (!isMotif && y0 - y1 < 0.4) continue;
             wxGraphicsPath& path = isMotif ? motif : data;
             double r = isMotif ? 2.2 : 1.5;
             if (y0 - y1 >= 2 * r + 1)
@@ -466,6 +608,17 @@ void GlissandoScope::paintHeard(wxGraphicsContext* gc, const wxRect& trace)
                 k++;
             }
         }
+
+        placed.push_back({&frame, yFirst, yLast});
+    }
+
+    // Captions, newest first; one that would cover a newer one is left out,
+    // which is what happens to most of them where the lens squeezes.
+    std::vector<wxRect2DDouble> taken;
+    for (auto it = placed.rbegin(); it != placed.rend(); ++it)
+    {
+        const GlissandoScopeFrame& frame = *it->frame;
+        double yFirst = it->yFirst, yLast = it->yLast;
 
         // The caption: tempo and segment, then what this frame added to the
         // chat frame, wrapped to fit.
@@ -522,6 +675,11 @@ void GlissandoScope::paintHeard(wxGraphicsContext* gc, const wxRect& trace)
         double cx = frame.voice == 0 ? trace.x + 12 : trace.x + trace.width - chipW - 8;
         double cy = (yFirst + yLast) / 2 - chipH / 2;
         cy = std::min(bottom - chipH - 2, std::max<double>(trace.y + 2, cy));
+        wxRect2DDouble chip(cx, cy - 1, chipW, chipH + 2);
+        bool covered = false;
+        for (const wxRect2DDouble& other : taken) covered = covered || chip.Intersects(other);
+        if (covered) continue;
+        taken.push_back(chip);
 
         gc->SetBrush(wxBrush(wxColour(0, 0, 0, 180)));
         gc->SetPen(frame.completed ? wxPen(wxColour(255, 252, 240, 210), 1) : wxPen(wxColour(200, 198, 192, 80), 1));
@@ -541,5 +699,63 @@ void GlissandoScope::paintHeard(wxGraphicsContext* gc, const wxRect& trace)
             gc->DrawText(p.text, cx + pad + x, y + (lineH - p.h) / 2);
             x += p.w;
         }
+    }
+}
+
+void GlissandoScope::renderTrace(wxImage& image)
+{
+    // Phosphor white with a faint blue-grey tint in the dark, like an old
+    // cathode ray tube.
+    unsigned char* rgb = image.GetData();
+    auto put = [&](size_t pixel, unsigned v) {
+        rgb[3 * pixel + 0] = (unsigned char)(8 + v * 224 / 255);
+        rgb[3 * pixel + 1] = (unsigned char)(9 + v * 227 / 255);
+        rgb[3 * pixel + 2] = (unsigned char)(12 + v * 218 / 255);
+    };
+    const int w = historyWidth_;
+
+    if (!lens_ || rowSeconds_.empty() || rowSeconds_[0] <= 0.0)
+    {
+        int rows = std::min(traceHeight_, historyRows_);
+        for (size_t i = 0; i < (size_t)w * rows; i++) put(i, history_[i]);
+        for (size_t i = (size_t)w * rows; i < (size_t)w * traceHeight_; i++) put(i, 0);
+        return;
+    }
+
+    std::vector<unsigned> line((size_t)w);
+    double newest = rowSeconds_[0];
+    for (int y = 0; y < traceHeight_; y++)
+    {
+        // The rows under this pixel: its top and bottom edge, in rows back.
+        double r0 = timeToRow(newest - yToAge(y));
+        double r1 = timeToRow(newest - yToAge(y + 1));
+        size_t out = (size_t)y * w;
+        if (r0 >= historyRows_ - 1)
+        {
+            for (int x = 0; x < w; x++) put(out + x, 0);
+            continue;
+        }
+        if (r1 - r0 <= 1.0)
+        {
+            // Magnified: blend the two rows either side of the pixel's middle.
+            double r = std::max(0.0, 0.5 * (r0 + r1));
+            int a = std::min(historyRows_ - 1, (int)r);
+            int b = std::min(historyRows_ - 1, a + 1);
+            unsigned f = (unsigned)std::lround((r - a) * 256.0);
+            const unsigned char* ra = history_.data() + (size_t)a * w;
+            const unsigned char* rb = history_.data() + (size_t)b * w;
+            for (int x = 0; x < w; x++) put(out + x, (ra[x] * (256 - f) + rb[x] * f) >> 8);
+            continue;
+        }
+        // Squeezed: the brightest of the rows, so nothing faint is lost.
+        int a = (int)r0;
+        int b = std::min(historyRows_ - 1, std::max(a, (int)std::ceil(r1) - 1));
+        std::fill(line.begin(), line.end(), 0u);
+        for (int row = a; row <= b; row++)
+        {
+            const unsigned char* src = history_.data() + (size_t)row * w;
+            for (int x = 0; x < w; x++) line[(size_t)x] = std::max<unsigned>(line[(size_t)x], src[x]);
+        }
+        for (int x = 0; x < w; x++) put(out + x, line[(size_t)x]);
     }
 }

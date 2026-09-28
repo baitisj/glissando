@@ -41,6 +41,7 @@ struct GlissandoConsoleSettings
     bool listenAllGears = true;     // decode every tempo, not just ours
     double scanRate = 4.0;          // visi-scope rows per second
     bool wideScope = false;         // show the duet's high voice too
+    bool lens = true;               // the visi-scope's time lens: recent rows magnified, old ones kept
 };
 
 // What the console shows on its meters, gathered by the host.
@@ -159,6 +160,7 @@ private:
     Chaotica::Button* autoButton_;
     Chaotica::Button* listenAllButton_;
     Chaotica::Button* wideButton_;
+    Chaotica::Button* lensButton_;
     Chaotica::Button* engageButton_;
     bool engageAborts_ = false;     // the button reads Abort
     Chaotica::Button* chatButton_;
