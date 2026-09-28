@@ -18,6 +18,7 @@
 
 #include "ChaoticaControls.h"
 #include "ChaoticaTheme.h"
+#include "ChaoticaTheme.h"
 #include "GlissandoScope.h"
 
 using namespace Chaotica;
@@ -447,6 +448,7 @@ void GlissandoConsole::buildControls()
         if (engageAborts_ || host_->glissandoTelemetry().transmitBusy)
         {
             host_->glissandoAbortTransmit();
+            scope_->clearSent();
         }
         else
         {
@@ -630,11 +632,17 @@ void GlissandoConsole::refreshTelemetry()
     }
     engageButton_->SetChecked(t.audioRunning);
     engageButton_->SetLabel(aborts ? _("Abort") : t.audioRunning ? _("Disengage") : _("Engage"));
+
+    // Red while it reads Abort. And a chat message is waiting for a
+    // transmitter that only Engage brings up: the button flashes red with the
+    // message's chip until it is pressed.
+    engageButton_->SetAlarm(aborts || (t.engageToSend && Chaotica::blinkLit()));
     engagedLamp_->SetLit(t.audioRunning);
     receivingLamp_->SetLit(t.receiving);
     transmittingLamp_->SetLit(t.transmitting);
     scope_->setActivity(t.receiving, t.transmitting);
     for (const GlissandoScopeFrame& frame : host_->glissandoHeardFrames()) scope_->addHeard(frame);
+    for (const GlissandoScopeSent& frame : host_->glissandoSentFrames()) scope_->addSent(frame);
 
     snrMeter_->SetValue(t.haveReport ? t.snrDb : std::nan(""));
     dopplerReadout_->SetText(t.haveReport ? wxString::Format("%.2f Hz", t.dopplerHz) : wxString("---"));

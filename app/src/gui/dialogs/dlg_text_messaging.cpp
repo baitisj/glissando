@@ -63,6 +63,9 @@ namespace
 // How often the station list ages out and the "last heard" column is redrawn.
 constexpr int REFRESH_INTERVAL_MS = 1000;
 
+// Often enough to follow the shared blink, which changes every half second.
+constexpr int BLINK_INTERVAL_MS = 125;
+
 enum
 {
     ID_STATION_LIST = wxID_HIGHEST + 700,
@@ -76,6 +79,7 @@ enum
     ID_AUTO_REPLY,
     ID_ENTRY,
     ID_REFRESH_TIMER,
+    ID_BLINK_TIMER,
 };
 
 wxString escapeHtml(const std::string& text)
@@ -152,9 +156,9 @@ struct DeliveryChip
 
 // Which chip applies is decided in DeliveryChip.h; this is its wording and
 // colours.
-DeliveryChip deliveryChip(const TextMessage& message)
+DeliveryChip deliveryChip(const TextMessage& message, bool waitingForEngage = false, bool lit = false)
 {
-    DeliveryChipState state = deliveryChipState(message);
+    DeliveryChipState state = deliveryChipState(message, waitingForEngage);
 
     // Black and white, like the rest of the console: dark while waiting,
     // lit while going out, chrome once confirmed. Only a failure is red.
@@ -170,6 +174,13 @@ DeliveryChip deliveryChip(const TextMessage& message)
         case DeliveryChipKind::Queued:
             chip.label = _("QUEUED");
             chip.background = smoke;
+            break;
+        case DeliveryChipKind::EngageToSend:
+            // Flashes with the Engage button: red with dark lettering, then
+            // smoke with red lettering, so it reads in both halves.
+            chip.label = _("ENGAGE TO SEND");
+            chip.background = lit ? "#EC4034" : smoke;
+            chip.foreground = lit ? black : "#EC4034";
             break;
         case DeliveryChipKind::Sending:
             chip.label = _("SENDING");
@@ -218,9 +229,9 @@ DeliveryChip deliveryChip(const TextMessage& message)
     return chip;
 }
 
-wxString statusChip(const TextMessage& message)
+wxString statusChip(const TextMessage& message, bool waitingForEngage, bool lit)
 {
-    DeliveryChip chip = deliveryChip(message);
+    DeliveryChip chip = deliveryChip(message, waitingForEngage, lit);
     if (chip.label.empty()) return "";
 
     return "<table cellpadding=\"2\" cellspacing=\"0\" bgcolor=\"" + chip.background +
@@ -245,6 +256,7 @@ TextMessagingDialog::TextMessagingDialog(wxWindow* parent, wxWindowID id, const 
     , m_txtInhibited(nullptr)
     , m_txtModem(nullptr)
     , m_refreshTimer(this, ID_REFRESH_TIMER)
+    , m_blinkTimer(this, ID_BLINK_TIMER)
     , m_transmitting(false)
     , m_transmitControlsDisabled(false)
     , m_statusKind(StatusKind::Sticky)
@@ -273,6 +285,7 @@ TextMessagingDialog::TextMessagingDialog(wxWindow* parent, wxWindowID id, const 
     Connect(ID_STATION_LIST, wxEVT_COMMAND_LIST_ITEM_DESELECTED,
             wxListEventHandler(TextMessagingDialog::OnStationDeselected));
     Connect(ID_REFRESH_TIMER, wxEVT_TIMER, wxTimerEventHandler(TextMessagingDialog::OnTimer));
+    Connect(ID_BLINK_TIMER, wxEVT_TIMER, wxTimerEventHandler(TextMessagingDialog::OnBlinkTimer));
     Connect(wxEVT_CLOSE_WINDOW, wxCloseEventHandler(TextMessagingDialog::OnClose));
 
     m_txtEntry->Connect(wxEVT_KEY_DOWN, wxKeyEventHandler(TextMessagingDialog::OnEntryKeyDown),
@@ -282,6 +295,7 @@ TextMessagingDialog::TextMessagingDialog(wxWindow* parent, wxWindowID id, const 
 
     TextMessagingSession::instance().protocol().setObserver(this);
     m_refreshTimer.Start(REFRESH_INTERVAL_MS);
+    m_blinkTimer.Start(BLINK_INTERVAL_MS);
 
     if (uiLogEnabled()) log_info("UI: chat window created, observer registered");
 }
@@ -289,6 +303,7 @@ TextMessagingDialog::TextMessagingDialog(wxWindow* parent, wxWindowID id, const 
 TextMessagingDialog::~TextMessagingDialog()
 {
     m_refreshTimer.Stop();
+    m_blinkTimer.Stop();
     TextMessagingSession::instance().protocol().setObserver(nullptr);
 
     m_txtEntry->Disconnect(wxEVT_KEY_DOWN, wxKeyEventHandler(TextMessagingDialog::OnEntryKeyDown),
@@ -627,7 +642,7 @@ void TextMessagingDialog::appendMessage(const TextMessage& message)
     if (excess > 0) m_messages.erase(m_messages.begin(), m_messages.begin() + excess);
 }
 
-void TextMessagingDialog::renderChat()
+void TextMessagingDialog::renderChat(bool keepPlace)
 {
     Palette colors = palette();
 
@@ -663,7 +678,11 @@ void TextMessagingDialog::renderChat()
         wxString right;
         if (sent)
         {
-            right = statusChip(message);
+            // Only a message still in the queue waits for Engage; one left
+            // queued by an earlier run never goes, engaged or not.
+            bool waits = m_waitingForEngage && message.status == MessageStatus::Queued &&
+                         TextMessagingSession::instance().protocol().isMessageQueued(message.id);
+            right = statusChip(message, waits, m_engageChipLit);
         }
         else if (message.snr != 0.0f && std::isfinite(message.snr))
         {
@@ -695,11 +714,22 @@ void TextMessagingDialog::renderChat()
 
     // Setting the page and then scrolling it are two repaints; frozen, the
     // window shows the result rather than the intermediate state.
+    int viewX = 0, viewY = 0;
+    m_chatWindow->GetViewStart(&viewX, &viewY);
+
     m_chatWindow->Freeze();
     m_chatWindow->SetPage(html);
 
-    // Keep the newest message in view, the way a chat window should.
-    m_chatWindow->Scroll(0, m_chatWindow->GetScrollRange(wxVERTICAL));
+    // Keep the newest message in view, the way a chat window should; but a
+    // chip flashing must not pull the view off whatever is being read.
+    if (keepPlace)
+    {
+        m_chatWindow->Scroll(viewX, viewY);
+    }
+    else
+    {
+        m_chatWindow->Scroll(0, m_chatWindow->GetScrollRange(wxVERTICAL));
+    }
     m_chatWindow->Thaw();
 }
 
@@ -1066,6 +1096,30 @@ void TextMessagingDialog::OnTimer(wxTimerEvent&)
 
     // Auto shift can change the tempo while the text sits there.
     updateAirTime();
+}
+
+void TextMessagingDialog::OnBlinkTimer(wxTimerEvent&)
+{
+    updateEngageChips();
+}
+
+// Redraws the chat only when a queued message's chip changes: when the
+// console is engaged or disengaged, and each half second while one flashes.
+void TextMessagingDialog::updateEngageChips()
+{
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    bool waiting = frame != nullptr && frame->chatWaitsForEngage();
+    auto& protocol = TextMessagingSession::instance().protocol();
+    bool anyQueued = std::any_of(m_messages.begin(), m_messages.end(), [&](const TextMessage& message)
+                                 { return message.direction == MessageDirection::Sent &&
+                                          message.status == MessageStatus::Queued &&
+                                          protocol.isMessageQueued(message.id); });
+    bool lit = waiting && anyQueued && Chaotica::blinkLit();
+
+    bool changed = waiting != m_waitingForEngage || (anyQueued && lit != m_engageChipLit);
+    m_waitingForEngage = waiting;
+    m_engageChipLit = lit;
+    if (changed && anyQueued) renderChat(true);
 }
 
 // Counting frames is a handful of integer sums, so this runs on every change

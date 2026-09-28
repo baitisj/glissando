@@ -107,7 +107,10 @@ private:
 
     void buildControls();
     Palette palette() const;
-    void renderChat();
+    // keepPlace leaves the view where the operator has scrolled it, for a
+    // redraw that changes no message, only how a chip looks.
+    void renderChat(bool keepPlace = false);
+    void updateEngageChips();
     void refreshStations();
     std::string selectedCallsign() const;
     long stationItem(const std::string& callsign) const;
@@ -155,6 +158,7 @@ private:
     void OnEntryKeyDown(wxKeyEvent& event);
     void OnEntryText(wxCommandEvent& event);
     void OnTimer(wxTimerEvent& event);
+    void OnBlinkTimer(wxTimerEvent& event);
     void OnClose(wxCloseEvent& event);
 
     wxListCtrl* m_stationList;
@@ -171,6 +175,12 @@ private:
     WrappingText* m_txtInhibited;
     WrappingText* m_txtModem;       // Data2G's connection, while chat uses it
     wxTimer m_refreshTimer;
+    wxTimer m_blinkTimer;
+
+    // With the console disengaged a queued message's chip reads ENGAGE TO
+    // SEND and flashes red, in step with the Engage button.
+    bool m_waitingForEngage = false;
+    bool m_engageChipLit = false;
 
     // Remembered so the one second timer only touches the controls when the
     // transmitter's state, or whether it may be used, actually changes,

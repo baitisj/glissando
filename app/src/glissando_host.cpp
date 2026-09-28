@@ -216,6 +216,8 @@ GlissandoTelemetry MainFrame::glissandoTelemetry()
                              (m_RxRunning && m_textMessagingTransport != nullptr &&
                               m_textMessagingTransport->isTransmitting());
     telemetry.audioRunning = m_RxRunning;
+    telemetry.engageToSend =
+        chatWaitsForEngage() && TextMessaging::TextMessagingSession::instance().protocol().hasQueuedTransmissions();
 
     int64_t frequency = wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency;
     telemetry.rigFrequencyKnown = frequency > 0;
@@ -285,6 +287,22 @@ std::vector<GlissandoScopeFrame> MainFrame::glissandoHeardFrames()
                 frame.tokens.push_back({scopeRole(token.role), fromAir(token.text)});
             }
         }
+        frames.push_back(std::move(frame));
+    }
+    return frames;
+}
+
+std::vector<GlissandoScopeSent> MainFrame::glissandoSentFrames()
+{
+    std::vector<GlissandoScopeSent> frames;
+    for (const TextMessagingModem::GlissandoSent& sent : textMessagingModem().takeGlissandoSent())
+    {
+        GlissandoScopeSent frame;
+        frame.symbolSeconds = Glissando::gearInfo(sent.gear).symbolSeconds;
+        frame.voice = sent.voice;
+        frame.heroes = sent.scale == Glissando::Scale::Pentatonic;
+        std::copy(sent.notesHz.begin(), sent.notesHz.end(), frame.notesHz.begin());
+        frame.melody.assign(sent.melody.begin(), sent.melody.end());
         frames.push_back(std::move(frame));
     }
     return frames;

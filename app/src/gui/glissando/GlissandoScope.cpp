@@ -48,6 +48,91 @@ constexpr double LENS_SPAN_FACTOR = 8.0;
 // Captions are wrapped to this fraction of the trace's width.
 constexpr double CAPTION_WIDTH = 0.62;
 
+// Sent notes are gathered into a formation of sprites for as long as the
+// top of the trace takes to scroll this many pixels, so the newest
+// formations sit just clear of each other. Sprites are drawn at most this
+// many screen pixels to one of theirs.
+constexpr double FORMATION_PIXELS = 44.0;
+constexpr int SPRITE_SCALE = 3;
+
+// Frames queued to be sent but still not played this long after we last
+// transmitted were never going to be (the burst was dropped).
+constexpr double SENT_STALE_SECONDS = 20.0;
+
+// Pixel art, one string per row: X lit, r the rocket's exhaust.
+const char* const ROCKET[] = {
+    "....X....",
+    "...XXX...",
+    "...XXX...",
+    "..XXXXX..",
+    "..X...X..",
+    "..XX.XX..",
+    "..XXXXX..",
+    "..XXXXX..",
+    ".XXXXXXX.",
+    "XX.XXX.XX",
+    "X..XXX..X",
+    "...rrr...",
+    "....r....",
+};
+
+const char* const CRAB[] = {
+    "..X.....X..",
+    "...X...X...",
+    "..XXXXXXX..",
+    ".XX.XXX.XX.",
+    "XXXXXXXXXXX",
+    "X.XXXXXXX.X",
+    "X.X.....X.X",
+    "...XX.XX...",
+};
+
+const char* const SQUID[] = {
+    "...XX...",
+    "..XXXX..",
+    ".XXXXXX.",
+    "XX.XX.XX",
+    "XXXXXXXX",
+    "..X..X..",
+    ".X.XX.X.",
+    "X.X..X.X",
+};
+
+struct Sprite
+{
+    const char* const* rows;
+    int height;
+    int width() const { return (int)std::strlen(rows[0]); }
+};
+
+template <size_t N> Sprite sprite(const char* const (&rows)[N]) { return Sprite{rows, (int)N}; }
+
+// Draws the sprite centred on (cx, cy), `scale` pixels to one of its own,
+// each run of lit pixels in a row as one rectangle.
+void drawSprite(wxGraphicsContext* gc, const Sprite& sprite, double cx, double cy, int scale,
+                const wxColour& ink, const wxColour& exhaust)
+{
+    double x0 = std::round(cx - sprite.width() * scale / 2.0);
+    double y0 = std::round(cy - sprite.height * scale / 2.0);
+    gc->SetPen(*wxTRANSPARENT_PEN);
+    for (int j = 0; j < sprite.height; j++)
+    {
+        const char* row = sprite.rows[j];
+        for (int i = 0; row[i] != '\0';)
+        {
+            char c = row[i];
+            int run = 1;
+            while (row[i + run] == c) run++;
+            if (c != '.')
+            {
+                gc->SetBrush(wxBrush(c == 'r' ? exhaust : ink));
+                gc->DrawRectangle(x0 + i * scale, y0 + j * scale, run * scale, scale);
+            }
+            i += run;
+        }
+    }
+}
+
 wxFont captionTextFont()
 {
     return wxFont(wxFontInfo(9).Family(wxFONTFAMILY_TELETYPE).Bold());
@@ -66,11 +151,20 @@ GlissandoScope::GlissandoScope(wxWindow* parent, wxWindowID id)
     , transmitting_(false)
     , hoverX_(-1)
     , historyWidth_(0)
+    , historyNyquistHz_(0.0)
     , historyRows_(0)
+    , traceWidth_(0)
     , traceHeight_(0)
     , lens_(true)
     , lensK_(1.0)
     , lensTau_(1.0)
+    , sendClock_(0.0)
+    , sendEnd_(0.0)
+    , sendStart_(0.0)
+    , lastTick_(0.0)
+    , lastTransmitting_(0.0)
+    , gatheringFrom_(-1.0)
+    , formationSerial_(0)
 {
     SetBackgroundStyle(wxBG_STYLE_PAINT);
     SetMinSize(wxSize(420, 240));
@@ -112,9 +206,10 @@ void GlissandoScope::setSpan(double lowHz, double highHz)
     if (lowHz == lowHz_ && highHz == highHz_) return;
     lowHz_ = lowHz;
     highHz_ = highHz;
-    // Old rows were drawn to the old scale and would now be in the wrong
-    // place.
-    clear();
+    // History is kept by frequency, not by pixel, so it is simply drawn
+    // again on the new scale: tuning and the duet's wider view pan and
+    // zoom it rather than wiping it.
+    Refresh();
 }
 
 void GlissandoScope::setActivity(bool receiving, bool transmitting)
@@ -128,7 +223,7 @@ void GlissandoScope::setActivity(bool receiving, bool transmitting)
 void GlissandoScope::clear()
 {
     // Decoded frames stay: they are placed by frequency and time, not by
-    // pixel, so they are still in the right place on the new scale.
+    // pixel.
     std::fill(history_.begin(), history_.end(), 0);
     Refresh();
 }
@@ -143,6 +238,78 @@ void GlissandoScope::addHeard(const GlissandoScopeFrame& frame)
     heard_.push_back(frame);
     while (heard_.size() > HEARD_LIMIT) heard_.pop_front();
     Refresh(false);
+}
+
+void GlissandoScope::addSent(const GlissandoScopeSent& frame)
+{
+    if (frame.melody.empty()) return;
+    // A second voice sings alongside the first; anything else follows on
+    // from what is queued, or starts now.
+    double offset = frame.voice > 0 ? sendStart_ : std::max(sendEnd_, sendClock_);
+    if (frame.voice == 0) sendStart_ = offset;
+    sendEnd_ = std::max(sendEnd_, offset + frame.symbolSeconds * frame.melody.size());
+    sending_.push_back(Sending{frame, offset, 0});
+}
+
+void GlissandoScope::clearSent()
+{
+    sending_.clear();
+    sendEnd_ = sendStart_ = sendClock_;
+}
+
+double GlissandoScope::formationSeconds() const
+{
+    return lens_ ? yToAge(FORMATION_PIXELS) : FORMATION_PIXELS / scanRate_;
+}
+
+void GlissandoScope::advanceSent(double now)
+{
+    double elapsed = lastTick_ > 0.0 ? std::min(1.0, std::max(0.0, now - lastTick_)) : 0.0;
+    lastTick_ = now;
+    if (transmitting_)
+    {
+        sendClock_ += elapsed;
+        lastTransmitting_ = now;
+    }
+    else if (!sending_.empty() && now - lastTransmitting_ > SENT_STALE_SECONDS)
+    {
+        clearSent();
+    }
+
+    for (Sending& sending : sending_)
+    {
+        const GlissandoScopeSent& frame = sending.frame;
+        while (sending.next < frame.melody.size() &&
+               sending.offset + sending.next * frame.symbolSeconds <= sendClock_)
+        {
+            int note = std::min(7, std::max(0, frame.melody[sending.next]));
+            double hz = frame.notesHz[note];
+            if (gatheringFrom_ < 0.0) gatheringFrom_ = sending.offset + sending.next * frame.symbolSeconds;
+            gathering_.heroes = frame.heroes;
+            if (std::find(gathering_.notesHz.begin(), gathering_.notesHz.end(), hz) == gathering_.notesHz.end())
+            {
+                gathering_.notesHz.push_back(hz);
+            }
+            sending.next++;
+        }
+    }
+    while (!sending_.empty() && sending_.front().next >= sending_.front().frame.melody.size())
+    {
+        sending_.pop_front();
+    }
+
+    // A formation is complete once it spans its time, or when the
+    // transmitter lets go.
+    double window = formationSeconds();
+    if (gatheringFrom_ >= 0.0 && (sendClock_ - gatheringFrom_ >= window || !transmitting_))
+    {
+        gathering_.seconds = now;
+        gathering_.window = window;
+        gathering_.serial = formationSerial_++;
+        formations_.push_back(gathering_);
+        gathering_.notesHz.clear();
+        gatheringFrom_ = -1.0;
+    }
 }
 
 void GlissandoScope::setLens(bool on)
@@ -192,12 +359,12 @@ double GlissandoScope::yToAge(double y) const
 
 void GlissandoScope::sizeHistory()
 {
-    if (historyWidth_ <= 0 || traceHeight_ <= 0) return;
+    if (traceHeight_ <= 0) return;
     // The lens reaches back lensSpanSeconds(); a little more, so the bottom
     // pixel of the trace always has rows under it after a scan rate change.
     int rows = traceHeight_;
     if (lens_) rows = std::max(rows, (int)std::ceil(lensSpanSeconds() * scanRate_ * 1.1) + 2);
-    if (rows == historyRows_) return;
+    if (rows == historyRows_ && history_.size() == (size_t)historyWidth_ * rows) return;
     history_.resize((size_t)historyWidth_ * rows, 0);
     rowSeconds_.resize((size_t)rows, 0.0);
     historyRows_ = rows;
@@ -252,16 +419,10 @@ int GlissandoScope::hzToX(double hz) const
 void GlissandoScope::OnSize(wxSizeEvent& event)
 {
     wxRect r = traceRect();
-    if (r.width != historyWidth_ || r.height != traceHeight_)
+    if (r.width != traceWidth_ || r.height != traceHeight_)
     {
-        // A new width is a new picture; a new height keeps the rows.
-        if (r.width != historyWidth_)
-        {
-            history_.clear();
-            rowSeconds_.clear();
-            historyRows_ = 0;
-        }
-        historyWidth_ = r.width;
+        // History is kept in spectrum bins, so a resize keeps it all.
+        traceWidth_ = r.width;
         traceHeight_ = r.height;
         updateLens();
         sizeHistory();
@@ -273,16 +434,32 @@ void GlissandoScope::OnSize(wxSizeEvent& event)
 void GlissandoScope::OnTimer(wxTimerEvent&)
 {
     addRow();
+    advanceSent(steadySeconds());
     Refresh(false);
 }
 
 void GlissandoScope::addRow()
 {
-    if (historyWidth_ <= 0 || historyRows_ <= 0) return;
+    if (historyRows_ <= 0) return;
+
+    double nyquist = 0.0;
+    bool have = source_ && source_(spectrum_, nyquist) && !spectrum_.empty() && nyquist > 0.0;
+
+    // A spectrum of a new shape (the sound card's rate changed) cannot be
+    // drawn with the old one: start the history again.
+    if (have && ((int)spectrum_.size() != historyWidth_ || nyquist != historyNyquistHz_))
+    {
+        historyWidth_ = (int)spectrum_.size();
+        historyNyquistHz_ = nyquist;
+        history_.assign((size_t)historyWidth_ * historyRows_, 0);
+    }
 
     // Scroll everything down one row.
-    std::memmove(history_.data() + historyWidth_, history_.data(),
-                 (size_t)historyWidth_ * (historyRows_ - 1));
+    if (historyWidth_ > 0)
+    {
+        std::memmove(history_.data() + historyWidth_, history_.data(),
+                     (size_t)historyWidth_ * (historyRows_ - 1));
+    }
     std::move_backward(rowSeconds_.begin(), rowSeconds_.end() - 1, rowSeconds_.end());
     rowSeconds_[0] = steadySeconds();
 
@@ -293,10 +470,14 @@ void GlissandoScope::addRow()
     {
         heard_.pop_front();
     }
+    while (!formations_.empty() && oldest > 0.0 &&
+           formations_.front().seconds - formations_.front().window < oldest)
+    {
+        formations_.pop_front();
+    }
 
     unsigned char* row = history_.data();
-    double nyquist = 0.0;
-    if (!source_ || !source_(spectrum_, nyquist) || spectrum_.empty() || nyquist <= 0.0)
+    if (!have)
     {
         std::fill(row, row + historyWidth_, 0);
         return;
@@ -311,20 +492,13 @@ void GlissandoScope::addRow()
     // than PEAK_RANGE_DB under the loudest bin.
     float floor = std::max(sorted[sorted.size() / 2], peak - PEAK_RANGE_DB);
 
-    double binsPerHz = (spectrum_.size() - 1) / nyquist;
-    for (int x = 0; x < historyWidth_; x++)
+    // Kept bin by bin across the whole spectrum; renderTrace() picks out
+    // and stretches the part on show.
+    for (int b = 0; b < historyWidth_; b++)
     {
-        // Several pixels share a bin at this zoom; interpolate between bins
-        // so notes are smooth lines rather than stairs.
-        double hz = lowHz_ + (highHz_ - lowHz_) * x / std::max(1, historyWidth_ - 1);
-        double bin = hz * binsPerHz;
-        int b0 = std::min((int)spectrum_.size() - 1, std::max(0, (int)std::floor(bin)));
-        int b1 = std::min((int)spectrum_.size() - 1, b0 + 1);
-        double t = bin - b0;
-        float db = (float)((1.0 - t) * spectrum_[b0] + t * spectrum_[b1]);
-        float level = std::min(1.0f, std::max(0.0f, (db - floor) / DISPLAY_RANGE_DB));
+        float level = std::min(1.0f, std::max(0.0f, (spectrum_[(size_t)b] - floor) / DISPLAY_RANGE_DB));
         // A little gamma so weak signals show without the noise turning grey.
-        row[x] = (unsigned char)std::lround(255.0 * std::pow(level, 1.6));
+        row[b] = (unsigned char)std::lround(255.0 * std::pow(level, 1.6));
     }
 }
 
@@ -365,9 +539,9 @@ void GlissandoScope::OnPaint(wxPaintEvent&)
 
     // The trace itself, blitted as an image: phosphor white with a faint
     // blue-grey tint in the dark, like an old cathode ray tube.
-    if (historyWidth_ == trace.width && traceHeight_ == trace.height && !history_.empty())
+    if (traceWidth_ == trace.width && traceHeight_ == trace.height && traceWidth_ > 0 && traceHeight_ > 0)
     {
-        wxImage image(historyWidth_, traceHeight_, false);
+        wxImage image(traceWidth_, traceHeight_, false);
         renderTrace(image);
         dc.DrawBitmap(wxBitmap(image), trace.x, trace.y);
     }
@@ -399,13 +573,16 @@ void GlissandoScope::OnPaint(wxPaintEvent&)
         gc->StrokeLine(x, trace.y, x, trace.y + trace.height);
     }
 
-    // Activity: a band across the top edge, like the screen flaring.
+    // Activity: a band across the top edge, like the screen flaring; white
+    // while hearing a frame, red while on the air.
     if (receiving_ || transmitting_)
     {
+        wxColour flare = transmitting_ ? Colour::Alarm : wxColour(255, 255, 255);
         gc->SetPen(*wxTRANSPARENT_PEN);
-        gc->SetBrush(gc->CreateLinearGradientBrush(trace.x, trace.y, trace.x, trace.y + 30,
-                                                   wxColour(255, 255, 255, transmitting_ ? 120 : 70),
-                                                   wxColour(255, 255, 255, 0)));
+        gc->SetBrush(gc->CreateLinearGradientBrush(
+            trace.x, trace.y, trace.x, trace.y + 30,
+            wxColour(flare.Red(), flare.Green(), flare.Blue(), transmitting_ ? 170 : 70),
+            wxColour(flare.Red(), flare.Green(), flare.Blue(), 0)));
         gc->DrawRectangle(trace.x, trace.y, trace.width, 30);
     }
 
@@ -441,6 +618,7 @@ void GlissandoScope::OnPaint(wxPaintEvent&)
     }
 
     paintHeard(gc.get(), trace);
+    paintSent(gc.get(), trace);
 
     if (hoverX_ >= 0)
     {
@@ -707,32 +885,80 @@ void GlissandoScope::renderTrace(wxImage& image)
     // Phosphor white with a faint blue-grey tint in the dark, like an old
     // cathode ray tube.
     unsigned char* rgb = image.GetData();
-    auto put = [&](size_t pixel, unsigned v) {
-        rgb[3 * pixel + 0] = (unsigned char)(8 + v * 224 / 255);
-        rgb[3 * pixel + 1] = (unsigned char)(9 + v * 227 / 255);
-        rgb[3 * pixel + 2] = (unsigned char)(12 + v * 218 / 255);
-    };
-    const int w = historyWidth_;
-
-    if (!lens_ || rowSeconds_.empty() || rowSeconds_[0] <= 0.0)
+    const int w = traceWidth_;
+    const int bins = historyWidth_;
+    if (bins <= 0 || history_.empty())
     {
-        int rows = std::min(traceHeight_, historyRows_);
-        for (size_t i = 0; i < (size_t)w * rows; i++) put(i, history_[i]);
-        for (size_t i = (size_t)w * rows; i < (size_t)w * traceHeight_; i++) put(i, 0);
+        for (size_t i = 0; i < (size_t)w * traceHeight_; i++)
+        {
+            rgb[3 * i + 0] = 8;
+            rgb[3 * i + 1] = 9;
+            rgb[3 * i + 2] = 12;
+        }
         return;
     }
 
-    std::vector<unsigned> line((size_t)w);
-    double newest = rowSeconds_[0];
+    // Where each pixel column falls among the bins. Several pixels share a
+    // bin at this zoom; interpolating between bins keeps notes smooth lines
+    // rather than stairs. Columns beyond the spectrum stay dark.
+    std::vector<int> b0s((size_t)w);
+    std::vector<unsigned> fracs((size_t)w);
+    double binsPerHz = (bins - 1) / historyNyquistHz_;
+    for (int x = 0; x < w; x++)
+    {
+        double hz = lowHz_ + (highHz_ - lowHz_) * x / std::max(1, w - 1);
+        double bin = hz * binsPerHz;
+        if (bin < 0.0 || bin > bins - 1)
+        {
+            b0s[(size_t)x] = -1;
+            continue;
+        }
+        int b0 = std::min(bins - 2, (int)bin);
+        b0s[(size_t)x] = std::max(0, b0);
+        fracs[(size_t)x] = (unsigned)std::lround((bin - b0s[(size_t)x]) * 256.0);
+    }
+
+    std::vector<unsigned> line((size_t)bins + 1, 0u);
+    auto putLine = [&](int y) {
+        unsigned char* out = rgb + 3 * (size_t)y * w;
+        for (int x = 0; x < w; x++, out += 3)
+        {
+            int b0 = b0s[(size_t)x];
+            unsigned v = 0;
+            if (b0 >= 0)
+            {
+                unsigned f = std::min(256u, fracs[(size_t)x]);
+                v = (line[(size_t)b0] * (256 - f) + line[(size_t)b0 + 1] * f) >> 8;
+            }
+            out[0] = (unsigned char)(8 + v * 224 / 255);
+            out[1] = (unsigned char)(9 + v * 227 / 255);
+            out[2] = (unsigned char)(12 + v * 218 / 255);
+        }
+    };
+    auto rowAt = [&](int row) { return history_.data() + (size_t)row * bins; };
+
+    bool throughLens = lens_ && !rowSeconds_.empty() && rowSeconds_[0] > 0.0;
+    double newest = throughLens ? rowSeconds_[0] : 0.0;
     for (int y = 0; y < traceHeight_; y++)
     {
+        std::fill(line.begin(), line.end(), 0u);
+        if (!throughLens)
+        {
+            if (y < historyRows_)
+            {
+                const unsigned char* src = rowAt(y);
+                for (int b = 0; b < bins; b++) line[(size_t)b] = src[b];
+            }
+            putLine(y);
+            continue;
+        }
+
         // The rows under this pixel: its top and bottom edge, in rows back.
         double r0 = timeToRow(newest - yToAge(y));
         double r1 = timeToRow(newest - yToAge(y + 1));
-        size_t out = (size_t)y * w;
         if (r0 >= historyRows_ - 1)
         {
-            for (int x = 0; x < w; x++) put(out + x, 0);
+            putLine(y);
             continue;
         }
         if (r1 - r0 <= 1.0)
@@ -742,20 +968,85 @@ void GlissandoScope::renderTrace(wxImage& image)
             int a = std::min(historyRows_ - 1, (int)r);
             int b = std::min(historyRows_ - 1, a + 1);
             unsigned f = (unsigned)std::lround((r - a) * 256.0);
-            const unsigned char* ra = history_.data() + (size_t)a * w;
-            const unsigned char* rb = history_.data() + (size_t)b * w;
-            for (int x = 0; x < w; x++) put(out + x, (ra[x] * (256 - f) + rb[x] * f) >> 8);
+            const unsigned char* ra = rowAt(a);
+            const unsigned char* rb = rowAt(b);
+            for (int k = 0; k < bins; k++) line[(size_t)k] = (ra[k] * (256 - f) + rb[k] * f) >> 8;
+            putLine(y);
             continue;
         }
         // Squeezed: the brightest of the rows, so nothing faint is lost.
         int a = (int)r0;
         int b = std::min(historyRows_ - 1, std::max(a, (int)std::ceil(r1) - 1));
-        std::fill(line.begin(), line.end(), 0u);
         for (int row = a; row <= b; row++)
         {
-            const unsigned char* src = history_.data() + (size_t)row * w;
-            for (int x = 0; x < w; x++) line[(size_t)x] = std::max<unsigned>(line[(size_t)x], src[x]);
+            const unsigned char* src = rowAt(row);
+            for (int k = 0; k < bins; k++) line[(size_t)k] = std::max<unsigned>(line[(size_t)k], src[k]);
         }
-        for (int x = 0; x < w; x++) put(out + x, line[(size_t)x]);
+        putLine(y);
+    }
+}
+
+void GlissandoScope::paintSent(wxGraphicsContext* gc, const wxRect& trace)
+{
+    if (formations_.empty()) return;
+    const double bottom = trace.y + trace.height;
+    const wxColour hull(Colour::Glow);
+    const wxColour exhaust(255, 150, 60);
+    const wxColour henchman(Colour::Phosphor);
+
+    for (const Formation& formation : formations_)
+    {
+        // The formation fills the rows its notes were sung in; the sprites
+        // shrink to fit as the lens squeezes those rows together.
+        double yNew = trace.y + timeToY(formation.seconds);
+        double yOld = trace.y + timeToY(formation.seconds - formation.window);
+        double room = yOld - yNew;
+        if (yNew > bottom || room < 1.5) continue;
+
+        Sprite shape = formation.heroes ? sprite(ROCKET) : formation.serial % 2 ? sprite(SQUID) : sprite(CRAB);
+        int scale = std::min(SPRITE_SCALE, (int)std::floor((room - 2.0) / shape.height));
+        double cy = (yNew + yOld) / 2.0;
+        const wxColour& ink = formation.heroes ? hull : henchman;
+
+        for (size_t i = 0; i < formation.notesHz.size(); i++)
+        {
+            double cx = hzToX(formation.notesHz[i]);
+            if (scale < 1)
+            {
+                // Too far down the lens for a sprite: a speck in its place.
+                gc->SetPen(*wxTRANSPARENT_PEN);
+                gc->SetBrush(wxBrush(wxColour(ink.Red(), ink.Green(), ink.Blue(), 120)));
+                gc->DrawRectangle(cx - 1, cy - 1, 2, 2);
+                continue;
+            }
+            drawSprite(gc, shape, cx, cy, scale, ink, exhaust);
+
+            // Full size ones exchange fire: rockets shoot straight up, invaders
+            // drop zigzag bombs.
+            if (scale < SPRITE_SCALE || (i + formation.serial) % 2 != 0) continue;
+            double half = shape.height * scale / 2.0;
+            if (formation.heroes)
+            {
+                gc->SetPen(*wxTRANSPARENT_PEN);
+                for (int k = 0; k < 3; k++)
+                {
+                    gc->SetBrush(wxBrush(wxColour(ink.Red(), ink.Green(), ink.Blue(), 200 - 60 * k)));
+                    gc->DrawRectangle(cx - 1, cy - half - 11 - 9 * k, 2, 5);
+                }
+            }
+            else
+            {
+                double y = cy + half + 3;
+                wxGraphicsPath bomb = gc->CreatePath();
+                bomb.MoveToPoint(cx, y);
+                bomb.AddLineToPoint(cx + 3, y + 4);
+                bomb.AddLineToPoint(cx - 3, y + 8);
+                bomb.AddLineToPoint(cx + 3, y + 12);
+                bomb.AddLineToPoint(cx, y + 15);
+                gc->SetBrush(*wxTRANSPARENT_BRUSH);
+                gc->SetPen(wxPen(wxColour(ink.Red(), ink.Green(), ink.Blue(), 210), 2));
+                gc->StrokePath(bomb);
+            }
+        }
     }
 }

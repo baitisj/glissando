@@ -66,6 +66,7 @@ struct GlissandoTelemetry
     bool transmitting = false;
     bool transmitBusy = false;      // a chat burst on the air, pauses included
     bool audioRunning = false;
+    bool engageToSend = false;      // chat has something to send and no transmitter until Engage
     bool rigFrequencyKnown = false;
     double rigFrequencyHz = 0.0;
 };
@@ -93,6 +94,10 @@ public:
 
     // Frames decoded since the last call, to write on the visi-scope.
     virtual std::vector<GlissandoScopeFrame> glissandoHeardFrames() = 0;
+
+    // Our own frames made ready to send since the last call, in the order
+    // they go out.
+    virtual std::vector<GlissandoScopeSent> glissandoSentFrames() = 0;
 
     virtual void glissandoSetAudioRunning(bool running) = 0;
 

@@ -1765,6 +1765,11 @@ int MainFrame::chatTimeOutSeconds()
     return seconds > 0 ? seconds : 180;
 }
 
+bool MainFrame::chatWaitsForEngage()
+{
+    return m_textMessagingTransport != nullptr && !data2gChatActive_.load() && !m_RxRunning;
+}
+
 wxString MainFrame::chatModemStatus()
 {
     if (!data2gChatActive_.load() || m_data2gTransport == nullptr) return wxEmptyString;

@@ -37,7 +37,7 @@ namespace Colour
     const wxColour Glow(255, 252, 240);         // a lit lamp
     const wxColour Bakelite(20, 19, 19);        // unlit button face
     const wxColour Phosphor(232, 236, 230);     // the visi-scope's trace
-    const wxColour Alarm(236, 64, 52);          // the one red lamp: over the time-out
+    const wxColour Alarm(236, 64, 52);          // red for danger: on the air, Abort, over the time-out
 }
 
 enum class FontRole
@@ -62,6 +62,11 @@ void drawSpacedTextCentred(wxGraphicsContext* gc, const wxString& text, double c
                            double spacing);
 
 // A domed rivet head.
+// Whether something blinking is in its lit half right now. Everything that
+// blinks takes its phase from the one clock, so a chip in the chat window and
+// a button on the console flash together.
+bool blinkLit();
+
 void drawRivet(wxGraphicsContext* gc, double cx, double cy, double radius);
 
 // A bevelled, riveted plate filling the rectangle.
