@@ -106,6 +106,30 @@ const char* scaleName(Scale scale)
     return SCALE_NAMES[index];
 }
 
+int scaleDegreeNumber(int scaleDegree)
+{
+    static const int degreeNumbers[SCALE_DEGREE_COUNT] = {1, 4, 5};
+    for (int i = 0; i < SCALE_DEGREE_COUNT; ++i)
+        if (SCALE_DEGREES[i] == scaleDegree) return degreeNumbers[i];
+    return 1;
+}
+
+int normalizeScaleDegree(int scaleDegree)
+{
+    int best = SCALE_DEGREES[0];
+    int distance = std::abs(scaleDegree - best);
+    for (int i = 1; i < SCALE_DEGREE_COUNT; ++i)
+    {
+        int candidateDistance = std::abs(scaleDegree - SCALE_DEGREES[i]);
+        if (candidateDistance < distance)
+        {
+            best = SCALE_DEGREES[i];
+            distance = candidateDistance;
+        }
+    }
+    return best;
+}
+
 bool scaleFromName(const std::string& name, Scale& scaleOut)
 {
     for (int i = 0; i < SCALE_COUNT; i++)
@@ -152,7 +176,7 @@ std::array<double, NOTES> scaleNotes(Scale scale, int voice)
 std::array<double, NOTES> scaleDegreeNotes(Scale scale, int voice, int degree)
 {
     std::array<double, NOTES> notes = scaleNotes(scale, voice);
-    degree = std::max(0, std::min(MAX_SCALE_DEGREE, degree));
+    degree = normalizeScaleDegree(degree);
     if (degree == 0) return notes;
 
     // Derive this voice's pitch classes from its actual scale notes. The
@@ -293,8 +317,9 @@ std::vector<Decode> receive(const float* audio, size_t numSamples, const ModemSe
         std::vector<int> hypothesisDegrees;
         for (Scale scale : scales)
         {
-            for (int degree = 0; degree <= MAX_SCALE_DEGREE; ++degree)
+            for (int i = 0; i < SCALE_DEGREE_COUNT; ++i)
             {
+                const int degree = SCALE_DEGREES[i];
                 held.push_back(detail::voiceTemplates(scale, voice, gear.number, degree, settings.tuningOffsetHz));
                 hypotheses.push_back(held.back().get());
                 hypothesisScales.push_back(scale);

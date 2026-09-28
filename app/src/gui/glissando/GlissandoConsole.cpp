@@ -316,7 +316,7 @@ void GlissandoConsole::buildControls()
 
     auto* degreeRow = row();
     degreeButton_ = new Button(modulationPlate, wxID_ANY, wxEmptyString, false, wxSize(180, 34));
-    degreeButton_->SetToolTip(_("Choose a scale-degree transposition for transmissions. The receiver searches all three positions automatically; the +2 limit keeps the highest duet voice inside a 4 kHz passband."));
+    degreeButton_->SetToolTip(_("Choose scale degree 1, 4 or 5 for transmissions. The receiver searches all three positions automatically. Degrees 4 and 5 use single-voice gears to stay inside a 4 kHz passband."));
     degreeRow->Add(new wxStaticText(modulationPlate, wxID_ANY, _("Transmit degree:")), 0,
                    wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
     degreeRow->Add(degreeButton_, 0);
@@ -392,11 +392,13 @@ void GlissandoConsole::buildControls()
     });
     degreeButton_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
         const std::vector<Choice> choices = {
-            {_("Root (0)"), true, _("Current pitch placement; compatible with older Glissando stations.")},
-            {_("Scale step +1"), true, _("Move each note up one scale degree.")},
-            {_("Scale step +2"), true, _("Move each note up two scale degrees; highest supported position for 4 kHz use.")},
+            {_("Scale degree 1 (root)"), true, _("Current pitch placement; compatible with older Glissando stations.")},
+            {_("Scale degree 4"), true, _("Move each note up three scale steps. Transmission uses a single voice to fit a 4 kHz passband.")},
+            {_("Scale degree 5"), true, _("Move each note up four scale steps. Transmission uses a single voice to fit a 4 kHz passband.")},
         };
-        ShowChoices(degreeButton_, choices, [this](int index) { selectScaleDegree(index); });
+        ShowChoices(degreeButton_, choices, [this](int index) {
+            selectScaleDegree(Glissando::SCALE_DEGREES[index]);
+        });
     });
     wideButton_->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& event) {
         settings_.wideScope = event.GetInt() != 0;
@@ -482,7 +484,8 @@ void GlissandoConsole::selectScale(Glissando::Scale scale)
 
 void GlissandoConsole::selectScaleDegree(int degree)
 {
-    settings_.scaleDegree = std::max(0, std::min(Glissando::MAX_SCALE_DEGREE, degree));
+    settings_.scaleDegree = Glissando::normalizeScaleDegree(degree);
+    if (settings_.gear > 4) settings_.gear = 4;
     applySettings(true);
 }
 
@@ -504,7 +507,8 @@ void GlissandoConsole::applySettings(bool notifyHost)
     {
         scaleButtons_[i]->SetChecked(scales[i] == settings_.scale);
     }
-    degreeButton_->SetLabel(wxString::Format(_("Scale step +%d"), settings_.scaleDegree));
+    degreeButton_->SetLabel(wxString::Format(_("Scale degree %d"),
+                                             Glissando::scaleDegreeNumber(settings_.scaleDegree)));
     autoButton_->SetChecked(settings_.autoGear);
     listenAllButton_->SetChecked(settings_.listenAllGears);
     wideButton_->SetChecked(settings_.wideScope);
@@ -524,11 +528,14 @@ void GlissandoConsole::updateGearButtons()
     // measurements chose, and the tempo picked by hand, which automatic
     // falls back to when nothing has been heard, glows faintly beside it.
     int lit = settings_.autoGear ? sendingGear_ : settings_.gear;
+    if (settings_.scaleDegree >= 3) lit = std::min(lit, 4);
     for (size_t i = 0; i < gearButtons_.size(); i++)
     {
         int gear = (int)i + Glissando::MIN_GEAR;
+        gearButtons_[i]->Enable(!(settings_.scaleDegree >= 3 && gear == 5));
         gearButtons_[i]->SetChecked(gear == lit);
-        gearButtons_[i]->SetHinted(settings_.autoGear && gear == settings_.gear && gear != lit);
+        gearButtons_[i]->SetHinted((settings_.autoGear || settings_.scaleDegree >= 3) &&
+                                   gear == settings_.gear && gear != lit);
     }
 }
 
@@ -574,7 +581,8 @@ void GlissandoConsole::refreshTelemetry()
         wxString ago = s < 90 ? wxString::Format("%.0fs", s)
                               : s < 5400 ? wxString::Format("%.0fm", s / 60) : wxString::Format("%.0fh", s / 3600);
         heardReadout_->SetText(wxString::Format("%s %s", gearLabel(t.heardGear).Left(4), ago));
-        heardScaleReadout_->SetText(wxString::Format(_("%s, +%d"), scaleLabel(t.heardScale), t.heardScaleDegree));
+        heardScaleReadout_->SetText(wxString::Format(_("%s, degree %d"), scaleLabel(t.heardScale),
+                                                     Glissando::scaleDegreeNumber(t.heardScaleDegree)));
     }
     else
     {

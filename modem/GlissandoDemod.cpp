@@ -1002,7 +1002,7 @@ std::shared_ptr<const VoiceTemplates> voiceTemplates(Scale scale, int voice, int
     // Keep enough for every gear and voice of every scale/degree hypothesis
     // at two tunings, and
     // forget the oldest beyond that.
-    const size_t MAX_ENTRIES = 2 * SCALE_COUNT * (MAX_SCALE_DEGREE + 1) * 6;
+    const size_t MAX_ENTRIES = 2 * SCALE_COUNT * SCALE_DEGREE_COUNT * 6;
     while (cache.size() >= MAX_ENTRIES && !age.empty())
     {
         cache.erase(age.front());

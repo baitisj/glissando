@@ -447,8 +447,9 @@ void StreamingReceiver::Impl::search(GearState& state, unsigned generation)
         std::vector<int> hypothesisDegrees;
         for (Scale scale : activeScales)
         {
-            for (int degree = 0; degree <= MAX_SCALE_DEGREE; ++degree)
+            for (int i = 0; i < SCALE_DEGREE_COUNT; ++i)
             {
+                const int degree = SCALE_DEGREES[i];
                 held.push_back(detail::voiceTemplates(scale, voice, state.gear, degree, activeTuning));
                 hypotheses.push_back(held.back().get());
                 hypothesisScales.push_back(scale);

@@ -573,12 +573,16 @@ double TextMessagingModem::glissandoMessageSeconds(size_t textBytes) const
 
 int TextMessagingModem::transmitGearLocked() const
 {
+    int gear = glissando_.gear;
     if (glissando_.autoGear && glissandoStatus_.haveReport && glissandoStatus_.advisedGear != 0 &&
         steadyMs() - glissandoStatus_.heardAtMs < (uint64_t)GLISSANDO_REPORT_LIFETIME_MS)
     {
-        return glissandoStatus_.advisedGear;
+        gear = glissandoStatus_.advisedGear;
     }
-    return glissando_.gear;
+    // The +3/+4 step positions put the duet's high voice above a 4 kHz
+    // channel. Keep those choices on a single-voice gear even in auto mode.
+    if (glissando_.scaleDegree >= 3) gear = std::min(gear, 4);
+    return gear;
 }
 
 void TextMessagingModem::configureGlissandoReceiverLocked()
@@ -622,8 +626,9 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
 
     if (rxLogEnabled())
     {
-        log_info("RX: Glissando %s %s degree +%d voice %d, %.1f dB, %.2f Hz Doppler, offset %+.1f Hz%s",
-                 Glissando::gearInfo(decode.gear).tempo, Glissando::scaleName(d.scale), d.scaleDegree, d.voice, d.report.snrDb,
+        log_info("RX: Glissando %s %s scale degree %d voice %d, %.1f dB, %.2f Hz Doppler, offset %+.1f Hz%s",
+                 Glissando::gearInfo(decode.gear).tempo, Glissando::scaleName(d.scale),
+                 Glissando::scaleDegreeNumber(d.scaleDegree), d.voice, d.report.snrDb,
                  d.report.dopplerHz, d.frequencyOffsetHz, complete ? ", burst complete" : "");
     }
     if (!complete) return;

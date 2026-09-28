@@ -29,9 +29,12 @@ constexpr int SAMPLE_RATE_HZ = 8000;
 constexpr int PAYLOAD_BITS = 77;
 constexpr int NOTES = 8;
 constexpr int SYMBOLS_PER_FRAME = 86;
-// A shared transmit choice that keeps every scale/voice combination within
-// the useful part of a nominal 4 kHz SSB passband.
-constexpr int MAX_SCALE_DEGREE = 2;
+// The three musical positions offered in the console: scale degrees 1, 4,
+// and 5 (represented as zero-based steps from the root).
+constexpr int SCALE_DEGREE_COUNT = 3;
+constexpr int SCALE_DEGREES[SCALE_DEGREE_COUNT] = {0, 3, 4};
+int scaleDegreeNumber(int scaleDegree);
+int normalizeScaleDegree(int scaleDegree);
 
 // The prototype's gears: 1 Adagio, 2 Andante, 3 Allegro, 4 Presto,
 // 5 Presto duet (two voices, two payloads per frame).
@@ -80,7 +83,7 @@ struct ModemSettings
 {
     int gear = 3;
     Scale scale = Scale::Pentatonic;
-    int scaleDegree = 0;            // 0..MAX_SCALE_DEGREE, scale steps above the root
+    int scaleDegree = 0;            // zero-based step offset for offered degrees 1, 4 or 5
 
     // Receive only: listen for every scale, not just `scale`, and say in
     // Decode::scale which one each frame was sung in. Every receive search
