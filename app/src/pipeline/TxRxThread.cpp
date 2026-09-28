@@ -92,7 +92,6 @@ extern paCallBackData* g_rxUserdata;
 extern std::atomic<int> g_analog;
 extern std::atomic<bool> g_half_duplex;
 extern std::atomic<bool> g_tx;
-extern int g_dump_fifo_state;
 extern std::atomic<bool> g_playFileToMicIn;
 extern std::atomic<int> g_sfTxFs;
 extern std::atomic<bool> g_loopPlayFileToMicIn;
@@ -103,7 +102,6 @@ extern GenericFIFO<short> g_plotSpeechOutFifo;
 extern int g_mode;
 extern int g_txLevel;
 extern std::atomic<float> g_txLevelScale;
-extern int g_dump_timing;
 extern std::atomic<bool> g_queueResync;
 extern int g_resyncs;
 extern bool g_recFileFromRadio;
@@ -120,7 +118,6 @@ extern std::atomic<int> g_State;
 extern std::atomic<int> g_channel_noise;
 extern std::atomic<float> g_RxFreqOffsetHz;
 extern float g_sig_pwr_av;
-extern std::atomic<bool> g_voice_keyer_tx;
 extern std::atomic<bool> g_agcEnabled;
 
 #include "../freedv_interface.h"
@@ -149,7 +146,6 @@ extern SNDFILE* g_sfRecDecoderFile;
 extern std::atomic<SNDFILE*> g_sfPlayFileFromRadio;
 
 extern std::atomic<bool> g_recFileFromMic;
-extern std::atomic<bool> g_recVoiceKeyerFile;
 extern bool g_recFileFromDecoder;
 
 #include "sox_biquad.h"
@@ -302,71 +298,10 @@ void TxRxThread::initializePipeline_()
         auto resampleForPlotOutTap = new TapStep(outputSampleRate_, resampleForPlotOutPipeline);
         rfDemodulationPipeline->appendPipelineStep(resampleForPlotOutTap);
         
-        // Replace received audio with microphone audio if we're monitoring TX/voice keyer recording.
-        if (equalizedMicAudioLink_ != nullptr)
-        {
-            auto bypassMonitorAudio = new AudioPipeline(inputSampleRate_, outputSampleRate_);
-            auto mutePipeline = new AudioPipeline(inputSampleRate_, outputSampleRate_);
-            
-            auto monitorPipeline = new AudioPipeline(inputSampleRate_, outputSampleRate_);
-            monitorPipeline->appendPipelineStep(equalizedMicAudioLink_->getOutputPipelineStep());
-            
-            auto monitorLevelStep = new LevelAdjustStep(outputSampleRate_, +[]() FREEDV_NONBLOCKING {
-                float volInDb = 0;
-                if (g_voice_keyer_tx.load(std::memory_order_acquire) && NonblockingWxGetApp().appConfiguration.monitorVoiceKeyerAudio.getWithoutProcessing())
-                {
-                    volInDb = NonblockingWxGetApp().appConfiguration.monitorVoiceKeyerAudioVol.getWithoutProcessing();
-                }
-                else
-                {
-                    volInDb = NonblockingWxGetApp().appConfiguration.monitorTxAudioVol.getWithoutProcessing();
-                }
-                
-                return std::exp(volInDb/20.0f * std::log(10.0f));
-            });
-            monitorPipeline->appendPipelineStep(monitorLevelStep);
-
-            auto muteStep = new MuteStep(inputSampleRate_, outputSampleRate_);
-            
-            mutePipeline->appendPipelineStep(muteStep);
-            
-            auto eitherOrMuteStep = new EitherOrStep(
-                +[]() FREEDV_NONBLOCKING { return g_recVoiceKeyerFile.load(std::memory_order_relaxed); },
-                mutePipeline,
-                bypassMonitorAudio
-            );
-
-            auto eitherOrMicMonitorStep = new EitherOrStep(
-                +[]() FREEDV_NONBLOCKING { return 
-                    (g_voice_keyer_tx.load(std::memory_order_acquire) && NonblockingWxGetApp().appConfiguration.monitorVoiceKeyerAudio.getWithoutProcessing()) || 
-                    (g_tx.load(std::memory_order_acquire) && NonblockingWxGetApp().appConfiguration.monitorTxAudio.getWithoutProcessing()); },
-                monitorPipeline,
-                eitherOrMuteStep
-            );
-            bypassRfDemodulationPipeline->appendPipelineStep(eitherOrMicMonitorStep);
-        }
-        
-        EitherOrStep* eitherOrRfDemodulationStep = nullptr;
-        if (equalizedMicAudioLink_ != nullptr)
-        {
-            eitherOrRfDemodulationStep = new EitherOrStep(
-                +[]() FREEDV_NONBLOCKING { return g_analog.load(std::memory_order_relaxed) ||
-                    (
-                        (g_recVoiceKeyerFile.load(std::memory_order_relaxed)) ||
-                        (g_voice_keyer_tx.load(std::memory_order_acquire) && NonblockingWxGetApp().appConfiguration.monitorVoiceKeyerAudio.getWithoutProcessing()) ||
-                        (g_tx.load(std::memory_order_acquire) && NonblockingWxGetApp().appConfiguration.monitorTxAudio.getWithoutProcessing())
-                    ); 
-                },
-                bypassRfDemodulationPipeline,
-                rfDemodulationPipeline);
-        }
-        else
-        {
-            eitherOrRfDemodulationStep = new EitherOrStep(
-                +[]() FREEDV_NONBLOCKING { return g_analog.load(std::memory_order_relaxed) != 0; },
-                bypassRfDemodulationPipeline,
-                rfDemodulationPipeline);
-        }
+        auto eitherOrRfDemodulationStep = new EitherOrStep(
+            +[]() FREEDV_NONBLOCKING { return g_analog.load(std::memory_order_relaxed) != 0; },
+            bypassRfDemodulationPipeline,
+            rfDemodulationPipeline);
 
         activeRxPipeline->appendPipelineStep(eitherOrRfDemodulationStep);
 
@@ -435,12 +370,10 @@ void TxRxThread::initializePipeline_()
         auto activeRxEitherOr = new EitherOrStep(
             +[]() FREEDV_NONBLOCKING {
                 bool tmpTx = g_tx.load(std::memory_order_acquire);
-                bool tmpVkTx = g_voice_keyer_tx.load(std::memory_order_acquire);
                 bool tmpHalfDuplex = g_half_duplex.load(std::memory_order_acquire);
                 return
-                    (tmpVkTx && NonblockingWxGetApp().appConfiguration.monitorVoiceKeyerAudio.getWithoutProcessing()) ||
                     (tmpTx && NonblockingWxGetApp().appConfiguration.monitorTxAudio.getWithoutProcessing()) ||
-                    (!tmpVkTx && ((tmpHalfDuplex && !tmpTx) || !tmpHalfDuplex));
+                    (tmpHalfDuplex && !tmpTx) || !tmpHalfDuplex;
             },
             activeRxPipeline,
             activeRxMutePipeline
@@ -637,11 +570,6 @@ void TxRxThread::TimingStats::report(bool m_tx, const char* label) const
 void TxRxThread::clearFifos_() FREEDV_NONBLOCKING
 {
     paCallBackData  *cbData = g_rxUserdata;
-    
-    if (equalizedMicAudioLink_ != nullptr)
-    {
-        equalizedMicAudioLink_->clearFifo();
-    }
     
     if (m_tx)
     {

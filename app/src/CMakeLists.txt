@@ -6,7 +6,6 @@ set(FREEDV_SOURCES
     sox_biquad.c
     util.cpp
     eq.cpp
-    voicekeyer.cpp
     playrec.cpp
     ongui.cpp
     freedv_interface.cpp

@@ -139,25 +139,6 @@ wxString  getLastUsedConfigPath();
 void      saveLastUsedConfigPath(const wxString& path);
 void      clearLastUsedConfigPath();
 
-// Voice Keyer Constants
-
-#define VK_SYNC_WAIT_TIME 5.0
-
-// Voice Keyer States
-
-#define VK_IDLE      0
-#define VK_TX        1
-#define VK_RX        2
-#define VK_SYNC_WAIT 3
-
-// Voice Keyer Events
-
-#define VK_START         0
-#define VK_SPACE_BAR     1
-#define VK_PLAY_FINISHED 2
-#define VK_DT            3
-#define VK_SYNC          4
-
 // "Detect Sync" state machine states and constants
 
 #define DS_IDLE           0
@@ -248,7 +229,6 @@ class MainApp : public wxApp
 
         // debugging 700D audio break up
 
-        bool       m_txRxThreadHighPriority;
 
         int        m_prevMode;
         
@@ -466,10 +446,6 @@ private:
 
     bool                    m_schedule_restore;
 
-    // Voice Keyer state machine
-
-    int                     vk_state;
-    void VoiceKeyerProcessEvent(int vk_event);
 
         void StopPlayFileToMicIn(void);
         void StopPlaybackFileFromRadio();
@@ -536,12 +512,9 @@ private:
         void OnTogBtnPTTMouseDown( wxMouseEvent& event );
         void OnTogBtnPTTMouseLeave( wxMouseEvent& event );
 
-        void OnTogBtnVoiceKeyerClick (wxCommandEvent& event) override;
-        void OnTogBtnVoiceKeyerRightClick( wxContextMenuEvent& event ) override;
         
 
         void OnTogBtnOnOff( wxCommandEvent& event ) override;
-        void OnTogBtnRecord( wxCommandEvent& event ) override;
 
         
         void OnCallSignReset( wxCommandEvent& event ) override;
@@ -561,7 +534,6 @@ private:
         void OnIdle(wxIdleEvent &evt);
 #endif
 
-        int VoiceKeyerStartTx(void);
 
         void OnChangeTxMode( wxCommandEvent& event ) override;
         
@@ -587,8 +559,6 @@ private:
 
         void OnSystemColorChanged(wxSysColourChangedEvent& event) override;
         
-        void OnChooseAlternateVoiceKeyerFile( wxCommandEvent& event );
-        void OnRecordNewVoiceKeyerFile( wxCommandEvent& event );
 
         void OnTOTTimer(wxTimerEvent& evt);
         void OnTOTWarningTimer(wxTimerEvent& evt);
@@ -596,10 +566,8 @@ private:
         void playTotBeep_();
         void stopTotBeep_();
         
-        void OnSetMonitorVKAudio( wxCommandEvent& event );
         void OnSetMonitorTxAudio( wxCommandEvent& event );
         
-        void OnSetMonitorVKAudioVol( wxCommandEvent& event );
         void OnSetMonitorTxAudioVol( wxCommandEvent& event );
         
         void OnResetMicSpkrLevel(wxMouseEvent& event) override;
@@ -670,12 +638,6 @@ private:
         void        designEQFilters(paCallBackData *cb, int rxSampleRate, int txSampleRate);
         void        deleteEQFilters(paCallBackData *cb);
 
-        // Voice Keyer States
-
-        int        vk_rx_pause;
-        int        vk_repeats, vk_repeat_counter;
-        float      vk_rx_time;
-        float      vk_rx_sync_time;
         bool suppressFreqModeUpdates_;
         // The operator picked a frequency in the app while no radio was
         // connected; the radio is tuned to it once it connects. Otherwise the
@@ -692,14 +654,9 @@ private:
         int txLoadedLevel_{-200};
         int tuneLoadedLevel_{-200};
         
-        std::string vkFileName_;
         
-        wxMenu* voiceKeyerPopupMenu_;
         wxMenu* pttPopupMenu_;
         wxMenuItem* adjustMonitorPttVolMenuItem_;
-        wxMenuItem* adjustMonitorVKVolMenuItem_;
-        wxMenuItem* chooseVKFileMenuItem_;
-        wxMenuItem* recordNewVoiceKeyerFileMenuItem_;
 
         bool terminating_; // used for terminating FreeDV
         bool realigned_; // used to inhibit resize hack once already done
@@ -714,10 +671,6 @@ private:
         std::future<void> rigPttDisconnectFuture_;
         std::future<void> rigFreqDisconnectFuture_;
 
-        // Caches appConfiguration.experimentalFeatures as of the last tab layout load
-        // attempt, so exit-time save uses that instead of a possibly-since-toggled live
-        // value (toggling the checkbox mid-session doesn't reload/reapply a layout).
-        bool tabLayoutPersistenceEnabledAtStartup_;
         
         int         getSoundCardIDFromName(wxString& name, bool input);
         bool        validateSoundCardSetup(bool silent = false);
@@ -736,7 +689,6 @@ private:
         
         void updateReportingFreqList_();
         
-        void updateVoiceKeyerButtonLabel_();
         int captureCurrentMicGroupTab_();
         
         void onFrequencyModeChange_(IRigFrequencyController*, uint64_t freq, IRigFrequencyController::Mode mode);

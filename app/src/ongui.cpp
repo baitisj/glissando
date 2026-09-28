@@ -49,7 +49,6 @@ extern std::atomic<float> g_tuneLevelScale;
 extern wxConfigBase *pConfig;
 extern std::atomic<bool> endingTx;
 extern std::atomic<int> g_outfifo1_empty;
-extern std::atomic<bool> g_voice_keyer_tx;
 extern paCallBackData* g_rxUserdata;
 
 extern std::atomic<SNDFILE*>            g_sfRecFileFromModulator;
@@ -231,15 +230,6 @@ void MainFrame::OnToolsOptions(wxCommandEvent& event)
         });
 
         
-        // Update voice keyer file if different
-        wxFileName fullVKPath(wxGetApp().appConfiguration.voiceKeyerWaveFilePath, wxGetApp().appConfiguration.voiceKeyerWaveFile);
-        if (wxString::FromUTF8(vkFileName_.c_str()) != fullVKPath.GetFullPath())
-        {
-            // Clear filename to force reselection next time VK is triggered.
-            vkFileName_ = "";
-            wxGetApp().appConfiguration.voiceKeyerWaveFile = "";
-            setVoiceKeyerButtonLabel_("");
-        }
         
         // Adjust frequency labels on main window
         wxListItem colInfo;
@@ -961,8 +951,7 @@ int MainApp::FilterEvent(wxEvent& event)
                 (mainWindowActive || totWarningActive) &&
                 wxGetApp().appConfiguration.enableSpaceBarForPTT && !frame->isReceiveOnly()) {
 
-                // space bar controls tx/rx if keyer not running
-                if (frame->vk_state == VK_IDLE) {
+                {
                     if (wxGetApp().appConfiguration.pttMomentaryMode) {
                         // Momentary mode: start TX only on the initial key press (not repeated events).
                         if (!g_tx.load(std::memory_order_acquire)) {
@@ -980,8 +969,6 @@ int MainApp::FilterEvent(wxEvent& event)
                         frame->togglePTT();
                     }
                 }
-                else // space bar stops keyer
-                    frame->VoiceKeyerProcessEvent(VK_SPACE_BAR);
 
                 return Event_Processed; // absorb key so we don't toggle control with focus (e.g. Start)
 
@@ -1000,7 +987,7 @@ int MainApp::FilterEvent(wxEvent& event)
                 wxGetApp().appConfiguration.enableSpaceBarForPTT && !frame->isReceiveOnly() &&
                 wxGetApp().appConfiguration.pttMomentaryMode) {
 
-                if (frame->vk_state == VK_IDLE) {
+                {
                     if (g_tx.load(std::memory_order_acquire)) {
                         frame->m_btnTogPTT->SetValue(false);
                         frame->m_btnTogPTT->SetBackgroundColour(wxNullColour);
@@ -1083,15 +1070,7 @@ void MainFrame::OnTogBtnPTTMouseLeave(wxMouseEvent& event)
 //-------------------------------------------------------------------------
 void MainFrame::OnTogBtnPTT (wxCommandEvent&)
 {
-    if (vk_state == VK_TX)
-    {
-        // Disable TX via VK code to prevent state inconsistencies.
-        VoiceKeyerProcessEvent(VK_SPACE_BAR);
-    }
-    else 
-    {
-        togglePTT();
-    }
+    togglePTT();
 }
 
 void MainFrame::playTotBeep_()
@@ -1137,11 +1116,6 @@ void MainFrame::OnTOTTimer(wxTimerEvent&)
     m_totCurrentDurationMs = 0;
     stopTotBeep_();
 
-    if (vk_state == VK_TX)
-    {
-        VoiceKeyerProcessEvent(VK_SPACE_BAR);
-    }
-    else
     {
         m_btnTogPTT->SetValue(false);
         endingTx.store(true, std::memory_order_release);
@@ -1431,7 +1405,6 @@ void MainFrame::togglePTT(void) {
         // Re-enable buttons.
         m_togBtnOnOff->Enable(true);
         m_togBtnAnalog->Enable(true);
-        m_togBtnVoiceKeyer->Enable(true);
     }
     else
     {
@@ -1638,7 +1611,6 @@ void MainFrame::OnTogBtnTune(wxCommandEvent&)
     }
 
     // Disable actual TX controls if needed
-    m_togBtnVoiceKeyer->Enable(!newTx);
     m_btnTogPTT->Enable(!newTx);
     m_cboReportFrequency->Enable(!newTx);
 

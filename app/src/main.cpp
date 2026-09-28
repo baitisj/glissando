@@ -63,7 +63,6 @@
 #include "text_messaging/TextMessagingSession.h"
 #include "text_messaging/UsDataSegments.h"
 #include "gui/util/WindowPositionRestore.h"
-#include "gui/util/TabLayoutSerializer.h"
 
 #include "util/logging/ulog.h"
 #include "util/audio_spin_mutex.h"
@@ -101,7 +100,6 @@ std::shared_ptr<TxRxThread> m_txThread;
 std::shared_ptr<TxRxThread> m_rxThread;
 float               g_pwr_scale;
 int                 g_clip;
-int                 g_freedv_verbose;
 std::atomic<bool>   g_queueResync;
 
 // test Frames
@@ -132,15 +130,12 @@ std::atomic<int>    g_analog;
 std::atomic<bool>   g_tx;
 float g_snr;
 std::atomic<bool>  g_half_duplex;
-std::atomic<bool>  g_voice_keyer_tx;
 std::atomic<bool>  g_agcEnabled;
 // sending and receiving Call Sign data
 
 // tx/rx processing states
 std::atomic<int>                 g_State, g_prev_State;
 paCallBackData     *g_rxUserdata;
-int                 g_dump_timing;
-int                 g_dump_fifo_state;
 time_t              g_sync_time;
 
 // FIFOs used for plotting waveforms
@@ -187,7 +182,6 @@ extern int                 g_recFileFromModulatorEventId;
 
 extern std::atomic<SNDFILE*> g_sfRecMicFile;
 extern std::atomic<bool>   g_recFileFromMic;
-extern std::atomic<bool>   g_recVoiceKeyerFile;
 
 extern SNDFILE* g_sfRecDecoderFile;
 extern bool g_recFileFromDecoder;
@@ -1002,15 +996,7 @@ void MainFrame::loadConfiguration_()
 
     wxGetApp().m_FreeDV700Combine = 1;
 
-    if (wxGetApp().appConfiguration.debugVerbose)
-    {
-        ulog_set_level(LOG_TRACE);
-    }
-    else
-    {
-        ulog_set_level(LOG_INFO);
-    }
-    g_freedv_verbose = wxGetApp().appConfiguration.apiVerbose;
+    ulog_set_level(LOG_INFO);
 
     wxGetApp().m_attn_carrier_en = 0;
     wxGetApp().m_attn_carrier    = 0;
@@ -1072,7 +1058,6 @@ void MainFrame::loadConfiguration_()
     
     m_togBtnAnalog->Disable();
     m_btnTogPTT->Disable();
-    m_togBtnVoiceKeyer->Disable();
 
     // squelch settings
     m_sliderSQ->SetValue((int)((g_SquelchLevel+5.0)*2.0));
@@ -1089,7 +1074,6 @@ void MainFrame::loadConfiguration_()
     m_freqBox->Show(isFrequencyControlEnabled_());
 
     restoreCallsignListFromCsv_();
-    m_logQSO->Enable(m_lastReportedCallsignListView->GetItemCount() > 0);
 
 
     // Ensure that sound card count is correct. Otherwise the Audio Options won't show
@@ -1104,41 +1088,7 @@ void MainFrame::loadConfiguration_()
     m_panel->SetSizerAndFit(currentSizer, false);
     m_panel->Layout();
     
-    // Load default voice keyer file as current.
-    if (wxGetApp().appConfiguration.voiceKeyerWaveFile != "")
-    {
-        wxFileName fullVKPath(wxGetApp().appConfiguration.voiceKeyerWaveFilePath, wxGetApp().appConfiguration.voiceKeyerWaveFile);
-        vkFileName_ = fullVKPath.GetFullPath().mb_str();
-        
-        m_togBtnVoiceKeyer->SetToolTip(_("Toggle Voice Keyer using file ") + wxGetApp().appConfiguration.voiceKeyerWaveFile + _(". Right-click for additional options."));
-        
-        wxString fileNameWithoutExt;
-        wxFileName::SplitPath(wxGetApp().appConfiguration.voiceKeyerWaveFile, nullptr, &fileNameWithoutExt, nullptr);
-        setVoiceKeyerButtonLabel_(fileNameWithoutExt);
-    }
-    else
-    {
-        vkFileName_ = "";
-    }
     
-    // Cache this now rather than re-reading the live config value at exit time: the
-    // checkbox can be toggled mid-session without reloading/reapplying a layout (that
-    // only happens here, at startup), so exit-time save must be gated on the same
-    // flag value the load decision above used, not whatever it's since been changed to.
-    tabLayoutPersistenceEnabledAtStartup_ = wxGetApp().appConfiguration.experimentalFeatures;
-    if (tabLayoutPersistenceEnabledAtStartup_ && wxGetApp().appConfiguration.tabLayout != "")
-    {
-#if wxCHECK_VERSION(3, 3, 0)
-        TabLayoutDeserializer deserializer(wxGetApp().appConfiguration.tabLayout);
-        m_auiNbookCtrl->LoadLayout("notebook", deserializer);
-#else
-        ((TabFreeAuiNotebook*)m_auiNbookCtrl)->LoadPerspective(wxGetApp().appConfiguration.tabLayout);
-#endif // wxCHECK_VERSION(3, 3, 0)
-        const_cast<wxAuiManager&>(m_auiNbookCtrl->GetAuiManager()).Update();
-
-        // Select previous active tab.
-        m_auiNbookCtrl->ChangeSelection(wxGetApp().appConfiguration.currentNotebookTab);
-    }
     
     statsBox->Show(wxGetApp().appConfiguration.showDecodeStats);
 }
@@ -1181,7 +1131,6 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("FreeDV ")
     terminating_ = false;
     realigned_ = false;
     syncState_ = false;
-    tabLayoutPersistenceEnabledAtStartup_ = false;
     txChangeoverOccurring_ = false;
     textMessagingChangeover_ = false;
 
@@ -1287,43 +1236,6 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("FreeDV ")
     Bind(wxEVT_TIMER, &MainFrame::OnPttKeyPollTimer, this, ID_TIMER_PTT_KEY_POLL);
 #endif
     
-    // Create voice keyer popup menu.
-    voiceKeyerPopupMenu_ = new wxMenu();
-    assert(voiceKeyerPopupMenu_ != nullptr);
-
-    chooseVKFileMenuItem_ = voiceKeyerPopupMenu_->Append(wxID_ANY, _("&Use another voice keyer file..."));
-    voiceKeyerPopupMenu_->Connect(
-        chooseVKFileMenuItem_->GetId(), wxEVT_COMMAND_MENU_SELECTED, 
-        wxCommandEventHandler(MainFrame::OnChooseAlternateVoiceKeyerFile),
-        NULL,
-        this);
-        
-    recordNewVoiceKeyerFileMenuItem_ = voiceKeyerPopupMenu_->Append(wxID_ANY, _("&Record new voice keyer file..."));
-    voiceKeyerPopupMenu_->Connect(
-        recordNewVoiceKeyerFileMenuItem_->GetId(), wxEVT_COMMAND_MENU_SELECTED, 
-        wxCommandEventHandler(MainFrame::OnRecordNewVoiceKeyerFile),
-        NULL,
-        this);
-    
-    voiceKeyerPopupMenu_->AppendSeparator();
-    
-    auto monitorVKMenuItem = voiceKeyerPopupMenu_->AppendCheckItem(wxID_ANY, _("Monitor transmitted audio"));
-    voiceKeyerPopupMenu_->Check(monitorVKMenuItem->GetId(), wxGetApp().appConfiguration.monitorVoiceKeyerAudio);
-    voiceKeyerPopupMenu_->Connect(
-        monitorVKMenuItem->GetId(), wxEVT_COMMAND_MENU_SELECTED, 
-        wxCommandEventHandler(MainFrame::OnSetMonitorVKAudio),
-        NULL,
-        this);
-        
-    adjustMonitorVKVolMenuItem_ = voiceKeyerPopupMenu_->Append(wxID_ANY, _("Adjust Monitor Volume..."));
-    adjustMonitorVKVolMenuItem_->Enable(wxGetApp().appConfiguration.monitorVoiceKeyerAudio);
-    voiceKeyerPopupMenu_->Connect(
-        adjustMonitorVKVolMenuItem_->GetId(), wxEVT_COMMAND_MENU_SELECTED,
-        wxCommandEventHandler(MainFrame::OnSetMonitorVKAudioVol),
-        NULL,
-        this
-        );
-        
     // Create PTT popup menu
     pttPopupMenu_ = new wxMenu();
     assert(pttPopupMenu_ != nullptr);
@@ -1371,7 +1283,6 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("FreeDV ")
     
     g_sfRecMicFile.store(nullptr, std::memory_order_release);
     g_recFileFromMic.store(false, std::memory_order_relaxed);
-    g_recVoiceKeyerFile.store(false, std::memory_order_relaxed);
 
     // init click-tune states
 
@@ -1382,7 +1293,6 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("FreeDV ")
     g_TxFreqOffsetHz.store(0.0f, std::memory_order_relaxed);
 
     g_tx.store(false, std::memory_order_release);
-    g_voice_keyer_tx.store(false, std::memory_order_release);
 
     sox_biquad_start();
 
@@ -1396,7 +1306,6 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("FreeDV ")
     optionsDlg = new OptionsDlg(NULL);
     m_schedule_restore = false;
 
-    vk_state = VK_IDLE;
 
     m_timeSinceSyncLoss = 0;
 
@@ -1455,8 +1364,6 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("FreeDV ")
     /* experimental checkbox control of thread priority, used
        to helpo debug 700D windows sound break up */
 
-    wxGetApp().m_txRxThreadHighPriority = true;
-    g_dump_timing = g_dump_fifo_state = 0;
 
     startTextMessaging_();
 }
@@ -1553,16 +1460,6 @@ void MainFrame::exportConfiguration_(wxConfigBase* config)
         wxGetApp().appConfiguration.mainWindowHeight = h;
     }
 
-    if (tabLayoutPersistenceEnabledAtStartup_)
-    {
-#if wxCHECK_VERSION(3, 3, 0)
-        TabLayoutSerializer serializer;
-        m_auiNbookCtrl->SaveLayout("notebook", serializer);
-        wxGetApp().appConfiguration.tabLayout = serializer.GetLayout();
-#else
-        wxGetApp().appConfiguration.tabLayout = ((TabFreeAuiNotebook*)m_auiNbookCtrl)->SavePerspective();
-#endif // wxCHECK_VERSION(3, 3, 0)
-    }
 
 
     wxGetApp().appConfiguration.squelchActive = g_SquelchActive;
@@ -1609,8 +1506,7 @@ void MainFrame::startTextMessaging_()
         CallAfter([this, keyed]() { setTextMessagingPtt_(keyed); });
     });
     m_textMessagingTransport->setVoiceTransmitCheck([]() {
-        return g_tx.load(std::memory_order_acquire) ||
-               g_voice_keyer_tx.load(std::memory_order_acquire);
+        return g_tx.load(std::memory_order_acquire);
     });
 
     m_textMessagingTransport->setTransmitAllowedCheck([]() {
@@ -1909,8 +1805,6 @@ MainFrame::~MainFrame()
         m_textMessagingDialog = nullptr;
     }
 
-    delete voiceKeyerPopupMenu_;
-    
     if (m_filterDialog != nullptr)
     {
         m_filterDialog->Close();
@@ -2000,7 +1894,7 @@ int MainFrame::getIdealStationsHeardColumnLength_(int col)
     for (int index = 0; index < m_lastReportedCallsignListView->GetItemCount(); index++)
     {
         auto itemText = m_lastReportedCallsignListView->GetItemText(index, col);
-        wxSize itemSize = m_togBtnVoiceKeyer->GetTextExtent(itemText);
+        wxSize itemSize = m_lastReportedCallsignListView->GetTextExtent(itemText);
         
         curColWidth = std::max(curColWidth, itemSize.GetWidth() + 10); // 10px buffer around text
     }
@@ -2055,7 +1949,6 @@ void MainFrame::OnTimer(wxTimerEvent &evt)
           if (m_panelWaterfall->checkDT()) {
               m_panelWaterfall->setRxFreq(FDMDV_FCENTRE - g_RxFreqOffsetHz.load(std::memory_order_relaxed));
               m_panelWaterfall->m_newdata = true;
-              m_panelWaterfall->setColor(wxGetApp().appConfiguration.waterfallColor);
               m_panelWaterfall->addOffset(freedvInterface.getCurrentRxModemOffset());
               m_panelWaterfall->setSync(syncState ? true : false);
               m_panelWaterfall->Refresh();
@@ -2064,10 +1957,7 @@ void MainFrame::OnTimer(wxTimerEvent &evt)
       else if (timerId == ID_TIMER_SPECTRUM)
       {
           m_panelSpectrum->setRxFreq(FDMDV_FCENTRE - g_RxFreqOffsetHz.load(std::memory_order_relaxed));
-    
-          // Note: each element in this combo box is a numeric value starting from 1,
-          // so just incrementing the selected index should get us the correct results.
-          m_panelSpectrum->setNumAveraging(wxGetApp().appConfiguration.currentSpectrumAveraging + 1);
+
           m_panelSpectrum->addOffset(freedvInterface.getCurrentRxModemOffset());
           m_panelSpectrum->setSync(syncState ? true : false);
           m_panelSpectrum->m_newdata = true;
@@ -2360,9 +2250,6 @@ void MainFrame::OnTimer(wxTimerEvent &evt)
                 Restore();
             m_schedule_restore = false;
         }
-    
-        // Voice Keyer state machine
-        VoiceKeyerProcessEvent(VK_DT);
     }
     
     if (timerId == ID_TIMER_SPEECH_IN ||
@@ -2526,7 +2413,6 @@ void MainFrame::performFreeDVOn_()
     isModemRunning.store(false, std::memory_order_release);
     g_queueResync.store(false, std::memory_order_release);
     endingTx.store(false, std::memory_order_release);
-    g_voice_keyer_tx.store(false, std::memory_order_release);
     g_tx.store(false, std::memory_order_release);
     
     m_timeSinceSyncLoss = 0;
@@ -2553,7 +2439,6 @@ void MainFrame::performFreeDVOn_()
         m_cboLastReportedCallsigns->Enable(m_lastReportedCallsignListView->GetItemCount() > 0);
         m_cboLastReportedCallsigns->SetText(wxT(""));
         
-        m_logQSO->Disable();
     });
     
     memset(m_callsign, 0, MAX_CALLSIGN);
@@ -2565,7 +2450,6 @@ void MainFrame::performFreeDVOn_()
     // Start Running -------------------------------------------------
     //
 
-    vk_state = VK_IDLE;
 
     // modify some button states when running
     executeOnUiThreadAndWait_([&]() 
@@ -2615,9 +2499,6 @@ void MainFrame::performFreeDVOn_()
 
         // Codec 2 VQ Equaliser
         freedvInterface.setEq(wxGetApp().appConfiguration.filterConfiguration.enable700CEqualizer);
-
-        // Codec2 verbosity setting
-        freedvInterface.setVerbose(g_freedv_verbose);
 
         g_error_hist = new short[MODEM_STATS_NC_MAX*2];
         g_error_histn = new short[MODEM_STATS_NC_MAX*2];
@@ -2852,7 +2733,6 @@ void MainFrame::performFreeDVOff_()
     executeOnUiThreadAndWait_([&]() 
     {
         m_btnTogPTT->SetValue(false);
-        VoiceKeyerProcessEvent(VK_SPACE_BAR);
     });
     
     stopRxStream();
@@ -2874,13 +2754,11 @@ void MainFrame::performFreeDVOff_()
 
         m_togBtnAnalog->Disable();
         m_btnTogPTT->Disable();
-        m_togBtnVoiceKeyer->Disable();
     
         m_rb1600->Enable();
         m_rb700d->Enable();
         m_rb700e->Enable();
         
-        m_logQSO->Enable(m_lastReportedCallsignListView->GetItemCount() > 0);
     });
 }
 
@@ -2896,7 +2774,6 @@ void MainFrame::OnTogBtnOnOff(wxCommandEvent&)
     // Disable buttons while on/off is occurring
     m_togBtnOnOff->Enable(false);
     m_togBtnAnalog->Enable(false);
-    m_togBtnVoiceKeyer->Enable(false);
     m_btnTogPTT->Enable(false);
         
     // we are attempting to start
@@ -2922,7 +2799,6 @@ void MainFrame::OnTogBtnOnOff(wxCommandEvent&)
                     (g_nSoundCards == 2);
                 
                 m_togBtnAnalog->Enable(m_RxRunning);
-                m_togBtnVoiceKeyer->Enable(txEnabled);
                 m_btnTogPTT->Enable(txEnabled);
                 optionsDlg->setSessionActive(m_RxRunning);
 
@@ -2973,7 +2849,6 @@ void MainFrame::OnTogBtnOnOff(wxCommandEvent&)
             // On/Off actions complete, re-enable button.
             executeOnUiThreadAndWait_([&]() {
                 m_togBtnAnalog->Enable(m_RxRunning);
-                m_togBtnVoiceKeyer->Enable(m_RxRunning);
                 m_btnTogPTT->Enable(m_RxRunning);
                 optionsDlg->setSessionActive(m_RxRunning);
                 m_togBtnOnOff->SetValue(m_RxRunning);
@@ -3299,7 +3174,7 @@ void MainFrame::startRxStream()
             // The transmit side has no input device: it only plays what the
             // chat modem queues, so it runs at the radio output's rate
             // throughout and takes its timing from that device.
-            m_txThread = std::make_shared<TxRxThread>(true, txOutSoundDevice->getSampleRate(), txOutSoundDevice->getSampleRate(), nullptr, txOutSoundDevice);
+            m_txThread = std::make_shared<TxRxThread>(true, txOutSoundDevice->getSampleRate(), txOutSoundDevice->getSampleRate(), txOutSoundDevice);
 
             if (!txOutSoundDevice->isRunning())
             {
@@ -3315,7 +3190,7 @@ void MainFrame::startRxStream()
 
         // Decoded audio has nowhere to go, so the receive side's output rate
         // just matches its input.
-        m_rxThread = std::make_shared<TxRxThread>(false, rxInSoundDevice->getSampleRate(), rxInSoundDevice->getSampleRate(), nullptr, rxInSoundDevice);
+        m_rxThread = std::make_shared<TxRxThread>(false, rxInSoundDevice->getSampleRate(), rxInSoundDevice->getSampleRate(), rxInSoundDevice);
 
         rxInSoundDevice->start();
         if (!rxInSoundDevice->isRunning())

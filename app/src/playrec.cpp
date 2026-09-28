@@ -7,7 +7,6 @@
 
 #include "main.h"
 
-#include "gui/dialogs/begin_recording.h"
 
 extern wxMutex g_mutexProtectingCallbackData;
 std::atomic<SNDFILE*> g_sfPlayFile;
@@ -73,7 +72,6 @@ void MainFrame::StopPlayFileToMicIn(void)
         sf_close(g_sfPlayFile.load(std::memory_order_acquire));
         g_sfPlayFile.store(nullptr, std::memory_order_release);
         SetStatusText(wxT(""));
-        VoiceKeyerProcessEvent(VK_PLAY_FINISHED);
     }
     g_mutexProtectingCallbackData.Unlock();
 }
@@ -191,8 +189,6 @@ void MainFrame::StopRecFileFromRadio()
         
         g_mutexProtectingCallbackData.Unlock();
         
-        m_audioRecord->SetValue(false);
-        m_audioRecord->SetBackgroundColour(wxNullColour);
     }
 }
 
@@ -209,145 +205,6 @@ void MainFrame::StopRecFileFromDecoder()
         
         g_mutexProtectingCallbackData.Unlock();
         
-        m_audioRecord->SetValue(false);
-        m_audioRecord->SetBackgroundColour(wxNullColour);
     }
 }
 
-//-------------------------------------------------------------------------
-// OnTogBtnRecord()
-//-------------------------------------------------------------------------
-void MainFrame::OnTogBtnRecord(wxCommandEvent& event)
-{
-    wxUnusedVar(event);
-
-    if (g_sfRecFile != nullptr) 
-    {
-        StopRecFileFromRadio();
-    }
-    else if (g_sfRecDecoderFile != nullptr) 
-    {
-        StopRecFileFromDecoder();
-    }
-    else 
-    {
-        wxString dxCall;
-        auto selected = m_lastReportedCallsignListView->GetFirstSelected();
-        if (wxGetApp().lastSelectedLoggingRow == MainApp::MAIN_WINDOW && selected != -1)
-        {        
-            // Get callsign and RX frequency
-            dxCall = m_lastReportedCallsignListView->GetItemText(selected, 0);
-            log_info("Using %s from main window drop-down list as default recording suffix", (const char*)dxCall.ToUTF8());
-        }
-        
-        BeginRecordingDialog recordDialog(this, dxCall);
-        if (recordDialog.ShowModal() == wxOK)
-        {
-            wxString    soundFile;
-            SF_INFO     sfInfo;
-            auto currentTime = wxDateTime::Now().Format(_("%Y%m%d-%H%M%S"));
-
-            wxString folder;
-            wxString filenameSuffix = currentTime;
-            wxString filenamePrefix;
-            wxString recordingSuffix = recordDialog.getRecordingSuffix();
-            if (recordingSuffix != "")
-            {
-                filenameSuffix += wxString::Format(_("_%s"), recordingSuffix);
-            }
-            if (recordDialog.isRawRecording())
-            {
-                folder = wxGetApp().appConfiguration.quickRecordRawPath;
-                filenamePrefix = _("FDV_FromRadio");
-            }
-            else
-            {
-                folder = wxGetApp().appConfiguration.quickRecordDecodedPath;
-                filenamePrefix = _("FDV_FromDecoder");
-            }
-
-            wxString extension;
-#if !defined(SNDFILE_NO_MP3_SUPPORT)
-            if (recordDialog.isMp3Format())
-            {
-                extension = _("mp3");
-            }
-            else
-#endif // !defined(SNDFILE_NO_MP3_SUPPORT)
-            {
-                extension = _("wav");
-            }
-
-            wxFileName filePath(folder, wxString::Format(_("%s_%s.%s"), filenamePrefix, filenameSuffix, extension));
-            soundFile = filePath.GetFullPath();
-
-            log_info("Recording to %s", (const char*)soundFile.ToUTF8());
-            wxString fileName;
-            wxString tmpString;
-            wxFileName::SplitPath(soundFile, &tmpString, &fileName, &extension);
-
-#if !defined(SNDFILE_NO_MP3_SUPPORT)
-            if (recordDialog.isMp3Format())
-            {
-                sfInfo.format     = SF_FORMAT_MPEG | SF_FORMAT_MPEG_LAYER_III;
-            }
-            else
-#endif // !defined(SNDFILE_NO_MP3_SUPPORT)
-            {
-                sfInfo.format     = SF_FORMAT_WAV | SF_FORMAT_PCM_16;
-            }
-            
-            sfInfo.channels   = 1;
-            sfInfo.samplerate = RECORD_FILE_SAMPLE_RATE;
-
-            g_recFromRadioSamples.store(UINT32_MAX, std::memory_order_release); // record until stopped
-
-            if (!recordDialog.isRawRecording())
-            {
-                g_sfRecDecoderFile = sf_open(soundFile.c_str(), SFM_WRITE, &sfInfo);
-                if(g_sfRecDecoderFile == NULL)
-                {
-                    wxString strErr = sf_strerror(NULL);
-                    wxMessageBox(strErr, wxT("Couldn't open sound file"), wxOK);
-                    m_audioRecord->SetValue(false);
-                    return;
-                }
-
-                SetStatusText(wxT("Recording file ") + soundFile + wxT(" from decoder"), 0);
-                g_recFileFromDecoder = true;
-            }
-            else
-            {
-                g_sfRecFile = sf_open(soundFile.c_str(), SFM_WRITE, &sfInfo);
-                if(g_sfRecFile == NULL)
-                {
-                    wxString strErr = sf_strerror(NULL);
-                    wxMessageBox(strErr, wxT("Couldn't open sound file"), wxOK);
-                    m_audioRecord->SetValue(false);
-                    return;
-                }
-            
-                SetStatusText(wxT("Recording file ") + fileName + wxT(" from radio") , 0);
-                g_sfRecFileFromModulator = g_sfRecFile;
-            
-                if (!g_tx.load(std::memory_order_acquire))
-                {
-                    g_recFileFromModulator = false;
-                    g_recFileFromRadio = true;
-                }
-                else
-                {
-                    g_recFileFromRadio = false;
-                    g_recFileFromModulator = true;
-                }
-            }
-
-            m_audioRecord->SetValue(true);
-            m_audioRecord->SetBackgroundColour(*wxRED);
-        }
-        else
-        {
-            m_audioRecord->SetValue(false);
-        }
-    }
-}

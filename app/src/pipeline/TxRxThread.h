@@ -61,13 +61,12 @@ class BeepStep;
 class TxRxThread
 {
 public:
-    TxRxThread(bool tx, int inputSampleRate, int outputSampleRate, std::shared_ptr<LinkStep> micAudioLink, std::shared_ptr<IRealtimeHelper> helper) 
+    TxRxThread(bool tx, int inputSampleRate, int outputSampleRate, std::shared_ptr<IRealtimeHelper> helper) 
         : m_tx(tx)
         , m_run(1)
         , pipeline_(nullptr)
         , inputSampleRate_(inputSampleRate)
         , outputSampleRate_(outputSampleRate)
-        , equalizedMicAudioLink_(std::move(micAudioLink))
         , helper_(std::move(helper))
         , dataTxInProgress_(false)
     { 
@@ -112,7 +111,6 @@ private:
     std::unique_ptr<AudioPipeline> pipeline_;
     int inputSampleRate_;
     int outputSampleRate_;
-    std::shared_ptr<LinkStep> equalizedMicAudioLink_;
     BeepStep* beepStep_;
     std::shared_ptr<IRealtimeHelper> helper_;
     std::unique_ptr<short[]> inputSamples_;

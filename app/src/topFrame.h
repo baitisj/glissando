@@ -139,9 +139,7 @@ class TopFrame : public wxFrame
         wxButton      *m_BtnReSync;
         wxButton      *m_btnCenterRx;
         
-        wxToggleButton      *m_audioRecord;
         
-        wxButton*     m_logQSO;
 
         wxRadioButton *m_rb700d;
         wxRadioButton *m_rb700e;
@@ -197,16 +195,12 @@ class TopFrame : public wxFrame
         virtual void OnTogBtnLoopTx( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnTogBtnOnOff( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnTogBtnAnalogClick( wxCommandEvent& event ) { event.Skip(); }
-        virtual void OnTogBtnVoiceKeyerClick( wxCommandEvent& event ) { event.Skip(); }
-        virtual void OnTogBtnVoiceKeyerRightClick( wxContextMenuEvent& event ) { event.Skip(); }
 
         virtual void OnTogBtnPTT( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnTogBtnPTTRightClick( wxContextMenuEvent& event ) { event.Skip(); }
 
         
-        virtual void OnTogBtnRecord( wxCommandEvent& event ) { event.Skip(); }
         
-        virtual void OnLogQSO(wxCommandEvent& event) { event.Skip(); }
 
         virtual void OnTogBtnAnalogClickUI(wxUpdateUIEvent& event) { event.Skip(); }
         virtual void OnTogBtnRxIDUI(wxUpdateUIEvent& event ) { event.Skip(); }
@@ -248,12 +242,10 @@ class TopFrame : public wxFrame
         
         virtual void OnTogBtnTune(wxCommandEvent& event) { event.Skip(); }
 
-        void setVoiceKeyerButtonLabel_(wxString filename);
         
     public:
         wxToggleButton* m_togBtnOnOff;
         wxToggleButton* m_togBtnAnalog;
-        wxToggleButton* m_togBtnVoiceKeyer;
         wxToggleButton* m_btnTogPTT;
         wxToggleButton* m_btnTogTune;
         wxAuiNotebook* m_auiNbookCtrl;

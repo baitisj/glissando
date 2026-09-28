@@ -81,8 +81,6 @@ class OptionsDlg : public wxDialog
         wxNotebook  *m_notebook;
         wxNotebookPage *m_reportingTab; // Station: callsign, stations heard log
         wxNotebookPage *m_rigControlTab; // Rig Control
-        wxNotebookPage *m_displayTab; // Waterfall color, other display config
-        wxNotebookPage *m_keyerTab; // Voice Keyer
         wxNotebookPage *m_modemTab; // 700/OFDM/duplex
         wxNotebookPage *m_simulationTab; // testing/interference
         wxNotebookPage *m_debugTab; // Debug
@@ -102,27 +100,6 @@ class OptionsDlg : public wxDialog
         /* Time-Out Timer options */
         wxCheckBox    *m_ckboxTOTTimerEnabled;
         wxTextCtrl    *m_txtTOTTimerSecs;
-        
-        /* Waterfall color */
-        wxRadioButton *m_waterfallColorScheme1; // Multicolored
-        wxRadioButton *m_waterfallColorScheme2; // Black & white
-        wxRadioButton *m_waterfallColorScheme3; // Blue tint?
-
-        /* Spectrum plot averaging */
-        wxComboBox*             m_cbxNumSpectrumAveraging;
-
-        /* Voice Keyer */
-
-        wxButton     *m_buttonChooseVoiceKeyerWaveFilePath;
-        wxTextCtrl   *m_txtCtrlVoiceKeyerWaveFilePath;
-        wxTextCtrl   *m_txtCtrlVoiceKeyerRxPause;
-        wxTextCtrl   *m_txtCtrlVoiceKeyerRepeats;
-
-        /* Quick Record */
-        wxButton     *m_buttonChooseQuickRecordRawPath;
-        wxTextCtrl   *m_txtCtrlQuickRecordRawPath;
-        wxButton     *m_buttonChooseQuickRecordDecodedPath;
-        wxTextCtrl   *m_txtCtrlQuickRecordDecodedPath;
         
         /* test frames, other simulated channel impairments */
 
@@ -149,12 +126,6 @@ class OptionsDlg : public wxDialog
         wxStaticText  *m_textPA1;
         wxStaticText  *m_textPA2;
         wxTextCtrl    *m_txtCtrlFifoSize;
-        wxCheckBox    *m_ckboxTxRxThreadPriority;
-        wxCheckBox    *m_ckboxTxRxDumpTiming;
-        wxCheckBox    *m_ckboxTxRxDumpFifoState;
-        wxCheckBox    *m_ckboxVerbose;
-        wxCheckBox    *m_ckboxFreeDVAPIVerbose;
-        wxCheckBox    *m_experimentalFeatures;
         wxCheckBox    *m_showDecodeStats;
         
         wxButton*     m_sdbSizer5OK;
@@ -185,8 +156,6 @@ class OptionsDlg : public wxDialog
         
         unsigned int  event_in_serial, event_out_serial;
 
-        void OnChooseVoiceKeyerWaveFilePath(wxCommandEvent& event);
-        void OnChooseQuickRecordPath(wxCommandEvent& event);
         void OnChooseCsvLogFilePath(wxCommandEvent& event);
         
         void OnReportingFreqSelectionChange(wxCommandEvent& event);

@@ -72,10 +72,6 @@ public:
     ConfigurationDataElement<int> pttKeyCode;
     ConfigurationDataElement<bool> pttMomentaryMode;
 
-    ConfigurationDataElement<wxString> voiceKeyerWaveFilePath;
-    ConfigurationDataElement<wxString> voiceKeyerWaveFile;
-    ConfigurationDataElement<int> voiceKeyerRxPause;
-    ConfigurationDataElement<int> voiceKeyerRepeats;
     
     ConfigurationDataElement<bool> halfDuplexMode;
     ConfigurationDataElement<bool> multipleReceiveEnabled;
@@ -111,8 +107,6 @@ public:
     ConfigurationDataElement<long> glissandoWindowHeight;
     ConfigurationDataElement<bool> multipleReceiveOnSingleThread;
     
-    ConfigurationDataElement<wxString> quickRecordRawPath;
-    ConfigurationDataElement<wxString> quickRecordDecodedPath;
     
     ConfigurationDataElement<bool> freedv700Clip;
     ConfigurationDataElement<bool> freedv700TxBPF;
@@ -123,21 +117,13 @@ public:
     
     ConfigurationDataElement<bool> snrSlow;
     
-    ConfigurationDataElement<bool> debugVerbose;
-    ConfigurationDataElement<bool> apiVerbose;
     
-    ConfigurationDataElement<int> waterfallColor;
     ConfigurationDataElement<unsigned int> statsResetTimeSecs;
     
     ConfigurationDataElement<int> currentFreeDVMode;
     
-    ConfigurationDataElement<int> currentSpectrumAveraging;
     
-    ConfigurationDataElement<bool> experimentalFeatures;
-    ConfigurationDataElement<wxString> tabLayout;
 
-    ConfigurationDataElement<bool> monitorVoiceKeyerAudio;
-    ConfigurationDataElement<float> monitorVoiceKeyerAudioVol;
     ConfigurationDataElement<bool> monitorTxAudio;
     ConfigurationDataElement<float> monitorTxAudioVol;
 

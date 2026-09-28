@@ -586,31 +586,6 @@ TopFrame::TopFrame(wxWindow* parent, wxWindowID id, const wxString& title, const
     leftSizer->Add(sbSizer3_33,0, static_cast<int>(wxALL)|static_cast<int>(wxEXPAND)|wxFIXED_MINSIZE, 2);
 
     //------------------------------
-    // Audio Recording/Playback
-    //------------------------------
-    wxStaticBox* audioBox = new wxStaticBox(m_panel, wxID_ANY, _("Audio Recording"), wxDefaultPosition, wxSize(100,-1));
-    wxStaticBoxSizer* sbSizerAudioRecordPlay = new wxStaticBoxSizer(audioBox, wxVERTICAL);
-    
-    m_audioRecord = new wxToggleButton(audioBox, wxID_ANY, _("Record"), wxDefaultPosition, wxDefaultSize, 0);
-    m_audioRecord->SetToolTip(_("Records incoming over the air signals as well as anything transmitted."));
-    sbSizerAudioRecordPlay->Add(m_audioRecord, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_HORIZONTAL, 5);
-   
-    leftSizer->Add(sbSizerAudioRecordPlay, 0, static_cast<int>(wxALL)|static_cast<int>(wxEXPAND), 2);
-
-    //------------------------------
-    // QSO logging
-    //------------------------------
-    wxStaticBox* logBox = new wxStaticBox(m_panel, wxID_ANY, _("Logging"), wxDefaultPosition, wxSize(100,-1));
-    wxStaticBoxSizer* sbSizerLogging = new wxStaticBoxSizer(logBox, wxVERTICAL);
-    
-    m_logQSO = new wxButton(logBox, wxID_ANY, _("Log QSO"), wxDefaultPosition, wxDefaultSize, 0);
-    m_logQSO->SetToolTip(_("Logs most recent QSO."));
-    m_logQSO->Disable();
-    sbSizerLogging->Add(m_logQSO, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_HORIZONTAL, 5);
-    
-    leftSizer->Add(sbSizerLogging, 0, static_cast<int>(wxALL)|static_cast<int>(wxEXPAND), 2);
-
-    //------------------------------
     // BER Frames box
     //------------------------------
 
@@ -869,13 +844,6 @@ TopFrame::TopFrame(wxWindow* parent, wxWindowID id, const wxString& title, const
     m_btnTogTune->Enable(false);
 
     //------------------------------
-    // Voice Keyer Toggle
-    //------------------------------
-    m_togBtnVoiceKeyer = new wxToggleButton(controlBox, wxID_ANY, _("Start Voice &Keyer"), wxDefaultPosition, wxDefaultSize, 0);
-    m_togBtnVoiceKeyer->SetToolTip(_("Toggle Voice Keyer. Right-click for additional options."));
-    sbSizer5->Add(m_togBtnVoiceKeyer, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
-
-    //------------------------------
     // PTT button: Toggle Transmit/Receive mode
     //------------------------------
     m_btnTogPTT = new wxToggleButton(controlBox, wxID_ANY, _("&XMIT"), wxDefaultPosition, wxDefaultSize, 0);
@@ -905,8 +873,7 @@ TopFrame::TopFrame(wxWindow* parent, wxWindowID id, const wxString& title, const
     
     m_togBtnOnOff->MoveBeforeInTabOrder(m_togBtnAnalog);
     m_togBtnAnalog->MoveBeforeInTabOrder(m_btnTogTune);
-    m_btnTogTune->MoveBeforeInTabOrder(m_togBtnVoiceKeyer);
-    m_togBtnVoiceKeyer->MoveBeforeInTabOrder(m_btnTogPTT);
+    m_btnTogTune->MoveBeforeInTabOrder(m_btnTogPTT);
     
     //-------------------
     // Connect Events
@@ -954,13 +921,10 @@ TopFrame::TopFrame(wxWindow* parent, wxWindowID id, const wxString& title, const
 
     m_ckboxSNR->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(TopFrame::OnCheckSNRClick), NULL, this);
 
-    m_audioRecord->Connect(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTogBtnRecord), NULL, this);
 
-    m_logQSO->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnLogQSO), NULL, this);
     
     m_togBtnOnOff->Connect(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTogBtnOnOff), NULL, this);
     m_togBtnAnalog->Connect(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTogBtnAnalogClick), NULL, this);
-    m_togBtnVoiceKeyer->Connect(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTogBtnVoiceKeyerClick), NULL, this);
     m_btnTogPTT->Connect(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTogBtnPTT), NULL, this);
 
 #if defined(__WXGTK__)
@@ -970,10 +934,8 @@ TopFrame::TopFrame(wxWindow* parent, wxWindowID id, const wxString& title, const
     // button-up already; OSX uses ctrl-click), so this is GTK-specific.
     // Confirmed present on both wxGTK 3.2 and 3.3+, unlike the windowless
     // widget case below, so no version gate here.
-    m_togBtnVoiceKeyer->Bind(wxEVT_RIGHT_UP, [this](wxMouseEvent&) { wxContextMenuEvent ctx; OnTogBtnVoiceKeyerRightClick(ctx); });
     m_btnTogPTT->Bind(wxEVT_RIGHT_UP, [this](wxMouseEvent&) { wxContextMenuEvent ctx; OnTogBtnPTTRightClick(ctx); });
 #else
-    m_togBtnVoiceKeyer->Connect(wxEVT_CONTEXT_MENU, wxContextMenuEventHandler(TopFrame::OnTogBtnVoiceKeyerRightClick), NULL, this);
     m_btnTogPTT->Connect(wxEVT_CONTEXT_MENU, wxContextMenuEventHandler(TopFrame::OnTogBtnPTTRightClick), NULL, this);
 #endif
 
@@ -1086,18 +1048,14 @@ TopFrame::~TopFrame()
 
     m_togBtnOnOff->Disconnect(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTogBtnOnOff), NULL, this);
     m_togBtnAnalog->Disconnect(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTogBtnAnalogClick), NULL, this);
-    m_togBtnVoiceKeyer->Disconnect(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTogBtnVoiceKeyerClick), NULL, this);
     m_btnTogPTT->Disconnect(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTogBtnPTT), NULL, this);
 #if !defined(__WXGTK__)
-    m_togBtnVoiceKeyer->Disconnect(wxEVT_CONTEXT_MENU, wxContextMenuEventHandler(TopFrame::OnTogBtnVoiceKeyerRightClick), NULL, this);
     m_btnTogPTT->Disconnect(wxEVT_CONTEXT_MENU, wxContextMenuEventHandler(TopFrame::OnTogBtnPTTRightClick), NULL, this);
 #endif
     
     m_btnCenterRx->Disconnect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnCenterRx), NULL, this);
 
-    m_audioRecord->Disconnect(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTogBtnRecord), NULL, this);
     
-    m_logQSO->Disconnect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnLogQSO), NULL, this);
 
     m_rb1600->Disconnect(wxEVT_RADIOBUTTON, wxCommandEventHandler(TopFrame::OnChangeTxMode), NULL, this);
     m_rb700d->Disconnect(wxEVT_RADIOBUTTON, wxCommandEventHandler(TopFrame::OnChangeTxMode), NULL, this);
@@ -1141,51 +1099,3 @@ TopFrame::~TopFrame()
     m_btnTogTune->Disconnect(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTogBtnTune), NULL, this);
 }
 
-void TopFrame::setVoiceKeyerButtonLabel_(wxString filename)
-{
-    wxString vkLabel = _("Start Voice &Keyer");
-    int vkLabelWidth = 0;
-    int filenameWidth = 0;
-    int tmp = 0;
-    
-    wxSize buttonSize = m_togBtnVoiceKeyer->GetSize();
-    vkLabelWidth = buttonSize.GetWidth() * 0.95;
-    m_togBtnVoiceKeyer->GetTextExtent(filename, &filenameWidth, &tmp);
-        
-    // Truncate filename as required to ensure button isn't made wider than needed.
-    bool isTruncated = false;
-    while (filename.size() > 1 && filenameWidth > vkLabelWidth)
-    {
-        isTruncated = true;
-        filename = filename.Mid(0, filename.size() - 1);
-        
-        wxString tmpString = filename + _("...");
-        m_togBtnVoiceKeyer->GetTextExtent(tmpString, &filenameWidth, &tmp);
-    }
-    
-    if (filename.size() > 0)
-    {
-        m_togBtnVoiceKeyer->SetLabel(vkLabel + _("\n") + filename + (isTruncated ? _("...") : _("")));
-    }
-    else
-    {
-        m_togBtnVoiceKeyer->SetLabel(vkLabel);
-    }
-    
-    // Resize button height as needed.
-    wxSize currentSize = m_togBtnVoiceKeyer->GetSize();
-    wxSize bestSize = m_togBtnVoiceKeyer->GetBestSize();
-    currentSize.SetHeight(bestSize.GetHeight());
-    m_togBtnVoiceKeyer->SetSize(currentSize);
-    m_togBtnVoiceKeyer->Refresh();
-    
-    // XXX - wxWidgets doesn't handle button height changes properly until the user resizes 
-    // the window (even if only by a pixel or two). As a really hacky workaround, we 
-    // emulate this behavior when changing the button height.
-    wxSize winSize = GetSize();
-    SetSize(winSize.GetWidth(), winSize.GetHeight());
-    SetSize(winSize.GetWidth(), winSize.GetHeight() - 1);
-    SetSize(winSize.GetWidth(), winSize.GetHeight());
-        
-    log_info("Set voice keyer button label to %s", (const char*)m_togBtnVoiceKeyer->GetLabel().ToUTF8());
-}

@@ -1,7 +1,6 @@
 add_library(fdv_gui_util STATIC
     LabelOverrideAccessible.cpp
     NameOverrideAccessible.cpp
-    TabLayoutSerializer.cpp
     wxListViewComboPopup.cpp
     WindowPositionRestore.cpp)
 
