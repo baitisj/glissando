@@ -346,12 +346,6 @@ void MainFrame::OnToolsComCfgUI(wxUpdateUIEvent& event)
 void MainFrame::onFrequencyModeChange_(IRigFrequencyController*, uint64_t freq, IRigFrequencyController::Mode mode)
 {
     CallAfter([&, mode, freq]() {
-        if (firstFreqUpdateOnConnect_)
-        {
-            firstFreqUpdateOnConnect_ = false;
-            return;
-        }
-
         // Update string value.
         switch(mode)
         {
@@ -420,10 +414,10 @@ void MainFrame::onFrequencyModeChange_(IRigFrequencyController*, uint64_t freq, 
             m_txtModeStatus->SetForegroundColour(wxColor(*wxRED));
         }
 
-        // Update frequency box
-        if (!suppressFreqModeUpdates_ && (
-            !wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled ||
-            !wxGetApp().appConfiguration.reportingConfiguration.manualFrequencyReporting))
+        // The radio is the source of truth for its frequency: whatever it
+        // reports is what the app shows and uses, whether the operator turned
+        // the dial or another program (rigctl, a logger) retuned it.
+        if (!suppressFreqModeUpdates_)
         {
             // wxString::Format() doesn't respect locale but wxNumberFormatter should. Use the latter instead.
             wxString freqString;            
@@ -471,17 +465,26 @@ void MainFrame::onFrequencyModeChange_(IRigFrequencyController*, uint64_t freq, 
 
 void MainFrame::onRadioConnected_(IRigController*)
 {
-    if (wxGetApp().rigFrequencyController && 
+    // The radio keeps the frequency it is on, and the app picks it up from
+    // the first poll. Only a frequency the operator chose in the app while
+    // the radio was not connected is sent to it now. The mode is the
+    // operator's to set on the radio.
+    if (operatorFrequencyPending_.exchange(false) &&
+        wxGetApp().rigFrequencyController && 
         (wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqModeChanges || wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqChangesOnly) &&
         wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency > 0)
     {
-        // Suppress the frequency update message that will occur immediately after
-        // connect; this will prevent overwriting of whatever's in the text box.
-        firstFreqUpdateOnConnect_ = true;
-
-        // Set the frequency pre-selected by the user before start. The mode
-        // is the operator's to set on the radio.
         wxGetApp().rigFrequencyController->setFrequency(wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency);
+    }
+}
+
+void MainFrame::refreshRigFrequencyBeforeKeying_()
+{
+    // Commands to the radio run in order, so this read lands before the PTT
+    // command queued right after it.
+    if (wxGetApp().rigFrequencyController != nullptr && wxGetApp().rigFrequencyController->isConnected())
+    {
+        wxGetApp().rigFrequencyController->requestCurrentFrequencyMode();
     }
 }
 
@@ -520,13 +523,12 @@ bool MainFrame::OpenHamlibRig() {
         auto tmp = std::make_shared<HamlibRigController>(
             rig, (const char*)port.mb_str(wxConvUTF8), serial_rate, wxGetApp().appConfiguration.rigControlConfiguration.hamlibIcomCIVAddress,
             pttType, pttType == HamlibRigController::PTT_VIA_CAT || pttType == HamlibRigController::PTT_VIA_NONE ? (const char*)port.mb_str(wxConvUTF8) : (const char*)pttPort.mb_str(wxConvUTF8),
-            (wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqModeChanges || wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqChangesOnly),
+            false, // leave the radio where it is on stop, rather than on the frequency it had at start
             true, // frequency only: the mode is the operator's
             wxGetApp().appConfiguration.rigControlConfiguration.hamlibForceRTSOn,
             wxGetApp().appConfiguration.rigControlConfiguration.hamlibForceDTROn);
 
         // Hamlib also controls PTT.
-        firstFreqUpdateOnConnect_ = false;
         wxGetApp().rigFrequencyController = tmp;
         wxGetApp().rigPttController = tmp;
         
@@ -1510,6 +1512,10 @@ void MainFrame::togglePTT(void) {
     auto newTx = !wasInTx;
     if (wxGetApp().rigPttController != nullptr && wxGetApp().rigPttController->isConnected())
     {
+        // The radio is not polled while it transmits, so read its frequency
+        // once more just before keying: a retune in the last second before
+        // a burst would otherwise not show until the burst ends.
+        if (newTx) refreshRigFrequencyBeforeKeying_();
         wxGetApp().rigPttController->ptt(newTx);
     }
 
@@ -1650,6 +1656,7 @@ void MainFrame::OnTogBtnTune(wxCommandEvent&)
     // Update PTT state
     if (wxGetApp().rigPttController != nullptr && wxGetApp().rigPttController->isConnected()) 
     {
+        if (newTx) refreshRigFrequencyBeforeKeying_();
         wxGetApp().rigPttController->ptt(newTx);
     }
 
@@ -1963,14 +1970,28 @@ void MainFrame::OnChangeReportFrequency( wxCommandEvent& event )
         {
             ptr->freqChange(wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency);
         }
-        
-        if (wxGetApp().rigFrequencyController != nullptr && 
-            wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency > 0 && 
-            (wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqModeChanges || wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqChangesOnly))
+    }
+
+    // Only a frequency the operator entered or picked retunes the radio.
+    // The box also changes when the radio reports a new frequency and
+    // when it loses focus (as it does when transmitting disables it);
+    // sending those back could put the radio on a frequency it has
+    // since been turned away from. An operator's choice goes to the radio even
+    // when the box already shows it, in case the radio moved meanwhile.
+    bool operatorChoice = event.GetEventType() == wxEVT_TEXT_ENTER || event.GetEventType() == wxEVT_COMBOBOX;
+    if (operatorChoice &&
+        wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency > 0 && 
+        (wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqModeChanges || wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqChangesOnly))
+    {
+        if (wxGetApp().rigFrequencyController != nullptr && wxGetApp().rigFrequencyController->isConnected())
         {
             // Request the frequency change on the radio side; the mode is
             // left as the operator set it.
             wxGetApp().rigFrequencyController->setFrequency(wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency);
+        }
+        else
+        {
+            operatorFrequencyPending_ = true;
         }
     }
 
@@ -1992,7 +2013,11 @@ void MainFrame::OnChangeReportFrequency( wxCommandEvent& event )
 
 void MainFrame::OnReportFrequencySetFocus(wxFocusEvent& event)
 {
-    suppressFreqModeUpdates_ = true;
+    // Hold off the radio's reports only while someone can type in the box.
+    // The main window stays hidden behind the Glissando console, and a box
+    // that took focus there would otherwise stop the app following the
+    // radio until it next lost focus.
+    suppressFreqModeUpdates_ = IsShown();
     TopFrame::OnReportFrequencySetFocus(event);
 }
 

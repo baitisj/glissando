@@ -1234,6 +1234,7 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("FreeDV ")
 
     m_zoom              = 1.;
     suppressFreqModeUpdates_ = false;
+    operatorFrequencyPending_ = false;
     lastBand_ = BAND_OTHER;
     
     tools->AppendSeparator();
@@ -2892,15 +2893,9 @@ void MainFrame::performFreeDVOn_()
                 }
     #endif // defined(WIN32)
                 
-                // Set the frequency pre-selected by the user before start. The
-                // mode is the operator's to set on the radio.
-                if (wxGetApp().rigFrequencyController && 
-                    (wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqModeChanges || wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqChangesOnly) &&
-                    wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency > 0)
-                {
-                    wxGetApp().rigFrequencyController->setFrequency(wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency);
-                }
-                    
+                // The radio keeps whatever frequency it is on; see
+                // onRadioConnected_() for the one exception.
+
                 // Initialize PSK Reporter reporting.
                 if (wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled)
                 {        
