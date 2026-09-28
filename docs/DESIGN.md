@@ -210,6 +210,10 @@ tries the three best sync candidates, which recovers most of the rest).
 The upside is that Glissando timing is precise enough to measure
 multipath delay; see the roadmap.
 
+Each keying also opens and closes with a chord of every note in the
+scale. It is there for the ear; the receiver syncs on the motif alone. See
+[CHORDS.md](CHORDS.md) for why, with measurements.
+
 ### 3.5 FEC and framing
 
 - Payload: 77 bits, the same size and so the same message set as FT8/FT4

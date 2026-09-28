@@ -217,9 +217,10 @@ void GlissandoScope::addSent(const GlissandoScopeSent& frame)
     if (frame.melody.empty()) return;
     // A second voice sings alongside the first; anything else follows on
     // from what is queued, or starts now.
-    double offset = frame.voice > 0 ? sendStart_ : std::max(sendEnd_, sendClock_);
+    // An opening chord goes before the first frame, a closing one after the last.
+    double offset = frame.voice > 0 ? sendStart_ : std::max(sendEnd_, sendClock_) + frame.leadSeconds;
     if (frame.voice == 0) sendStart_ = offset;
-    sendEnd_ = std::max(sendEnd_, offset + frame.symbolSeconds * frame.melody.size());
+    sendEnd_ = std::max(sendEnd_, offset + frame.symbolSeconds * frame.melody.size() + frame.tailSeconds);
     sending_.push_back(Sending{frame, offset, 0});
 }
 

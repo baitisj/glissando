@@ -196,6 +196,57 @@ void testMelody()
     CHECK(isMotifSymbol(0) && isMotifSymbol(45) && !isMotifSymbol(46) && isMotifSymbol(85));
 }
 
+// Power of x at hz (a Goertzel over the whole buffer), per sample.
+double tonePower(const std::vector<float>& x, double hz)
+{
+    double re = 0.0, im = 0.0;
+    for (size_t n = 0; n < x.size(); n++)
+    {
+        double a = 2.0 * 3.14159265358979323846 * hz * (double)n / SAMPLE_RATE_HZ;
+        re += x[n] * std::cos(a);
+        im -= x[n] * std::sin(a);
+    }
+    return (re * re + im * im) / ((double)x.size() * x.size());
+}
+
+void testChord()
+{
+    for (int gear = MIN_GEAR; gear <= MAX_GEAR; gear++)
+    {
+        ModemSettings settings;
+        settings.gear = gear;
+        settings.tuningOffsetHz = 3.0;
+        std::vector<float> c = chord(settings);
+        const GearInfo& info = gearInfo(gear);
+        CHECK(c.size() == (size_t)std::lround(4 * info.symbolSeconds * SAMPLE_RATE_HZ));
+        CHECK(std::fabs(chordSeconds(gear) - 4 * info.symbolSeconds) < 1e-12);
+        float peak = 0.0f;
+        for (float v : c) peak = std::max(peak, std::fabs(v));
+        CHECK(std::fabs(peak - 1.0f) < 1e-6f);
+        CHECK(std::fabs(c.front()) < 1e-6f && std::fabs(c.back()) < 1e-6f);
+
+        // Every note of every voice sounds, about equally, and nothing
+        // between them.
+        double lowest = 1e9, highest = 0.0;
+        for (int voice = 0; voice < info.voices; voice++)
+        {
+            for (double hz : scaleNotes(Scale::Pentatonic, voice))
+            {
+                double p = tonePower(c, hz + 3.0);
+                lowest = std::min(lowest, p);
+                highest = std::max(highest, p);
+            }
+        }
+        CHECK(highest < 2.0 * lowest);
+        CHECK(tonePower(c, 605.0) < 0.01 * lowest);
+
+        std::vector<float> frame = modulate({Payload{}}, settings);
+        if (gear == 4)
+            printf("chord: %.2f s at Presto, %.1f dB below a frame's power\n", chordSeconds(gear),
+                   10.0 * std::log10(meanSquare(frame) / meanSquare(c)));
+    }
+}
+
 } // namespace
 
 int main()
@@ -205,6 +256,7 @@ int main()
     testScales();
     testTuningOffset();
     testMelody();
+    testChord();
     if (failures == 0) printf("glissando modulation tests passed\n");
     return failures == 0 ? 0 : 1;
 }

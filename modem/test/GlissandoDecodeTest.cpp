@@ -257,6 +257,72 @@ void testSilenceAround()
     CHECK(falseDecodes == 0);
 }
 
+// A transmission opened and closed with the chord: the frames decode as
+// well as bare ones, the search window taking in the opening chord, and a
+// chord heard alone decodes as nothing.
+void testChordBookends()
+{
+    for (int gear = 4; gear <= MAX_GEAR; gear++)
+    {
+        const GearInfo& info = gearInfo(gear);
+        int decoded = 0, falseDecodes = 0;
+        const int trials = 3;
+        for (int i = 0; i < trials; i++)
+        {
+            Random rng(0xC4011D + 100 * gear + i);
+            std::vector<Payload> payloads;
+            for (int v = 0; v < info.voices; v++) payloads.push_back(rng.payload());
+            ModemSettings tx;
+            tx.gear = gear;
+            std::vector<float> frame = modulate(payloads, tx);
+            std::vector<float> c = chord(tx);
+            std::vector<float> x = c;
+            x.insert(x.end(), frame.begin(), frame.end());
+            x.insert(x.end(), c.begin(), c.end());
+
+            size_t lead = (size_t)(rng.uniform(0.3, 1.2) * SAMPLE_RATE_HZ);
+            std::vector<float> buffer = pad(x, lead, (size_t)(SEARCH_SECONDS * SAMPLE_RATE_HZ));
+            frequencyShift(buffer, rng.uniform(-15.0, 15.0));
+            addNoise(buffer, THRESHOLD_50_DB[gear - 1] + MARGIN_DB, meanSquare(frame), rng);
+
+            ModemSettings rx = tx;
+            rx.anyScale = true;
+            long long start = (long long)(lead + c.size());
+            std::vector<Decode> d = receive(buffer.data(), buffer.size(), rx, start - (long long)c.size(),
+                                            start + (long long)(0.5 * SAMPLE_RATE_HZ));
+            bool all = d.size() == payloads.size();
+            for (size_t v = 0; v < d.size() && v < payloads.size(); v++)
+            {
+                if (!d[v].ok || d[v].payload != payloads[v]) all = false;
+                if (d[v].ok && d[v].payload != payloads[v]) falseDecodes++;
+                if (d[v].ok && d[v].payload == payloads[v]) CHECK(std::llabs(d[v].startSample - start) <= 8);
+            }
+            decoded += all;
+        }
+        printf("G%d with chords at %.1f dB: %d/%d decoded\n", gear, THRESHOLD_50_DB[gear - 1] + MARGIN_DB,
+               decoded, trials);
+        CHECK(decoded >= trials - 1);
+        CHECK(falseDecodes == 0);
+    }
+
+    ModemSettings tx;
+    tx.gear = 4;
+    std::vector<float> c = chord(tx);
+    std::vector<float> alone;
+    for (int i = 0; i < 20; i++) alone.insert(alone.end(), c.begin(), c.end());
+    alone = pad(alone, SAMPLE_RATE_HZ, (size_t)gearInfo(4).frameSamples());
+    int found = 0;
+    for (int gear = MIN_GEAR; gear <= MAX_GEAR; gear++)
+    {
+        ModemSettings rx;
+        rx.gear = gear;
+        rx.anyScale = true;
+        for (const Decode& d : receive(alone.data(), alone.size(), rx, 0, 3 * SAMPLE_RATE_HZ)) found += d.ok;
+    }
+    printf("chords alone: %d decodes\n", found);
+    CHECK(found == 0);
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -269,6 +335,7 @@ int main(int argc, char** argv)
     if (argc > 1) testPythonClip(argv[1]);
     testNoiseOnly();
     testSilenceAround();
+    testChordBookends();
     printf("decode tests took %.1f s\n", secondsSince(start));
     if (failures == 0) printf("glissando decode tests passed\n");
     return failures == 0 ? 0 : 1;

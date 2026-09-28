@@ -126,6 +126,7 @@ public:
         double tuningOffsetHz = 0.0;
         bool listenAllGears = true;
         bool listenAllScales = true;    // hear stations singing in any scale, not just ours
+        bool chords = true;             // open and close each keying with the scale's chord
     };
 
     void setGlissando(const GlissandoConfig& config);
@@ -173,6 +174,8 @@ public:
         int voice = 0;
         std::array<double, Glissando::NOTES> notesHz{};    // tuning included
         std::array<int, Glissando::SYMBOLS_PER_FRAME> melody{};
+        double leadSeconds = 0.0;       // the opening chord, sung before this frame
+        double tailSeconds = 0.0;       // the closing chord, sung after it
     };
 
     static constexpr size_t GLISSANDO_SENT_LIMIT = 256;

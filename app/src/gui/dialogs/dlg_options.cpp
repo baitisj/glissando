@@ -552,6 +552,14 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
           "frequency; it still receives."));
     sbSizer_textChat->Add(m_ckboxTextChatUsDataSegmentsOnly, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
 
+    m_ckboxGlissandoChords = new wxCheckBox(
+        sb_textChat, wxID_ANY, _("Open and close each Glissando transmission with a chord"),
+        wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
+    m_ckboxGlissandoChords->SetToolTip(
+        _("Every note of the scale at once for one bar of the tempo, before and after the frames. "
+          "For the ear only: the receiver finds frames without it."));
+    sbSizer_textChat->Add(m_ckboxGlissandoChords, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
+
     // Data2G: an external modem program the operator runs; chat reaches it
     // over TCP (docs/DATA2G.md).
     m_ckboxData2G = new wxCheckBox(
@@ -810,7 +818,8 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     m_ckHalfDuplex->MoveBeforeInTabOrder(m_ckboxMultipleRx);
     m_ckboxMultipleRx->MoveBeforeInTabOrder(m_ckboxSingleRxThread);
     m_ckboxSingleRxThread->MoveBeforeInTabOrder(m_ckboxTextChatUsDataSegmentsOnly);
-    m_ckboxTextChatUsDataSegmentsOnly->MoveBeforeInTabOrder(m_statsResetTime);
+    m_ckboxTextChatUsDataSegmentsOnly->MoveBeforeInTabOrder(m_ckboxGlissandoChords);
+    m_ckboxGlissandoChords->MoveBeforeInTabOrder(m_statsResetTime);
     
     m_ckboxTestFrame->MoveBeforeInTabOrder(m_ckboxChannelNoise);
     m_ckboxChannelNoise->MoveBeforeInTabOrder(m_txtNoiseSNR);
@@ -1007,6 +1016,7 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         m_ckboxMultipleRx->SetValue(wxGetApp().appConfiguration.multipleReceiveEnabled);
         m_ckboxSingleRxThread->SetValue(wxGetApp().appConfiguration.multipleReceiveOnSingleThread);
         m_ckboxTextChatUsDataSegmentsOnly->SetValue(wxGetApp().appConfiguration.textChatUsDataSegmentsOnly);
+        m_ckboxGlissandoChords->SetValue(wxGetApp().appConfiguration.glissandoChords);
         m_ckboxData2G->SetValue(wxGetApp().appConfiguration.data2gEnabled);
         m_txtData2GHost->SetValue(wxGetApp().appConfiguration.data2gHost);
         m_txtData2GKissPort->SetValue(wxString::Format("%d", wxGetApp().appConfiguration.data2gKissPort.get()));
@@ -1162,6 +1172,7 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         wxGetApp().appConfiguration.multipleReceiveEnabled = m_ckboxMultipleRx->GetValue();
         wxGetApp().appConfiguration.multipleReceiveOnSingleThread = m_ckboxSingleRxThread->GetValue();
         wxGetApp().appConfiguration.textChatUsDataSegmentsOnly = m_ckboxTextChatUsDataSegmentsOnly->GetValue();
+        wxGetApp().appConfiguration.glissandoChords = m_ckboxGlissandoChords->GetValue();
         wxGetApp().appConfiguration.data2gEnabled = m_ckboxData2G->GetValue();
         wxString data2gHost = m_txtData2GHost->GetValue().Strip(wxString::both);
         wxGetApp().appConfiguration.data2gHost = data2gHost.IsEmpty() ? wxString("127.0.0.1") : data2gHost;
