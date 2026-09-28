@@ -34,6 +34,7 @@
 
 #include <cstdio>
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -362,6 +363,92 @@ void testPingAndPong()
     CHECK(pong.text.find("VK3ABC >> W1AW : PONG!") == 0);
     CHECK(pong.text.find("heard you at 8.0 dB") != std::string::npos);
     CHECK(sender.protocol.pendingCount() == 0);
+}
+
+// Glissando timings: Allegro frames are 13.76 s and Adagio 55.04 s; the
+// receiver reports a frame a quarter frame and a second after it ends.
+constexpr double ALLEGRO_FRAME = 13.76;
+constexpr double ADAGIO_FRAME = 55.04;
+double glissandoLatency(double frame) { return frame / 4.0 + 1.0; }
+
+// Given the slowest tempo an answer could come in, the waits cover an answer
+// at our own tempo with the far end's turnaround jitter, and never end before
+// the first frame of an answer at the slowest tempo could have been decoded.
+// Without it (as Data2G calls it) the timings are as they were.
+void testAirTimingWaitsForTheSlowestAnswer()
+{
+    auto ms = [](double seconds) { return (int)std::lround(seconds * 1000.0); };
+    auto keysAfter = [&](double ourLatency, double farFrame) {
+        return ms(ourLatency + farFrame / 2.0) + TURNAROUND_AFTER_RX_MILLISECONDS + TURNAROUND_JITTER_MILLISECONDS;
+    };
+
+    AirTiming own = AirTiming::forFrameSeconds(ALLEGRO_FRAME, 9, glissandoLatency(ALLEGRO_FRAME));
+    CHECK(own.ackTimeoutMs == 52900); // unchanged, as logged on the air
+    CHECK(own.pingTimeoutMs == 52900);
+
+    double allegroLatency = glissandoLatency(ALLEGRO_FRAME);
+    double adagioLatency = glissandoLatency(ADAGIO_FRAME);
+    AirTiming mixed = AirTiming::forFrameSeconds(ALLEGRO_FRAME, 9, allegroLatency, ADAGIO_FRAME, adagioLatency);
+    int firstAdagioFrame = keysAfter(allegroLatency, ADAGIO_FRAME) + ms(ADAGIO_FRAME + adagioLatency);
+    CHECK(mixed.ackTimeoutMs == ACK_TIMEOUT_MILLISECONDS + firstAdagioFrame);
+    CHECK(mixed.pingTimeoutMs == PING_TIMEOUT_MILLISECONDS + firstAdagioFrame);
+    CHECK(mixed.replyWindowMs == REPLY_WINDOW_MILLISECONDS + firstAdagioFrame);
+    CHECK(mixed.ackTimeoutMs > 115000); // 53 s before
+
+    // At Adagio a whole answer at our tempo, with the far end's jitter, is
+    // the longer wait: two frames of signalling after up to 29.5 s of it.
+    AirTiming adagio = AirTiming::forFrameSeconds(ADAGIO_FRAME, 9, adagioLatency, ADAGIO_FRAME, adagioLatency);
+    int adagioAnswer = keysAfter(adagioLatency, ADAGIO_FRAME) + ms(2 * ADAGIO_FRAME + adagioLatency);
+    CHECK(adagio.ackTimeoutMs == ACK_TIMEOUT_MILLISECONDS + adagioAnswer);
+    CHECK(adagio.ackTimeoutMs > 156100); // what it was, which the jitter could outrun
+}
+
+// A ping sent at Allegro while listening at every tempo, answered at Adagio:
+// the answer's first frame is heard 80 s after the ping ended, well past the
+// 53 s an Allegro answer takes, and the channel stays busy until the pong is
+// complete. The ping succeeds instead of giving up while the answer arrives.
+void testPingWaitsForAnAnswerAtASlowerTempo()
+{
+    AirTiming timing = AirTiming::forFrameSeconds(ALLEGRO_FRAME, 9, glissandoLatency(ALLEGRO_FRAME),
+                                                  ADAGIO_FRAME, glissandoLatency(ADAGIO_FRAME));
+    Station sender("W1AW");
+    Station receiver("VK3ABC");
+    sender.protocol.setAirTiming(timing);
+    receiver.protocol.setAirTiming(timing);
+
+    std::string error;
+    CHECK(sender.protocol.sendPing("VK3ABC", error));
+    sender.completeOneTransmission();
+    receiver.receiveFrom(sender.transport, 8.0f);
+
+    for (int s = 0; s < 80; s++)
+    {
+        sender.nowMs += 1000;
+        sender.protocol.tick();
+    }
+    CHECK(sender.protocol.pendingCount() == 1);
+
+    sender.transport.channelBusy = true; // the answer's first frame decodes
+    for (int s = 0; s < 70; s++)
+    {
+        sender.nowMs += 1000;
+        sender.protocol.tick();
+    }
+    CHECK(sender.protocol.pendingCount() == 1);
+
+    receiver.completeOneTransmission();
+    sender.receiveFrom(receiver.transport, 4.0f);
+    sender.transport.channelBusy = false;
+    sender.protocol.tick();
+
+    CHECK(sender.protocol.pendingCount() == 0);
+    bool noResponse = false;
+    for (const TextMessage& message : sender.observer.added)
+    {
+        if (message.text.find("no response") != std::string::npos) noResponse = true;
+    }
+    CHECK(!noResponse);
+    CHECK(sender.observer.added.back().text.find("VK3ABC >> W1AW : PONG!") == 0);
 }
 
 void testPingTimesOut()
@@ -1797,6 +1884,8 @@ int main()
     testDeliveryChip();
     testPingAndPong();
     testPingTimesOut();
+    testAirTimingWaitsForTheSlowestAnswer();
+    testPingWaitsForAnAnswerAtASlowerTempo();
     testAutoReplyCanBeDisabled();
     testAckWaitDoesNotBlockTheQueue();
     testTurnaroundKeepsStationsOffEachOther();

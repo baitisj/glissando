@@ -255,8 +255,19 @@ struct AirTiming
     // Carrier sense on such a modem only sees a burst once its first frame
     // decodes, so every wait for the far end is sized to the whole of the
     // burst it is waiting for, not to a turnaround.
+    //
+    // The far end answers at its own tempo, not ours, and after a jitter of
+    // its own. replyFrameSeconds and replyDecodeLatencySeconds describe the
+    // slowest tempo we would hear an answer in. Given them, a wait for an
+    // answer covers one at our tempo with the far end's jitter, and never
+    // gives up before the first frame of one at the slowest tempo could have
+    // been decoded; once it has, the channel is busy and the protocol holds
+    // its timers for the rest. Without them the timings are as they were,
+    // which is what Data2G uses.
     static AirTiming forFrameSeconds(double frameSeconds, int bytesPerFrame,
-                                     double decodeLatencySeconds);
+                                     double decodeLatencySeconds,
+                                     double replyFrameSeconds = 0.0,
+                                     double replyDecodeLatencySeconds = 0.0);
 };
 
 // What the station is currently waiting to hear back, which is what the chat

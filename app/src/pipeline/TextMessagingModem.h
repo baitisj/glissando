@@ -216,6 +216,11 @@ private:
     std::vector<GlissandoHeard> glissandoHeard_;
     std::unique_ptr<Glissando::StreamingReceiver> glissandoRx_;
     std::atomic<bool> glissandoOn_;
+
+    // The end of the frame that completed the last burst heard, as the
+    // receiver counts samples; -2 for none. While it is still the newest
+    // frame heard, that burst is over and the channel is free.
+    std::atomic<long long> completedFrameEnd_{-2};
 };
 
 // The application wide modem. Opened and closed by MainFrame on the GUI
