@@ -137,7 +137,6 @@ std::string GetOperatingSystemString()
 
 void SetThreadName(std::string const& name)
 {
-    std::string fullName = "FDV ";
-    fullName += name;
+    std::string fullName = GlissandoThreadName(name);
     pthread_setname_np(fullName.c_str());
 }

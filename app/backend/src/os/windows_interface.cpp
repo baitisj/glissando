@@ -90,8 +90,7 @@ void SetThreadName(std::string const& name)
 {
     // XXX - assumes ASCII. This is probably fine, though, since
     // this is debug code.
-    std::string fullName = "FDV ";
-    fullName += name;
+    std::string fullName = GlissandoThreadName(name);
     std::wstring stemp = std::wstring(fullName.begin(), fullName.end());
 
     // SetThreadDescription is Windows 10 1607+ only, and isn't even

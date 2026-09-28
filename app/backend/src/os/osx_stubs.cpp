@@ -34,6 +34,8 @@
 //
 //==========================================================================
 
+#include <algorithm>
+
 #include "os_interface.h"
 
 void VerifyMicrophonePermissions(std::promise<bool>& micPromise)
@@ -67,9 +69,11 @@ std::string GetOperatingSystemString()
 
 void SetThreadName(std::string const& name)
 {
-    std::string fullName = "FDV ";
-    fullName += name;
+    std::string fullName = GlissandoThreadName(name);
 #ifdef __linux__
+    // Linux refuses a name longer than 15 characters outright, leaving the
+    // thread with the one it inherited; cut it to fit instead.
+    fullName.resize(std::min<size_t>(fullName.size(), 15));
     pthread_setname_np(pthread_self(), fullName.c_str());
 #endif // __linux__
 }
