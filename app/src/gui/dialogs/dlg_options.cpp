@@ -120,7 +120,7 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     m_simulationTab = new wxPanel(m_notebook, wxID_ANY);
     m_debugTab = new wxPanel(m_notebook, wxID_ANY);
     
-    m_notebook->AddPage(m_reportingTab, _("Reporting"));
+    m_notebook->AddPage(m_reportingTab, _("Station"));
     m_notebook->AddPage(m_rigControlTab, _("Rig Control"));
     m_notebook->AddPage(m_displayTab, _("Display"));
     m_notebook->AddPage(m_keyerTab, _("Audio"));
@@ -130,114 +130,34 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     
     bSizer30->Add(m_notebook, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 3);
     
-    // Reporting tab
+    // Station tab: the callsign chat goes out under, and where stations
+    // heard are logged.
     wxBoxSizer* sizerReporting = new wxBoxSizer(wxVERTICAL);
-    
-    //------------------------------
-    // Txt Msg Text Box
-    //------------------------------
 
-    wxStaticBoxSizer* sbSizer_callSign;
-    wxStaticBox *sb_textMsg = new wxStaticBox(m_reportingTab, wxID_ANY, _("Txt Msg"));
-    sbSizer_callSign = new wxStaticBoxSizer(sb_textMsg, wxVERTICAL);
+    wxStaticBox* sbStation = new wxStaticBox(m_reportingTab, wxID_ANY, _("Station"));
+    wxStaticBoxSizer* sbSizerStationRows = new wxStaticBoxSizer(sbStation, wxVERTICAL);
 
-    m_txtCtrlCallSign = new wxTextCtrl(sb_textMsg, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, 0);
-    m_txtCtrlCallSign->SetToolTip(_("Text message that you can send along with your voice. Note that this does not have error correction and thus is not guaranteed to arrive at the receiving station."));
-    sbSizer_callSign->Add(m_txtCtrlCallSign, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
-
-    sizerReporting->Add(sbSizer_callSign,0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
- 
-    //----------------------------------------------------------
-    // Reporting Options 
-    //----------------------------------------------------------
-
-    wxStaticBoxSizer* sbSizerReportingRows;
-    wxBoxSizer* sbSizerReportingGeneral = new wxBoxSizer(wxHORIZONTAL);
-    
-    wxStaticBox* sbReporting = new wxStaticBox(m_reportingTab, wxID_ANY, _("Reporting"));
-    
-    sbSizerReportingRows = new wxStaticBoxSizer(sbReporting, wxVERTICAL);
-    m_ckboxReportingEnable = new wxCheckBox(sbReporting, wxID_ANY, _("Enable Reporting"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    sbSizerReportingGeneral->Add(m_ckboxReportingEnable, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    
-    wxStaticText* labelPskCallsign = new wxStaticText(sbReporting, wxID_ANY, wxT("Callsign:"), wxDefaultPosition, wxDefaultSize, 0);
-    sbSizerReportingGeneral->Add(labelPskCallsign, 0,  static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    
-    m_txt_callsign = new wxTextCtrl(sbReporting, wxID_ANY,  wxEmptyString, wxDefaultPosition, wxSize(180,-1), 0, wxTextValidator(wxFILTER_ALPHANUMERIC));
-    sbSizerReportingGeneral->Add(m_txt_callsign, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    
-    wxStaticText* labelPskGridSquare = new wxStaticText(sbReporting, wxID_ANY, wxT("Grid Square/Locator:"), wxDefaultPosition, wxDefaultSize, 0);
-    sbSizerReportingGeneral->Add(labelPskGridSquare, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    
-    m_txt_grid_square = new wxTextCtrl(sbReporting, wxID_ANY,  wxEmptyString, wxDefaultPosition, wxSize(180,-1), 0, wxTextValidator(wxFILTER_ALPHANUMERIC));
-    sbSizerReportingGeneral->Add(m_txt_grid_square, 0,  static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    
-    sbSizerReportingRows->Add(sbSizerReportingGeneral, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
-    
-    wxBoxSizer* sbSizerReportingManualFrequency = new wxBoxSizer(wxHORIZONTAL);
-    m_ckboxManualFrequencyReporting = new wxCheckBox(sbReporting, wxID_ANY, _("Manual Frequency Reporting"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    sbSizerReportingManualFrequency->Add(m_ckboxManualFrequencyReporting, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
-    sbSizerReportingRows->Add(sbSizerReportingManualFrequency, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
-    
-    // PSK Reporter options
-    wxBoxSizer* sbSizerReportingPSK = new wxBoxSizer(wxHORIZONTAL);
-    m_ckboxPskReporterEnable = new wxCheckBox(sbReporting, wxID_ANY, _("Report to PSK Reporter"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    sbSizerReportingPSK->Add(m_ckboxPskReporterEnable, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    sbSizerReportingRows->Add(sbSizerReportingPSK, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
-
-    // UDP reporting options
-    wxBoxSizer* sbSizerReportingUDP = new wxBoxSizer(wxHORIZONTAL);
-    m_ckboxUDPReportingEnable = new wxCheckBox(sbReporting, wxID_ANY, _("Enable QSO Logging"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    m_ckboxUDPReportingEnable->SetToolTip(_("Enables QSO logging using the WSJT-X support in your preferred logging program."));
-    sbSizerReportingUDP->Add(m_ckboxUDPReportingEnable, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    wxStaticText* labelUDPHostName = new wxStaticText(sbReporting, wxID_ANY, wxT("IP Address:"), wxDefaultPosition, wxDefaultSize, 0);
-    sbSizerReportingUDP->Add(labelUDPHostName, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    m_udpHostname = new wxTextCtrl(sbReporting, wxID_ANY,  wxEmptyString, wxDefaultPosition, wxSize(150,-1), 0);
-    sbSizerReportingUDP->Add(m_udpHostname, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    wxStaticText* labelUDPPort = new wxStaticText(sbReporting, wxID_ANY, wxT("Port:"), wxDefaultPosition, wxDefaultSize, 0);
-    sbSizerReportingUDP->Add(labelUDPPort, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    m_udpPort = new wxTextCtrl(sbReporting, wxID_ANY,  wxEmptyString, wxDefaultPosition, wxSize(60,-1), 0);
-    sbSizerReportingUDP->Add(m_udpPort, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    
-    sbSizerReportingRows->Add(sbSizerReportingUDP, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
-
-    // UDP broadcast reporting options (UdpReporter)
-    wxBoxSizer* sbSizerReportingUDPBroadcast = new wxBoxSizer(wxHORIZONTAL);
-    m_ckboxUDPBroadcastEnable = new wxCheckBox(sbReporting, wxID_ANY, _("Enable UDP Broadcast"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    m_ckboxUDPBroadcastEnable->SetToolTip(_("Broadcasts received callsign/frequency data as JSON UDP datagrams (e.g. to a multicast group or a local listener)."));
-    sbSizerReportingUDPBroadcast->Add(m_ckboxUDPBroadcastEnable, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    wxStaticText* labelUDPBroadcastAddr = new wxStaticText(sbReporting, wxID_ANY, wxT("IP Address:"), wxDefaultPosition, wxDefaultSize, 0);
-    sbSizerReportingUDPBroadcast->Add(labelUDPBroadcastAddr, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    m_udpBroadcastAddress = new wxTextCtrl(sbReporting, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(150, -1), 0);
-    sbSizerReportingUDPBroadcast->Add(m_udpBroadcastAddress, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    wxStaticText* labelUDPBroadcastPort = new wxStaticText(sbReporting, wxID_ANY, wxT("Port:"), wxDefaultPosition, wxDefaultSize, 0);
-    sbSizerReportingUDPBroadcast->Add(labelUDPBroadcastPort, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    m_udpBroadcastPort = new wxTextCtrl(sbReporting, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(60, -1), 0);
-    sbSizerReportingUDPBroadcast->Add(m_udpBroadcastPort, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-
-    sbSizerReportingRows->Add(sbSizerReportingUDPBroadcast, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
+    wxBoxSizer* sbSizerCallsign = new wxBoxSizer(wxHORIZONTAL);
+    wxStaticText* labelCallsign = new wxStaticText(sbStation, wxID_ANY, wxT("Callsign:"), wxDefaultPosition, wxDefaultSize, 0);
+    sbSizerCallsign->Add(labelCallsign, 0,  static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
+    m_txt_callsign = new wxTextCtrl(sbStation, wxID_ANY,  wxEmptyString, wxDefaultPosition, wxSize(180,-1), 0, wxTextValidator(wxFILTER_ALPHANUMERIC));
+    m_txt_callsign->SetToolTip(_("The callsign text chat sends under."));
+    sbSizerCallsign->Add(m_txt_callsign, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
+    sbSizerStationRows->Add(sbSizerCallsign, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
 
     // CSV log file path
     wxBoxSizer* sbSizerCsvLog = new wxBoxSizer(wxHORIZONTAL);
-    wxStaticText* labelCsvLogPath = new wxStaticText(sbReporting, wxID_ANY, wxT("Stations Heard Log File:"), wxDefaultPosition, wxDefaultSize, 0);
+    wxStaticText* labelCsvLogPath = new wxStaticText(sbStation, wxID_ANY, wxT("Stations Heard Log File:"), wxDefaultPosition, wxDefaultSize, 0);
     sbSizerCsvLog->Add(labelCsvLogPath, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    m_txtCtrlCsvLogFilePath = new wxTextCtrl(sbReporting, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(200, -1), 0);
+    m_txtCtrlCsvLogFilePath = new wxTextCtrl(sbStation, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(200, -1), 0);
+    m_txtCtrlCsvLogFilePath->SetToolTip(_("While engaged, each station whose chat is heard is added to this CSV file: time, callsign, modem, frequency and SNR."));
     sbSizerCsvLog->Add(m_txtCtrlCsvLogFilePath, 1, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    m_buttonChooseCsvLogFilePath = new wxButton(sbReporting, wxID_ANY, _("Choose"), wxDefaultPosition, wxSize(-1, -1), 0);
+    m_buttonChooseCsvLogFilePath = new wxButton(sbStation, wxID_ANY, _("Choose"), wxDefaultPosition, wxSize(-1, -1), 0);
     m_buttonChooseCsvLogFilePath->SetMinSize(wxSize(120, -1));
     sbSizerCsvLog->Add(m_buttonChooseCsvLogFilePath, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    sbSizerReportingRows->Add(sbSizerCsvLog, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
+    sbSizerStationRows->Add(sbSizerCsvLog, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
 
-    sizerReporting->Add(sbSizerReportingRows, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
-
-    // Callsign list settings
-    wxStaticBoxSizer* sbSizer_callsign_list;
-    wxStaticBox* sb_callsignList = new wxStaticBox(m_reportingTab, wxID_ANY, _("Callsign List"));
-    sbSizer_callsign_list = new wxStaticBoxSizer(sb_callsignList, wxHORIZONTAL);
-    m_ckbox_use_utc_time = new wxCheckBox(sb_callsignList, wxID_ANY, _("Use UTC Time"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    sbSizer_callsign_list->Add(m_ckbox_use_utc_time, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    
-    sizerReporting->Add(sbSizer_callsign_list,0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
+    sizerReporting->Add(sbSizerStationRows, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
     
     m_reportingTab->SetSizer(sizerReporting);
     
@@ -795,68 +715,6 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     this->Layout();
     this->Centre(wxBOTH);
 
-    //-------------------
-    // Tab ordering for accessibility
-    //-------------------
-#if 0
-    m_txtCtrlCallSign->MoveBeforeInTabOrder(m_ckboxReportingEnable);
-    m_ckboxReportingEnable->MoveBeforeInTabOrder(m_txt_callsign);
-    m_txt_callsign->MoveBeforeInTabOrder(m_txt_grid_square);
-    
-    m_txt_grid_square->MoveBeforeInTabOrder(m_ckboxManualFrequencyReporting);
-    m_ckboxManualFrequencyReporting->MoveBeforeInTabOrder(m_ckboxPskReporterEnable);
-    
-    m_waterfallColorScheme1->MoveBeforeInTabOrder(m_waterfallColorScheme2);
-    m_waterfallColorScheme2->MoveBeforeInTabOrder(m_waterfallColorScheme3);
-    
-    m_txtCtrlVoiceKeyerWaveFilePath->MoveBeforeInTabOrder(m_buttonChooseVoiceKeyerWaveFilePath);
-    m_buttonChooseVoiceKeyerWaveFilePath->MoveBeforeInTabOrder(m_txtCtrlVoiceKeyerRxPause);
-    m_txtCtrlVoiceKeyerRxPause->MoveBeforeInTabOrder(m_txtCtrlVoiceKeyerRepeats);
-    
-    m_ckboxFreeDV700txClip->MoveBeforeInTabOrder(m_ckboxFreeDV700txBPF);
-    m_ckboxFreeDV700txBPF->MoveBeforeInTabOrder(m_ckHalfDuplex);
-    m_ckHalfDuplex->MoveBeforeInTabOrder(m_ckboxMultipleRx);
-    m_ckboxMultipleRx->MoveBeforeInTabOrder(m_ckboxSingleRxThread);
-    m_ckboxSingleRxThread->MoveBeforeInTabOrder(m_ckboxTextChatUsDataSegmentsOnly);
-    m_ckboxTextChatUsDataSegmentsOnly->MoveBeforeInTabOrder(m_ckboxGlissandoChords);
-    m_ckboxGlissandoChords->MoveBeforeInTabOrder(m_statsResetTime);
-    
-    m_ckboxTestFrame->MoveBeforeInTabOrder(m_ckboxChannelNoise);
-    m_ckboxChannelNoise->MoveBeforeInTabOrder(m_txtNoiseSNR);
-    m_txtNoiseSNR->MoveBeforeInTabOrder(m_ckboxAttnCarrierEn);
-    m_ckboxAttnCarrierEn->MoveBeforeInTabOrder(m_txtAttnCarrier);
-    m_txtAttnCarrier->MoveBeforeInTabOrder(m_ckboxTone);
-    m_ckboxTone->MoveBeforeInTabOrder(m_txtToneFreqHz);
-    m_txtToneFreqHz->MoveBeforeInTabOrder(m_txtToneAmplitude);
-    
-    // Tab ordering for Debug tab.    
-#ifdef __WXMSW__
-    sb_console->MoveBeforeInTabOrder(sb_fifo);
-#endif // __WXMSW__
-    sb_fifo->MoveBeforeInTabOrder(sb_fifo2);
-
-    m_txtCtrlFifoSize->MoveBeforeInTabOrder(m_BtnFifoReset);
-    m_BtnFifoReset->MoveBeforeInTabOrder(m_ckboxVerbose);
-
-    m_ckboxVerbose->MoveBeforeInTabOrder(m_ckboxTxRxThreadPriority);
-    m_ckboxTxRxThreadPriority->MoveBeforeInTabOrder(m_ckboxTxRxDumpTiming);
-    m_ckboxTxRxDumpTiming->MoveBeforeInTabOrder(m_ckboxTxRxDumpFifoState);
-    m_ckboxTxRxDumpFifoState->MoveBeforeInTabOrder(m_ckboxFreeDVAPIVerbose);
-
-#ifdef __WXMSW__
-    m_ckboxDebugConsole->MoveBeforeInTabOrder(m_txtCtrlFifoSize);
-#endif // __WXMSW__
-    
-    m_reportingTab->MoveBeforeInTabOrder(m_displayTab);    
-    m_displayTab->MoveBeforeInTabOrder(m_keyerTab);
-    m_keyerTab->MoveBeforeInTabOrder(m_modemTab);
-    m_modemTab->MoveBeforeInTabOrder(m_simulationTab);
-    m_simulationTab->MoveBeforeInTabOrder(m_debugTab);
-    
-    m_notebook->MoveBeforeInTabOrder(m_sdbSizer5OK);
-    m_sdbSizer5OK->MoveBeforeInTabOrder(m_sdbSizer5Cancel);
-    m_sdbSizer5Cancel->MoveBeforeInTabOrder(m_sdbSizer5Apply);
-#endif
     
     // Connect Events -------------------------------------------------------
 
@@ -884,9 +742,6 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
 
     m_BtnFifoReset->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(OptionsDlg::OnFifoReset), NULL, this);
 
-    m_ckboxReportingEnable->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnReportingEnable), NULL, this);
-    m_ckboxUDPReportingEnable->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnReportingEnable), NULL, this);
-    m_ckboxUDPBroadcastEnable->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnReportingEnable), NULL, this);
     m_ckboxTone->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnToneStateEnable), NULL, this);
     
     m_ckboxMultipleRx->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnMultipleRxEnable), NULL, this);
@@ -938,9 +793,6 @@ OptionsDlg::~OptionsDlg()
     m_ckboxDebugConsole->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxScrollEventHandler(OptionsDlg::OnDebugConsole), NULL, this);
 #endif
     
-    m_ckboxReportingEnable->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnReportingEnable), NULL, this);
-    m_ckboxUDPReportingEnable->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnReportingEnable), NULL, this);
-    m_ckboxUDPBroadcastEnable->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnReportingEnable), NULL, this);
     m_ckboxTone->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnToneStateEnable), NULL, this);
     
     m_ckboxMultipleRx->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnMultipleRxEnable), NULL, this);
@@ -973,8 +825,6 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
             m_freqList->Append(item);
         }
         
-        m_txtCtrlCallSign->SetValue(wxGetApp().appConfiguration.reportingConfiguration.reportingFreeTextString);
-
         m_ckboxEnableSpacebarForPTT->SetValue(wxGetApp().appConfiguration.enableSpaceBarForPTT);
         m_ckboxPTTMomentaryMode->SetValue(wxGetApp().appConfiguration.pttMomentaryMode);
         m_selectedPTTKeyCode = wxGetApp().appConfiguration.pttKeyCode;
@@ -1055,31 +905,11 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         m_ckboxDebugConsole->SetValue(wxGetApp().appConfiguration.debugConsoleEnabled);
 #endif
         
-        // General reporting config
-        m_ckboxReportingEnable->SetValue(wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled);
         m_txt_callsign->SetValue(wxGetApp().appConfiguration.reportingConfiguration.reportingCallsign);
-        m_txt_grid_square->SetValue(wxGetApp().appConfiguration.reportingConfiguration.reportingGridSquare);
-        m_ckboxManualFrequencyReporting->SetValue(wxGetApp().appConfiguration.reportingConfiguration.manualFrequencyReporting);
-        
-        // PSK Reporter options
-        m_ckboxPskReporterEnable->SetValue(wxGetApp().appConfiguration.reportingConfiguration.pskReporterEnabled);
-
-        // UDP reporting options
-        m_ckboxUDPReportingEnable->SetValue(wxGetApp().appConfiguration.reportingConfiguration.udpReportingEnabled);
-        m_udpHostname->SetValue(wxGetApp().appConfiguration.reportingConfiguration.udpReportingHostname);
-        m_udpPort->SetValue(wxString::Format(wxT("%i"), wxGetApp().appConfiguration.reportingConfiguration.udpReportingPort.get()));
-
-        // UDP broadcast options (UdpReporter)
-        m_ckboxUDPBroadcastEnable->SetValue(wxGetApp().appConfiguration.reportingConfiguration.udpBroadcastEnabled);
-        m_udpBroadcastAddress->SetValue(wxGetApp().appConfiguration.reportingConfiguration.udpBroadcastAddress);
-        m_udpBroadcastPort->SetValue(wxString::Format(wxT("%i"), wxGetApp().appConfiguration.reportingConfiguration.udpBroadcastPort.get()));
 
         // CSV log file path
         m_txtCtrlCsvLogFilePath->SetValue(wxGetApp().appConfiguration.reportingConfiguration.csvLogFilePath);
 
-        // Callsign list config
-        m_ckbox_use_utc_time->SetValue(wxGetApp().appConfiguration.reportingConfiguration.useUTCForReporting);
-        
         // Stats reset time
         m_statsResetTime->SetValue(wxString::Format(wxT("%i"), wxGetApp().appConfiguration.statsResetTimeSecs.get()));
         
@@ -1166,8 +996,6 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqModeChanges = false;
         wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqChangesOnly = m_rbFrequencyControl->GetValue();
         
-        wxGetApp().appConfiguration.reportingConfiguration.reportingFreeTextString = m_txtCtrlCallSign->GetValue();
-
         wxGetApp().appConfiguration.halfDuplexMode = m_ckHalfDuplex->GetValue();
         wxGetApp().appConfiguration.multipleReceiveEnabled = m_ckboxMultipleRx->GetValue();
         wxGetApp().appConfiguration.multipleReceiveOnSingleThread = m_ckboxSingleRxThread->GetValue();
@@ -1248,37 +1076,11 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
 
         wxGetApp().appConfiguration.experimentalFeatures = m_experimentalFeatures->GetValue();
 
-        // General reporting config
-        wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled = m_ckboxReportingEnable->GetValue();
         wxGetApp().appConfiguration.reportingConfiguration.reportingCallsign = m_txt_callsign->GetValue();
-        wxGetApp().appConfiguration.reportingConfiguration.reportingGridSquare = m_txt_grid_square->GetValue();
-        wxGetApp().appConfiguration.reportingConfiguration.manualFrequencyReporting = m_ckboxManualFrequencyReporting->GetValue();
-        
-        // PSK Reporter options
-        wxGetApp().appConfiguration.reportingConfiguration.pskReporterEnabled = m_ckboxPskReporterEnable->GetValue();
-
-        // UDP reporting options
-        wxGetApp().appConfiguration.reportingConfiguration.udpReportingEnabled = m_ckboxUDPReportingEnable->GetValue();
-        wxGetApp().appConfiguration.reportingConfiguration.udpReportingHostname = m_udpHostname->GetValue();
-
-        long udpPort;
-        m_udpPort->GetValue().ToLong(&udpPort);
-        wxGetApp().appConfiguration.reportingConfiguration.udpReportingPort = (int)udpPort;
-
-        // UDP broadcast options (UdpReporter)
-        wxGetApp().appConfiguration.reportingConfiguration.udpBroadcastEnabled = m_ckboxUDPBroadcastEnable->GetValue();
-        wxGetApp().appConfiguration.reportingConfiguration.udpBroadcastAddress = m_udpBroadcastAddress->GetValue();
-
-        long udpBroadcastPort;
-        m_udpBroadcastPort->GetValue().ToLong(&udpBroadcastPort);
-        wxGetApp().appConfiguration.reportingConfiguration.udpBroadcastPort = (int)udpBroadcastPort;
 
         // CSV log file path
         wxGetApp().appConfiguration.reportingConfiguration.csvLogFilePath = m_txtCtrlCsvLogFilePath->GetValue();
 
-        // Callsign list config
-        wxGetApp().appConfiguration.reportingConfiguration.useUTCForReporting = m_ckbox_use_utc_time->GetValue();
-        
         // Waterfall color
         if (m_waterfallColorScheme1->GetValue())
         {
@@ -1478,78 +1280,9 @@ void OptionsDlg::OnFifoReset(wxCommandEvent&)
 }
 
 void OptionsDlg::updateReportingState()
-{    
-    if (!sessionActive_)
-    {
-        m_ckbox_use_utc_time->Enable(true);
-        m_ckboxReportingEnable->Enable(true);
-
-        if (m_ckboxReportingEnable->GetValue())
-        {
-            m_txtCtrlCallSign->Enable(false);
-            m_txt_callsign->Enable(true);
-            m_txt_grid_square->Enable(true);
-            m_ckboxManualFrequencyReporting->Enable(true);
-            m_ckboxPskReporterEnable->Enable(true);
-            m_ckboxUDPReportingEnable->Enable(true);
-
-            if (m_ckboxUDPReportingEnable->GetValue())
-            {
-                m_udpHostname->Enable(true);
-                m_udpPort->Enable(true);
-            }
-            else
-            {
-                m_udpHostname->Enable(false);
-                m_udpPort->Enable(false);
-            }
-
-            m_ckboxUDPBroadcastEnable->Enable(true);
-
-            if (m_ckboxUDPBroadcastEnable->GetValue())
-            {
-                m_udpBroadcastAddress->Enable(true);
-                m_udpBroadcastPort->Enable(true);
-            }
-            else
-            {
-                m_udpBroadcastAddress->Enable(false);
-                m_udpBroadcastPort->Enable(false);
-            }
-        }
-        else
-        {
-            m_txtCtrlCallSign->Enable(true);
-            m_txt_callsign->Enable(false);
-            m_txt_grid_square->Enable(false);
-            m_ckboxPskReporterEnable->Enable(false);
-            m_ckboxManualFrequencyReporting->Enable(false);
-            m_udpHostname->Enable(false);
-            m_udpPort->Enable(false);
-            m_ckboxUDPReportingEnable->Enable(false);
-            m_udpBroadcastAddress->Enable(false);
-            m_udpBroadcastPort->Enable(false);
-            m_ckboxUDPBroadcastEnable->Enable(false);
-        }
-    }
-    else
-    {
-        // Txt Msg/Reporter options cannot be modified during a session.
-        m_ckboxReportingEnable->Enable(false);
-        m_txtCtrlCallSign->Enable(false);
-        m_txt_callsign->Enable(false);
-        m_txt_grid_square->Enable(false);
-        m_ckboxManualFrequencyReporting->Enable(false);
-        m_ckboxPskReporterEnable->Enable(false);
-        m_udpHostname->Enable(false);
-        m_udpPort->Enable(false);
-        m_ckboxUDPReportingEnable->Enable(false);
-        m_udpBroadcastAddress->Enable(false);
-        m_udpBroadcastPort->Enable(false);
-        m_ckboxUDPBroadcastEnable->Enable(false);
-
-        m_ckbox_use_utc_time->Enable(false);
-    }
+{
+    // The callsign cannot be changed during a session.
+    m_txt_callsign->Enable(!sessionActive_);
 }
 
 void OptionsDlg::updateChannelNoiseState()
@@ -1602,11 +1335,6 @@ void OptionsDlg::updateRigControlState()
     }
 }
     
-void OptionsDlg::OnReportingEnable(wxCommandEvent&)
-{
-    updateReportingState();
-}
-
 void OptionsDlg::OnToneStateEnable(wxCommandEvent&)
 {
     updateToneState();

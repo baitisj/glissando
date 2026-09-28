@@ -30,32 +30,13 @@ class ReportingConfiguration : public WxWidgetsConfigStore
 public:
     ReportingConfiguration();
     virtual ~ReportingConfiguration() = default;
-    
-    // Old format reporting (FEC-free text field)
-    ConfigurationDataElement<wxString> reportingFreeTextString;
-    
-    ConfigurationDataElement<bool> reportingEnabled;
+
     ConfigurationDataElement<wxString> reportingCallsign;
-    ConfigurationDataElement<wxString> reportingGridSquare;
     
     // NOTE: this needs special handling for load/save as it's a string on disk but
     // uint64_t inside the FreeDV application.
     ConfigurationDataElement<uint64_t> reportingFrequency; 
-    
-    ConfigurationDataElement<bool> manualFrequencyReporting;
-    
-    ConfigurationDataElement<bool> pskReporterEnabled;
 
-    ConfigurationDataElement<bool> udpReportingEnabled;
-    ConfigurationDataElement<wxString> udpReportingHostname;
-    ConfigurationDataElement<int> udpReportingPort;
-
-    ConfigurationDataElement<bool> udpBroadcastEnabled;
-    ConfigurationDataElement<wxString> udpBroadcastAddress;
-    ConfigurationDataElement<int> udpBroadcastPort;
-
-    ConfigurationDataElement<bool> useUTCForReporting;
-    
     ConfigurationDataElement<std::vector<wxString> > reportingFrequencyList;
 
     ConfigurationDataElement<bool> reportingFrequencyAsKhz;

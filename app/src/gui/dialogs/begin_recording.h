@@ -24,7 +24,6 @@
 
 #include "main.h"
 #include "defines.h"
-#include "../../logging/ILogger.h"
 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=--=-=-=-=
 // Class BeginRecordingDialog

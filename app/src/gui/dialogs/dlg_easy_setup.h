@@ -56,7 +56,6 @@ class EasySetupDialog : public wxDialog
         void    OnAdvancedPTTSetup(wxCommandEvent& event);
         void    HamlibRigNameChanged(wxCommandEvent& event);
         void    PTTUseHamLibClicked(wxCommandEvent& event);
-        void    OnPSKReporterChecked(wxCommandEvent& event);
 
         // Internal section-specific ExchangeData methods.
         void    ExchangeSoundDeviceData(int inout);
@@ -98,9 +97,7 @@ class EasySetupDialog : public wxDialog
         wxButton* m_buttonTest;
         
         // Step 3: PSK Reporter setup
-        wxCheckBox    *m_ckbox_psk_enable;
         wxTextCtrl    *m_txt_callsign;
-        wxTextCtrl    *m_txt_grid_square;
         
         // Step 4: test/save/cancel setup
         wxButton* m_buttonOK;

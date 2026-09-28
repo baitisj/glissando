@@ -252,28 +252,20 @@ EasySetupDialog::EasySetupDialog(wxWindow* parent, wxWindowID id, const wxString
     
     sectionSizer->Add(setupCatControlBoxSizer, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 2);
     
-    // Step 3: setup PSK Reporter
-    // ==========================
-    wxStaticBox *setupPskReporterBox = new wxStaticBox(panel, wxID_ANY, _("Step 3: Setup Reporting"));
+    // Step 3: the callsign chat sends under
+    // ====================================
+    wxStaticBox *setupStationBox = new wxStaticBox(panel, wxID_ANY, _("Step 3: Your Station"));
     
-    wxStaticBoxSizer* sbSizer_psk;
-    sbSizer_psk = new wxStaticBoxSizer(setupPskReporterBox, wxHORIZONTAL);
-    m_ckbox_psk_enable = new wxCheckBox(setupPskReporterBox, wxID_ANY, _("Enable Reporting"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    sbSizer_psk->Add(m_ckbox_psk_enable, 0, static_cast<int>(wxALL) | static_cast<int>(wxALIGN_CENTER_VERTICAL), 2);
+    wxStaticBoxSizer* sbSizer_station;
+    sbSizer_station = new wxStaticBoxSizer(setupStationBox, wxHORIZONTAL);
     
-    wxStaticText* labelPskCallsign = new wxStaticText(setupPskReporterBox, wxID_ANY, wxT("Callsign: "), wxDefaultPosition, wxDefaultSize, 0);
-    sbSizer_psk->Add(labelPskCallsign, 0,  static_cast<int>(wxALL) | static_cast<int>(wxALIGN_CENTER_VERTICAL), 2);
+    wxStaticText* labelCallsign = new wxStaticText(setupStationBox, wxID_ANY, wxT("Callsign: "), wxDefaultPosition, wxDefaultSize, 0);
+    sbSizer_station->Add(labelCallsign, 0,  static_cast<int>(wxALL) | static_cast<int>(wxALIGN_CENTER_VERTICAL), 2);
     
-    m_txt_callsign = new wxTextCtrl(setupPskReporterBox, wxID_ANY,  wxEmptyString, wxDefaultPosition, wxSize(180,-1), 0, wxTextValidator(wxFILTER_ALPHANUMERIC));
-    sbSizer_psk->Add(m_txt_callsign, 0, static_cast<int>(wxALL) | static_cast<int>(wxALIGN_CENTER_VERTICAL), 2);
+    m_txt_callsign = new wxTextCtrl(setupStationBox, wxID_ANY,  wxEmptyString, wxDefaultPosition, wxSize(180,-1), 0, wxTextValidator(wxFILTER_ALPHANUMERIC));
+    sbSizer_station->Add(m_txt_callsign, 0, static_cast<int>(wxALL) | static_cast<int>(wxALIGN_CENTER_VERTICAL), 2);
     
-    wxStaticText* labelPskGridSquare = new wxStaticText(setupPskReporterBox, wxID_ANY, wxT("Grid Square/Locator: "), wxDefaultPosition, wxDefaultSize, 0);
-    sbSizer_psk->Add(labelPskGridSquare, 0, static_cast<int>(wxALL) | static_cast<int>(wxALIGN_CENTER_VERTICAL), 2);
-    
-    m_txt_grid_square = new wxTextCtrl(setupPskReporterBox, wxID_ANY,  wxEmptyString, wxDefaultPosition, wxSize(180,-1), 0, wxTextValidator(wxFILTER_ALPHANUMERIC));
-    sbSizer_psk->Add(m_txt_grid_square, 0,  static_cast<int>(wxALL) | static_cast<int>(wxALIGN_CENTER_VERTICAL), 2);
-    
-    sectionSizer->Add(sbSizer_psk, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 2);
+    sectionSizer->Add(sbSizer_station, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 2);
     
     // Step 4: save or cancel changes
     // =============================
@@ -314,7 +306,6 @@ EasySetupDialog::EasySetupDialog(wxWindow* parent, wxWindowID id, const wxString
     
     m_advancedSoundSetup->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(EasySetupDialog::OnAdvancedSoundSetup), NULL, this);
     m_advancedPTTSetup->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(EasySetupDialog::OnAdvancedPTTSetup), NULL, this);
-    m_ckbox_psk_enable->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(EasySetupDialog::OnPSKReporterChecked), NULL, this);
     m_buttonTest->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(EasySetupDialog::OnTest), NULL, this);
     
     m_buttonOK->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(EasySetupDialog::OnOK), NULL, this);
@@ -338,7 +329,6 @@ EasySetupDialog::~EasySetupDialog()
     
     m_advancedSoundSetup->Disconnect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(EasySetupDialog::OnAdvancedSoundSetup), NULL, this);
     m_advancedPTTSetup->Disconnect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(EasySetupDialog::OnAdvancedPTTSetup), NULL, this);
-    m_ckbox_psk_enable->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(EasySetupDialog::OnPSKReporterChecked), NULL, this);
     m_buttonTest->Disconnect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(EasySetupDialog::OnTest), NULL, this);
     
     m_buttonOK->Disconnect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(EasySetupDialog::OnOK), NULL, this);
@@ -581,33 +571,14 @@ void EasySetupDialog::ExchangeReportingData(int inout)
 {
     if (inout == EXCHANGE_DATA_IN)
     {
-        m_ckbox_psk_enable->SetValue(wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled);
         m_txt_callsign->SetValue(wxGetApp().appConfiguration.reportingConfiguration.reportingCallsign);
-        m_txt_grid_square->SetValue(wxGetApp().appConfiguration.reportingConfiguration.reportingGridSquare);
     }
     else if (inout == EXCHANGE_DATA_OUT)
     {
-        if (wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled != m_ckbox_psk_enable->GetValue())
-        {
-            wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled = m_ckbox_psk_enable->GetValue();
-            if (wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled)
-            {
-                // Enable PSK Reporter by default.
-                wxGetApp().appConfiguration.reportingConfiguration.pskReporterEnabled = wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled;
-            }
-        }
-        
         wxGetApp().appConfiguration.reportingConfiguration.reportingCallsign = m_txt_callsign->GetValue();
-        wxGetApp().appConfiguration.reportingConfiguration.reportingGridSquare = m_txt_grid_square->GetValue();
 
         wxGetApp().appConfiguration.save(pConfig);
     }
-}
-
-void EasySetupDialog::OnPSKReporterChecked(wxCommandEvent&)
-{
-    m_txt_callsign->Enable(m_ckbox_psk_enable->GetValue());
-    m_txt_grid_square->Enable(m_ckbox_psk_enable->GetValue());
 }
 
 void EasySetupDialog::HamlibRigNameChanged(wxCommandEvent&)
@@ -909,9 +880,7 @@ void EasySetupDialog::OnTest(wxCommandEvent&)
             m_cbSerialRate->Enable(false);
             m_tcIcomCIVHex->Enable(false);
             m_advancedPTTSetup->Enable(false);
-            m_ckbox_psk_enable->Enable(false);
             m_txt_callsign->Enable(false);
-            m_txt_grid_square->Enable(false);
             m_buttonOK->Enable(false);
             m_buttonCancel->Enable(false);
             m_buttonApply->Enable(false);
@@ -977,9 +946,7 @@ void EasySetupDialog::stopTest_()
     m_cbSerialRate->Enable(true);
     m_tcIcomCIVHex->Enable(true);
     m_advancedPTTSetup->Enable(true);
-    m_ckbox_psk_enable->Enable(true);
     m_txt_callsign->Enable(true);
-    m_txt_grid_square->Enable(true);
     m_buttonOK->Enable(true);
     m_buttonCancel->Enable(true);
     m_buttonApply->Enable(true);
@@ -1381,11 +1348,5 @@ bool EasySetupDialog::canTestRadioSettings_()
 
 bool EasySetupDialog::canSaveSettings_()
 {
-    bool radioSettingsValid = canTestRadioSettings_();
-
-    bool isPSKReporterEnabled = m_ckbox_psk_enable->GetValue();
-    bool callsignValid = m_txt_callsign->GetValue().Length() > 0;
-    bool gridSquareValid = m_txt_grid_square->GetValue().Length() > 0;
-    
-    return radioSettingsValid && (!isPSKReporterEnabled || (callsignValid && gridSquareValid));
+    return canTestRadioSettings_();
 }

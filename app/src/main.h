@@ -50,6 +50,7 @@
 
 #include <stdint.h>
 #include <future>
+#include <map>
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386) || defined(_M_IX86)
 #include <cpuid.h>
 #endif
@@ -92,7 +93,6 @@
 #include "audio/AudioEngineFactory.h"
 #include "audio/IAudioDevice.h"
 #include "config/FreeDVConfiguration.h"
-#include "logging/ILogger.h"
 #include "pipeline/paCallbackData.h"
 #include "pipeline/LinkStep.h"
 #include "freedv_sanitizers.h"
@@ -119,7 +119,6 @@ enum {
         ID_TIMER_DEMOD_IN,
         ID_TIMER_SNR,
         ID_TIMER_UPDATE_OTHER,
-        ID_TIMER_PSKREPORTER,
         ID_TIMER_UPD_FREQ,
         ID_TIMER_TOT,           // Time-Out Timer
         ID_TIMER_TOT_WARNING,   // Polls remaining TOT time to show warning
@@ -216,7 +215,6 @@ class MainApp : public wxApp
         std::shared_ptr<SerialPortInRigController> m_pttInSerialPort;
         
         // Logging
-        std::shared_ptr<ILogger> logger;
 
         wxRect              m_rTopWindow;
 
@@ -339,7 +337,6 @@ class MainFrame : public TopFrame, public IGlissandoHost
         wxTimer                 m_plotTimer;
 
         // Not sure why we have the option to disable timers. TBD?
-        wxTimer                 m_pskReporterTimer;
         wxTimer                 m_updFreqStatusTimer; //[UP]
 
         wxTimer                 m_plotWaterfallTimer;
@@ -458,6 +455,13 @@ private:
 
     // Set while text chat goes through data2g-host (applyChatModem_()).
     std::atomic<bool> data2gChatActive_{false};
+
+    // Adds a station whose chat was heard to the stations heard log. Called
+    // from the receive threads; the log is written on the UI thread.
+    void logStationHeard_(std::string const& callsign, float snr, std::string const& modem);
+    // When each station was last logged, on which frequency, so that one
+    // exchange is one line in the log rather than one per frame.
+    std::map<std::string, std::pair<std::chrono::steady_clock::time_point, int64_t>> stationsHeardLogged_;
     TextMessaging::Data2GTransport::Settings appliedData2GSettings_;
 
     bool                    m_schedule_restore;
@@ -539,7 +543,6 @@ private:
         void OnTogBtnOnOff( wxCommandEvent& event ) override;
         void OnTogBtnRecord( wxCommandEvent& event ) override;
 
-        virtual void OnLogQSO(wxCommandEvent& event) override;
         
         void OnCallSignReset( wxCommandEvent& event ) override;
         void OnBerReset( wxCommandEvent& event ) override;
@@ -755,18 +758,7 @@ private:
 
         bool isFrequencyControlEnabled_()
         {
-#if 0
-            auto& rigControlConfig = wxGetApp().appConfiguration.rigControlConfiguration;
-            return 
-                wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled || 
-                ((rigControlConfig.hamlibUseForPTT 
-#if defined(WIN32)
-                || rigControlConfig.useOmniRig
-#endif // defined(WIN32)
-                ) && (rigControlConfig.hamlibEnableFreqModeChanges || rigControlConfig.hamlibEnableFreqChangesOnly));
-#else
             return true;
-#endif // 0
         }
         
         int getIdealStationsHeardColumnLength_(int col);
@@ -782,8 +774,6 @@ void my_freedv_put_error_pattern(void *state, short error_pattern[], int sz_erro
 
 // FreeDv API calls these puppies when it needs/receives a text char
 
-char my_get_next_tx_char(void *callback_state);
-void my_put_next_rx_char(void *callback_state, char c);
 
 // helper complex freq shift function
 

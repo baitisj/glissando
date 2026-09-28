@@ -22,7 +22,6 @@
 #include "gui/dialogs/dlg_options.h"
 #include "gui/dialogs/dlg_ptt.h"
 #include "gui/dialogs/monitor_volume_adj.h"
-#include "gui/dialogs/log_entry.h"
 
 #if defined(WIN32)
 #include "rig_control/omnirig/OmniRigController.h"
@@ -99,17 +98,6 @@ void MainFrame::OnToolsEasySetup(wxCommandEvent&)
         // Show/hide frequency box based on CAT control setup.
         m_freqBox->Show(isFrequencyControlEnabled_());
 
-        // Show/hide callsign combo box based on PSK Reporter Status
-        if (wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled)
-        {
-            m_cboLastReportedCallsigns->Show();
-            m_txtCtrlCallSign->Hide();
-        }
-        else
-        {
-            m_cboLastReportedCallsigns->Hide();
-            m_txtCtrlCallSign->Show();
-        }
 
         // Relayout window so that the changes can take effect.
         m_panel->Layout();
@@ -242,17 +230,6 @@ void MainFrame::OnToolsOptions(wxCommandEvent& event)
             SetSize(w, h);
         });
 
-        // Show/hide callsign combo box based on reporting Status
-        if (wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled)
-        {
-            m_cboLastReportedCallsigns->Show();
-            m_txtCtrlCallSign->Hide();
-        }
-        else
-        {
-            m_cboLastReportedCallsigns->Hide();
-            m_txtCtrlCallSign->Show();
-        }
         
         // Update voice keyer file if different
         wxFileName fullVKPath(wxGetApp().appConfiguration.voiceKeyerWaveFilePath, wxGetApp().appConfiguration.voiceKeyerWaveFile);
@@ -1732,76 +1709,6 @@ void MainFrame::OnCallSignReset(wxCommandEvent&)
     
     m_lastReportedCallsignListView->DeleteAllItems();
     m_cboLastReportedCallsigns->SetText(_(""));
-}
-
-void MainFrame::OnLogQSO(wxCommandEvent&)
-{
-    wxString dxCall;
-    wxString dxGrid;
-    wxString dxFreq;
-    wxString logTime;
-    wxString snrString;
-    wxDateTime logTimeObj = wxDateTime::Now();
-    double dxFreqDouble = 0;
-    uint64_t dxFreqHz = 0;
-    double snr = ILogger::UNKNOWN_SNR;
-    
-    auto selected = m_lastReportedCallsignListView->GetFirstSelected();
-    if (wxGetApp().lastSelectedLoggingRow == MainApp::MAIN_WINDOW && selected != -1)
-    {        
-        // Get callsign and RX frequency
-        dxCall = m_lastReportedCallsignListView->GetItemText(selected, 0);
-        dxFreq = m_lastReportedCallsignListView->GetItemText(selected, 1);
-        logTime = m_lastReportedCallsignListView->GetItemText(selected, 2);
-        snrString = m_lastReportedCallsignListView->GetItemText(selected, 3);
-        
-        wxNumberFormatter::FromString(dxFreq, &dxFreqDouble);
-        wxNumberFormatter::FromString(snrString, &snr);
-        
-        wxString::const_iterator end;
-        logTimeObj.ParseDateTime(logTime, &end);
-
-        if (wxGetApp().appConfiguration.reportingConfiguration.useUTCForReporting)
-        {
-            // String was stored in UTC; ParseDateTime assumes local — reinterpret as UTC.
-            logTimeObj.MakeFromTimezone(wxDateTime::UTC);
-        }
-        
-        if (wxGetApp().appConfiguration.reportingConfiguration.reportingFrequencyAsKhz)
-        {
-            dxFreqDouble *= 1000;
-        }
-        else
-        {
-            dxFreqDouble *= 1000000;
-        }
-        
-        dxFreqHz = (uint64_t)dxFreqDouble;
-        
-        log_info("Logging %s/%s at %" PRIu64 " Hz from main window drop-down list", (const char*)dxCall.ToUTF8(), (const char*)dxGrid.ToUTF8(), dxFreqHz);
-    }
-    else
-    {
-        dxFreq = m_cboReportFrequency->GetValue();
-        wxNumberFormatter::FromString(dxFreq, &dxFreqDouble);
-        
-        if (wxGetApp().appConfiguration.reportingConfiguration.reportingFrequencyAsKhz)
-        {
-            dxFreqDouble *= 1000;
-        }
-        else
-        {
-            dxFreqDouble *= 1000000;
-        }
-        
-        dxFreqHz = (uint64_t)dxFreqDouble;
-        
-        log_info("No rows selected, defaulting logging to %" PRIu64 " Hz", dxFreqHz);
-    }
-
-    // Show log contact dialog 
-    auto logDialog = new LogEntryDialog(this);
-    logDialog->ShowDialog(dxCall.ToUTF8(), dxGrid.ToUTF8(), logTimeObj, (int64_t)dxFreqHz, (int)snr);
 }
 
 // Force manual resync, just in case demod gets stuck on false sync

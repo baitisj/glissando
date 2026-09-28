@@ -49,11 +49,7 @@
 #include "audio/AudioEngineFactory.h"
 #include "codec2_fdmdv.h"
 #include "pipeline/TxRxThread.h"
-#include "reporting/pskreporter.h"
 #include "reporting/CsvReporter.h"
-#include "reporting/UdpReporter.h"
-
-#include "logging/WSJTXNetworkLogger.h"
 
 #include "gui/dialogs/dlg_options.h"
 #include "gui/dialogs/dlg_filter.h"
@@ -139,8 +135,6 @@ std::atomic<bool>  g_half_duplex;
 std::atomic<bool>  g_voice_keyer_tx;
 std::atomic<bool>  g_agcEnabled;
 // sending and receiving Call Sign data
-std::atomic<GenericFIFO<short>*> g_txDataInFifo;
-struct FIFO         *g_rxDataOutFifo;
 
 // tx/rx processing states
 std::atomic<int>                 g_State, g_prev_State;
@@ -1097,18 +1091,6 @@ void MainFrame::loadConfiguration_()
     restoreCallsignListFromCsv_();
     m_logQSO->Enable(m_lastReportedCallsignListView->GetItemCount() > 0);
 
-    // Show/hide callsign combo box based on reporting enablement
-    if (wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled)
-    {
-        m_cboLastReportedCallsigns->Show();
-        m_txtCtrlCallSign->Hide();
-        m_cboLastReportedCallsigns->Enable(m_lastReportedCallsignListView->GetItemCount() > 0);
-    }
-    else
-    {
-        m_cboLastReportedCallsigns->Hide();
-        m_txtCtrlCallSign->Show();
-    }
 
     // Ensure that sound card count is correct. Otherwise the Audio Options won't show
     // the correct devices prior to start.
@@ -1296,7 +1278,6 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("FreeDV ")
     m_plotSNRTimer.SetOwner(this, ID_TIMER_SNR);
 
     m_plotTimer.SetOwner(this, ID_TIMER_UPDATE_OTHER);
-    m_pskReporterTimer.SetOwner(this, ID_TIMER_PSKREPORTER);
     m_updFreqStatusTimer.SetOwner(this,ID_TIMER_UPD_FREQ);
     m_totTimer.SetOwner(this, ID_TIMER_TOT);
     Bind(wxEVT_TIMER, &MainFrame::OnTOTTimer, this, ID_TIMER_TOT);
@@ -1403,10 +1384,6 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("FreeDV ")
     g_tx.store(false, std::memory_order_release);
     g_voice_keyer_tx.store(false, std::memory_order_release);
 
-    // data states
-    g_txDataInFifo.store(new GenericFIFO<short>(MAX_CALLSIGN*FREEDV_VARICODE_MAX_BITS), std::memory_order_release);
-    g_rxDataOutFifo = codec2_fifo_create(MAX_CALLSIGN*FREEDV_VARICODE_MAX_BITS);
-
     sox_biquad_start();
 
     g_testFrames = 0;
@@ -1445,17 +1422,6 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("FreeDV ")
                 // Show/hide frequency box based on CAT control configuration.
                 m_freqBox->Show(isFrequencyControlEnabled_());
 
-                // Show/hide callsign combo box based on PSK Reporter Status
-                if (wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled)
-                {
-                    m_cboLastReportedCallsigns->Show();
-                    m_txtCtrlCallSign->Hide();
-                }
-                else
-                {
-                    m_cboLastReportedCallsigns->Hide();
-                    m_txtCtrlCallSign->Show();
-                }
 
                 // Relayout window so that the changes can take effect.
                 m_panel->Layout();
@@ -1664,15 +1630,17 @@ void MainFrame::startTextMessaging_()
         // The snooping window hears it all the same.
         auto& session = TextMessaging::TextMessagingSession::instance();
         session.snoop().onFrame(frame, snr, TextMessaging::SnoopSource::Glissando, std::time(nullptr));
+        logStationHeard_(frame.originCallsign, snr, "GLISSANDO");
         if (data2gChatActive_.load(std::memory_order_acquire)) return;
         session.protocol().onFrameReceived(frame, snr);
     });
 
     m_data2gTransport = new TextMessaging::Data2GTransport();
     m_data2gTransport->setLogFunction([](const std::string& line) { log_info("%s", line.c_str()); });
-    m_data2gTransport->setFrameCallback([](const TextMessaging::Frame& frame, float snr) {
+    m_data2gTransport->setFrameCallback([this](const TextMessaging::Frame& frame, float snr) {
         auto& session = TextMessaging::TextMessagingSession::instance();
         session.snoop().onFrame(frame, snr, TextMessaging::SnoopSource::Data2G, std::time(nullptr));
+        logStationHeard_(frame.originCallsign, snr, "DATA2G");
         session.protocol().onFrameReceived(frame, snr);
     });
 
@@ -1694,6 +1662,37 @@ void MainFrame::startTextMessaging_()
 
     applyChatModem_();
     updateTextChatTransmitPermission_();
+}
+
+//-------------------------------------------------------------------------
+// logStationHeard_(): the stations heard log (Preferences, Options, Station)
+// gets a line for each station whose chat frames are heard, at most one per
+// station and frequency every ten minutes.
+//-------------------------------------------------------------------------
+void MainFrame::logStationHeard_(std::string const& callsign, float snr, std::string const& modem)
+{
+    if (callsign.empty()) return;
+
+    CallAfter([this, callsign, snr, modem]() {
+        if (wxGetApp().m_reporters.empty()) return;
+
+        constexpr auto RELOG_AFTER = std::chrono::minutes(10);
+        auto now = std::chrono::steady_clock::now();
+        int64_t frequency = wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency;
+        auto last = stationsHeardLogged_.find(callsign);
+        if (last != stationsHeardLogged_.end() && last->second.second == frequency &&
+            now - last->second.first < RELOG_AFTER)
+        {
+            return;
+        }
+        stationsHeardLogged_[callsign] = {now, frequency};
+
+        signed char snrDb = (signed char)std::max(-128.0f, std::min(127.0f, std::round(snr)));
+        for (auto& reporter : wxGetApp().m_reporters)
+        {
+            reporter->addReceiveRecord(callsign, modem, frequency > 0 ? (uint64_t)frequency : 0, snrDb);
+        }
+    });
 }
 
 //-------------------------------------------------------------------------
@@ -1957,10 +1956,6 @@ MainFrame::~MainFrame()
         g_sfRecFileFromModulator = NULL;
     }
 #ifdef _USE_TIMER
-    if(m_pskReporterTimer.IsRunning())
-    {
-        m_pskReporterTimer.Stop();
-    }
     if(m_plotTimer.IsRunning())
     {
         m_plotTimer.Stop();
@@ -2046,15 +2041,7 @@ void MainFrame::OnTimer(wxTimerEvent &evt)
     }
     syncState = syncState_;
 
-    if (timerId == ID_TIMER_PSKREPORTER)
-    {
-        // Reporter timer fired; send in-progress packet.
-        for (auto& obj : wxGetApp().m_reporters)
-        {
-            obj->send();
-        }
-    }
-    else if (timerId == ID_TIMER_UPD_FREQ)
+    if (timerId == ID_TIMER_UPD_FREQ)
     {
         // show freq. and mode [UP]
         if (wxGetApp().rigFrequencyController && wxGetApp().rigFrequencyController->isConnected()) 
@@ -2259,163 +2246,6 @@ void MainFrame::OnTimer(wxTimerEvent &evt)
         }
         g_prev_State.store(state, std::memory_order_release);
 
-        // send Callsign ----------------------------------------------------
-
-        char callsign[MAX_CALLSIGN];
-        memset(callsign, 0, MAX_CALLSIGN);
-    
-        if (!wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled)
-        {
-            strncpy(callsign, (const char*) wxGetApp().appConfiguration.reportingConfiguration.reportingFreeTextString->mb_str(wxConvUTF8), MAX_CALLSIGN - 2);
-            if (strlen(callsign) < MAX_CALLSIGN - 1)
-            {
-                strncat(callsign, "\r", 2);
-            }     
-     
-            // buffer 1 txt message to ensure tx data fifo doesn't "run dry"
-            char* sendBuffer = &callsign[0];
-            auto txDataFifo = g_txDataInFifo.load(std::memory_order_acquire);
-            if ((unsigned)txDataFifo->numUsed() < strlen(sendBuffer)) {
-                unsigned int  i;
-
-                // write chars to tx data fifo
-                for(i = 0; i < strlen(sendBuffer); i++) {
-                    short ashort = (unsigned char)sendBuffer[i];
-                    txDataFifo->write(&ashort, 1);
-                }
-            }
-
-            // See if any Callsign info received --------------------------------
-
-            short ashort;
-            while (codec2_fifo_read(g_rxDataOutFifo, &ashort, 1) == 0) {
-                unsigned char incomingChar = (unsigned char)ashort;
-        
-                // Pre-1.5.1 behavior, where text is handled as-is.
-                if (incomingChar == '\r' || incomingChar == '\n' || incomingChar == 0 || ((m_pcallsign - m_callsign) > MAX_CALLSIGN-1))
-                {                        
-                    // CR completes line. Fill in remaining positions with zeroes.
-                    if ((m_pcallsign - m_callsign) <= MAX_CALLSIGN-1)
-                    {
-                        memset(m_pcallsign, 0, MAX_CALLSIGN - (m_pcallsign - m_callsign));
-                    }
-            
-                    // Reset to the beginning.
-                    m_pcallsign = m_callsign;
-                }
-                else
-                {
-                    *m_pcallsign++ = incomingChar;
-                }
-                m_txtCtrlCallSign->SetValue(m_callsign);
-            }
-        }
-
-        // We should only report to reporters when all of the following are true:
-        // a) The callsign encoder indicates a valid callsign has been received.
-        // b) We detect a valid format callsign in the text (see https://en.wikipedia.org/wiki/Amateur_radio_call_signs).
-        // c) We don't currently have a pending report to add to the outbound list for the active callsign.
-        // When the above is true, capture the callsign and current SNR and add to the PSK Reporter object's outbound list.
-        if (wxGetApp().m_reporters.size() > 0 && wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled)
-        {
-            const char* text = freedvInterface.getReliableText();
-            assert(text != nullptr);
-
-            wxString wxCallsign; 
-            if (text != nullptr && strlen(text) > 0) wxCallsign = text;
-
-            delete[] text;
-        
-            auto pendingSnr = (int)(g_snr + 0.5);
-            if (wxCallsign.Length() > 0)
-            {
-                freedvInterface.resetReliableText();
-
-                wxRegEx callsignFormat(CALLSIGN_FORMAT_RGX);
-                if (callsignFormat.Matches(wxCallsign))
-                {
-                    wxString rxCallsign = callsignFormat.GetMatch(wxCallsign, 1);
-                    std::string pendingCallsign = rxCallsign.ToStdString();
-
-                    wxString freqString;
-                    if (wxGetApp().appConfiguration.reportingConfiguration.reportingFrequencyAsKhz)
-                    {
-                        double freq = wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency.get() / 1000.0;
-                        freqString = wxNumberFormatter::ToString(freq, 1);
-                    }
-                    else
-                    {
-                        double freq = wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency.get() / 1000000.0;
-                        freqString = wxNumberFormatter::ToString(freq, 4);
-                    }
-
-                    if ((m_lastReportedCallsignListView->GetItemCount() == 0 || 
-                        m_lastReportedCallsignListView->GetItemText(0, 0) != rxCallsign ||
-                        m_lastReportedCallsignListView->GetItemText(0, 1) != freqString) ||
-                        (m_lastReportedCallsignListView->GetItemCount() > 0 && m_lastReportedCallsignListView->GetItemTextColour(0) == wxColour(160, 160, 160)))
-                    {
-                        auto currentTime = wxDateTime::Now();
-                        wxString currentTimeAsString = EMPTY_STR;
-                        
-                        if (wxGetApp().appConfiguration.reportingConfiguration.useUTCForReporting)
-                        {
-                            currentTime = currentTime.ToUTC();
-                        }
-                        currentTimeAsString.Printf(CURRENT_TIME_FORMAT_STR, currentTime.FormatISODate(), currentTime.FormatISOTime());
-                        
-                        auto index = m_lastReportedCallsignListView->InsertItem(0, rxCallsign, 0);
-                        m_lastReportedCallsignListView->SetItem(index, 1, freqString);
-                        m_lastReportedCallsignListView->SetItem(index, 2, currentTimeAsString);
-
-                        // Make sure all columns are wide enough to show contents
-                        m_lastReportedCallsignListView->SetColumnWidth(0, getIdealStationsHeardColumnLength_(0));
-                        m_lastReportedCallsignListView->SetColumnWidth(1, getIdealStationsHeardColumnLength_(1));
-                        m_lastReportedCallsignListView->SetColumnWidth(2, getIdealStationsHeardColumnLength_(2));
-                    }
-                    
-                    wxString snrAsString;
-                    snrAsString.Printf(SNR_FORMAT_STR_NO_DB, g_snr);
-                    auto index = m_lastReportedCallsignListView->GetTopItem();
-                    m_lastReportedCallsignListView->SetItem(index, 3, snrAsString);
-                    m_lastReportedCallsignListView->SetColumnWidth(3, getIdealStationsHeardColumnLength_(3));
-                    
-                    m_cboLastReportedCallsigns->SetText(rxCallsign);
-                    m_cboLastReportedCallsigns->Enable(m_lastReportedCallsignListView->GetItemCount() > 0);
-           
-                    if (wxGetApp().appConfiguration.rigControlConfiguration.hamlibUseForPTT)
-                    {
-                        wxGetApp().rigFrequencyController->requestCurrentFrequencyMode();
-                    }
-            
-                    int64_t freq = wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency;
-
-                    // Only report if there's a valid reporting frequency and if we're not playing 
-                    // a recording through ourselves (to avoid false reports).
-                    if (freq > 0)
-                    {
-                        long long freqLongLong = freq;
-                        log_info(
-                            "Reporting callsign %s @ SNR %d, freq %lld to reporting services.\n", 
-                            pendingCallsign.c_str(), 
-                            pendingSnr,
-                            freqLongLong);
-        
-                        if (!g_playFileFromRadio.load(std::memory_order_acquire))
-                        {
-                            for (auto& obj : wxGetApp().m_reporters)
-                            {
-                                obj->addReceiveRecord(
-                                    pendingCallsign,
-                                    freedvInterface.getCurrentModeStr(),
-                                    freq,
-                                    pendingSnr);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    
         // Run time update of EQ filters -----------------------------------
 
         g_mutexProtectingCallbackData.Lock();
@@ -2781,7 +2611,7 @@ void MainFrame::performFreeDVOn_()
         g_sfTxFs.store(FS, std::memory_order_release);
     
         wxGetApp().m_prevMode = g_mode;
-        freedvInterface.start(g_mode, wxGetApp().appConfiguration.fifoSizeMs, !wxGetApp().appConfiguration.multipleReceiveEnabled || wxGetApp().appConfiguration.multipleReceiveOnSingleThread, wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled);
+        freedvInterface.start(g_mode, wxGetApp().appConfiguration.fifoSizeMs, !wxGetApp().appConfiguration.multipleReceiveEnabled || wxGetApp().appConfiguration.multipleReceiveOnSingleThread, false);
 
         // Codec 2 VQ Equaliser
         freedvInterface.setEq(wxGetApp().appConfiguration.filterConfiguration.enable700CEqualizer);
@@ -2789,28 +2619,6 @@ void MainFrame::performFreeDVOn_()
         // Codec2 verbosity setting
         freedvInterface.setVerbose(g_freedv_verbose);
 
-        // Text field/callsign callbacks.
-        if (!wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled)
-        {
-            freedvInterface.setTextCallbackFn(&my_put_next_rx_char, &my_get_next_tx_char);
-        }
-        else
-        {
-            char temp[9];
-            memset(temp, 0, 9);
-            strncpy(temp, wxGetApp().appConfiguration.reportingConfiguration.reportingCallsign->ToUTF8(), 8); // One less than the size of temp to ensure we don't overwrite the null.
-            log_info("Setting callsign to %s", temp);
-            freedvInterface.setReliableText(temp);
-            
-            // Create logger object
-            if (wxGetApp().appConfiguration.reportingConfiguration.udpReportingEnabled)
-            {
-                wxGetApp().logger = std::make_shared<WSJTXNetworkLogger>(
-                    (const char*)wxGetApp().appConfiguration.reportingConfiguration.udpReportingHostname->ToUTF8(),
-                    wxGetApp().appConfiguration.reportingConfiguration.udpReportingPort);
-            }
-        }
-    
         g_error_hist = new short[MODEM_STATS_NC_MAX*2];
         g_error_histn = new short[MODEM_STATS_NC_MAX*2];
         int i;
@@ -2832,10 +2640,6 @@ void MainFrame::performFreeDVOn_()
         // adjust spectrum and waterfall freq scaling base on mode
         m_panelSpectrum->setFreqScale(MODEM_STATS_NSPEC*((float)MAX_F_HZ/(freedvInterface.getTxModemSampleRate()/2)));
         m_panelWaterfall->setFs(freedvInterface.getTxModemSampleRate());
-    
-        // Init text msg decoding
-        if (!wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled)
-            freedvInterface.setTextVaricodeNum(1);
     });
 
     g_State.store(0, std::memory_order_release);
@@ -2851,10 +2655,6 @@ void MainFrame::performFreeDVOn_()
     {
         m_gaugeLevel->SetValue(0);
         
-        if (wxGetApp().logger != nullptr)
-        {
-            m_logQSO->Enable(true);
-        }
     });
     
     // attempt to start sound cards and tx/rx processing
@@ -2919,57 +2719,17 @@ void MainFrame::performFreeDVOn_()
                 // The radio keeps whatever frequency it is on; see
                 // onRadioConnected_() for the one exception.
 
-                // Initialize PSK Reporter reporting.
-                if (wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled)
-                {        
-                    if (wxGetApp().appConfiguration.reportingConfiguration.reportingCallsign->ToStdString() == "" || wxGetApp().appConfiguration.reportingConfiguration.reportingGridSquare->ToStdString() == "")
-                    {
-                        executeOnUiThreadAndWait_([&]() 
-                        {
-                            wxMessageBox("Reporting requires a valid callsign and grid square in Tools->Options. Reporting will be disabled.", wxT("Error"), wxOK | wxICON_ERROR, this);
-                        });
-                    }
-                    else
-                    {
-                        auto csvPath = wxGetApp().appConfiguration.reportingConfiguration.csvLogFilePath.get();
-                        wxGetApp().m_reporters.push_back(std::make_shared<CsvReporter>(csvPath.ToStdString()));
-
-                        if (wxGetApp().appConfiguration.reportingConfiguration.pskReporterEnabled)
-                        {
-                            auto pskReporter =
-                                std::make_shared<PskReporter>(
-                                    wxGetApp().appConfiguration.reportingConfiguration.reportingCallsign->ToStdString(),
-                                    wxGetApp().appConfiguration.reportingConfiguration.reportingGridSquare->ToStdString(),
-                                    std::string("FreeDV ") + GetFreeDVVersion());
-                            assert(pskReporter != nullptr);
-                            wxGetApp().m_reporters.push_back(pskReporter);
-                        }
-                        
-                        if (wxGetApp().appConfiguration.reportingConfiguration.udpBroadcastEnabled)
-                        {
-                            auto udpBroadcastReporter = std::make_shared<UdpReporter>(
-                                wxGetApp().appConfiguration.reportingConfiguration.udpBroadcastAddress->ToStdString(),
-                                wxGetApp().appConfiguration.reportingConfiguration.udpBroadcastPort);
-                            wxGetApp().m_reporters.push_back(udpBroadcastReporter);
-                        }
-
-                        // Enable PSK Reporter timer (every 5 minutes).
-                        executeOnUiThreadAndWait_([&]() 
-                        {
-                            m_pskReporterTimer.Start(5 * 60 * 1000);
-                        });
-
-                        // Immediately transmit selected TX mode and frequency to avoid UI glitches.
-                        for (auto& obj : wxGetApp().m_reporters)
-                        {
-                            obj->transmit(freedvInterface.getCurrentTxModeStr(), g_tx.load(std::memory_order_acquire));
-                            obj->freqChange(wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency);
-                        }
-                    }
-                }
-                else
+                // The stations heard log is the one reporter left: each
+                // station whose chat is heard goes into it (see
+                // logStationHeard_()). PSK Reporter and the UDP reporters
+                // are parked.
+                wxGetApp().m_reporters.clear();
                 {
-                    wxGetApp().m_reporters.clear();
+                    auto csvPath = wxGetApp().appConfiguration.reportingConfiguration.csvLogFilePath.get();
+                    if (!csvPath.IsEmpty())
+                    {
+                        wxGetApp().m_reporters.push_back(std::make_shared<CsvReporter>(csvPath.ToStdString()));
+                    }
                 }
 
                 if (wxGetApp().appConfiguration.rigControlConfiguration.useSerialPTTInput)
@@ -3005,10 +2765,6 @@ void MainFrame::performFreeDVOn_()
             wxMessageBox(wxString("Microphone permissions must be granted to FreeDV for it to function properly."), wxT("Error"), wxOK | wxICON_ERROR, this);
         });
     }
-
-    // Clear existing TX text, if any.
-    auto tmpFifo = g_txDataInFifo.load(std::memory_order_acquire);
-    tmpFifo->reset();
 }
 
 void MainFrame::performFreeDVOff_()
@@ -3044,7 +2800,6 @@ void MainFrame::performFreeDVOff_()
         m_plotSpeechOutTimer.Stop();
         m_plotDemodInTimer.Stop();
         m_plotSNRTimer.Stop();
-        m_pskReporterTimer.Stop();
         m_updFreqStatusTimer.Stop(); // [UP]
     });
 #endif // _USE_TIMER
@@ -3111,7 +2866,6 @@ void MainFrame::performFreeDVOff_()
     
     m_newMicInFilter = m_newSpkOutFilter = true;
     
-    wxGetApp().logger = nullptr;
 
     executeOnUiThreadAndWait_([&]() 
     {
@@ -3656,17 +3410,6 @@ bool MainFrame::validateSoundCardSetup(bool silent)
                     // Show/hide frequency box based on CAT control status
                     m_freqBox->Show(isFrequencyControlEnabled_());
 
-                    // Show/hide callsign combo box based on PSK Reporter Status
-                    if (wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled)
-                    {
-                        m_cboLastReportedCallsigns->Show();
-                        m_txtCtrlCallSign->Hide();
-                    }
-                    else
-                    {
-                        m_cboLastReportedCallsigns->Hide();
-                        m_txtCtrlCallSign->Show();
-                    }
 
                     // Relayout window so that the changes can take effect.
                     m_panel->Layout();
