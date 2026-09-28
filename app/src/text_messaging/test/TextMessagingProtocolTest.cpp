@@ -403,6 +403,24 @@ void testAirTimingWaitsForTheSlowestAnswer()
     CHECK(adagio.ackTimeoutMs > 156100); // what it was, which the jitter could outrun
 }
 
+// Glissando's opening and closing chords (one bar, 4 of a frame's 86
+// symbols) are air time: every burst is two chords longer, and an answer's
+// first frame is heard one chord later.
+void testAirTimingCountsTheChords()
+{
+    auto ms = [](double seconds) { return (int)std::lround(seconds * 1000.0); };
+    const double allegroChord = ALLEGRO_FRAME * 4.0 / 86.0;
+    const double adagioChord = ADAGIO_FRAME * 4.0 / 86.0;
+    double allegroLatency = glissandoLatency(ALLEGRO_FRAME);
+    double adagioLatency = glissandoLatency(ADAGIO_FRAME);
+    AirTiming bare = AirTiming::forFrameSeconds(ALLEGRO_FRAME, 9, allegroLatency, ADAGIO_FRAME, adagioLatency);
+    AirTiming chords = AirTiming::forFrameSeconds(ALLEGRO_FRAME, 9, allegroLatency, ADAGIO_FRAME, adagioLatency,
+                                                  allegroChord, adagioChord);
+    CHECK(std::abs(chords.textFragmentAirMs - bare.textFragmentAirMs - ms(2.0 * allegroChord)) <= 1);
+    CHECK(std::abs(chords.ackTimeoutMs - bare.ackTimeoutMs - ms(adagioChord)) <= 1);
+    CHECK(std::abs(chords.replyWindowMs - bare.replyWindowMs - ms(adagioChord)) <= 1);
+}
+
 // A ping sent at Allegro while listening at every tempo, answered at Adagio:
 // the answer's first frame is heard 80 s after the ping ended, well past the
 // 53 s an Allegro answer takes, and the channel stays busy until the pong is
@@ -1923,6 +1941,7 @@ int main()
     testPingAndPong();
     testPingTimesOut();
     testAirTimingWaitsForTheSlowestAnswer();
+    testAirTimingCountsTheChords();
     testPingWaitsForAnAnswerAtASlowerTempo();
     testAutoReplyCanBeDisabled();
     testAckWaitDoesNotBlockTheQueue();

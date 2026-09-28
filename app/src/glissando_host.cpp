@@ -151,6 +151,7 @@ void MainFrame::applyGlissandoToModem_(bool enabled)
     if (Glissando::scaleFromName(((wxString)config.glissandoScale).ToStdString(), scale)) modemConfig.scale = scale;
     modemConfig.tuningOffsetHz = config.glissandoTuningDeciHz / 10.0;
     modemConfig.listenAllGears = config.glissandoListenAllGears;
+    modemConfig.chords = config.glissandoChords;
     textMessagingModem().setGlissando(modemConfig);
 
     // Automatic shifting can change the tempo at any frame heard, and every
@@ -289,6 +290,8 @@ std::vector<GlissandoScopeSent> MainFrame::glissandoSentFrames()
         frame.heroes = sent.scale == Glissando::Scale::Pentatonic;
         std::copy(sent.notesHz.begin(), sent.notesHz.end(), frame.notesHz.begin());
         frame.melody.assign(sent.melody.begin(), sent.melody.end());
+        frame.leadSeconds = sent.leadSeconds;
+        frame.tailSeconds = sent.tailSeconds;
         frames.push_back(std::move(frame));
     }
     return frames;

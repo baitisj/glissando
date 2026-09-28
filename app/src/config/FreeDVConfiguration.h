@@ -102,6 +102,7 @@ public:
     ConfigurationDataElement<wxString> glissandoScale;
     ConfigurationDataElement<int> glissandoTuningDeciHz;
     ConfigurationDataElement<bool> glissandoListenAllGears;
+    ConfigurationDataElement<bool> glissandoChords;
     ConfigurationDataElement<int> glissandoScanRateDeci;
     ConfigurationDataElement<bool> glissandoScopeLens;
     ConfigurationDataElement<long> glissandoWindowLeft;

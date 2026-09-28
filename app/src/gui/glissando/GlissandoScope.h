@@ -77,6 +77,8 @@ struct GlissandoScopeSent
     bool heroes = true;             // pentatonic
     std::array<double, 8> notesHz{};
     std::vector<int> melody;        // note index of every symbol
+    double leadSeconds = 0.0;       // the opening chord, sung before this frame
+    double tailSeconds = 0.0;       // the closing chord, sung after it
 };
 
 class GlissandoScope : public wxControl

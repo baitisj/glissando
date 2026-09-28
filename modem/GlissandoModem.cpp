@@ -233,6 +233,51 @@ std::vector<float> modulate(const std::vector<Payload>& payloads, const ModemSet
     return audio;
 }
 
+double chordSeconds(int gear)
+{
+    return 4.0 * gearInfo(gear).symbolSeconds;
+}
+
+std::vector<float> chord(const ModemSettings& settings)
+{
+    const GearInfo& gear = gearInfo(settings.gear);
+    const size_t length = (size_t)std::lround(chordSeconds(settings.gear) * SAMPLE_RATE_HZ);
+    std::vector<double> sum(length, 0.0);
+
+    // Newman's phases (pi k^2 / N) keep the notes from all peaking together
+    // at the start, which would leave the rest of the chord quieter still.
+    const int count = NOTES * gear.voices;
+    int k = 0;
+    for (int voice = 0; voice < gear.voices; voice++)
+    {
+        for (double hz : detail::voiceFrequencies(settings.scale, voice, settings.tuningOffsetHz))
+        {
+            const double phase = PI * (double)(k * k) / count;
+            const double step = 2.0 * PI * hz / SAMPLE_RATE_HZ;
+            for (size_t n = 0; n < length; n++) sum[n] += std::sin(step * (double)n + phase);
+            k++;
+        }
+    }
+
+    // A gentle swell and release, an eighth of the chord each, and the whole
+    // scaled to peak amplitude 1.
+    const size_t ramp = std::max<size_t>(length / 8, 1);
+    double peak = 0.0;
+    for (size_t n = 0; n < length; n++)
+    {
+        double w = 1.0;
+        if (n < ramp)
+            w = 0.5 - 0.5 * std::cos(PI * (double)n / ramp);
+        else if (n >= length - ramp)
+            w = 0.5 - 0.5 * std::cos(PI * (double)(length - 1 - n) / ramp);
+        sum[n] *= w;
+        peak = std::max(peak, std::fabs(sum[n]));
+    }
+    std::vector<float> audio(length);
+    for (size_t n = 0; n < length; n++) audio[n] = (float)(peak > 0.0 ? sum[n] / peak : 0.0);
+    return audio;
+}
+
 std::array<int, SYMBOLS_PER_FRAME> payloadMelody(const Payload& payload)
 {
     return detail::frameNotes(encodeFrame(payload));

@@ -264,10 +264,16 @@ struct AirTiming
     // been decoded; once it has, the channel is busy and the protocol holds
     // its timers for the rest. Without them the timings are as they were,
     // which is what Data2G uses.
+    //
+    // chordSeconds is the chord that opens and closes each of our keyings
+    // (Glissando's; 0 for none) and replyChordSeconds the one that opens an
+    // answer at the slowest tempo.
     static AirTiming forFrameSeconds(double frameSeconds, int bytesPerFrame,
                                      double decodeLatencySeconds,
                                      double replyFrameSeconds = 0.0,
-                                     double replyDecodeLatencySeconds = 0.0);
+                                     double replyDecodeLatencySeconds = 0.0,
+                                     double chordSeconds = 0.0,
+                                     double replyChordSeconds = 0.0);
 };
 
 // What the station is currently waiting to hear back, which is what the chat
