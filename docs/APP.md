@@ -59,6 +59,14 @@ Both open at launch:
 * **The chat window** ("Glissando Chat"): heard stations, the transmission
   log and the transmitter, in the same dress. Closing it only hides it;
   `Transmission log` on the console brings it back.
+* **The snooping window** ("Glissando Snooper"): every message the station
+  hears, including directed messages between other stations, which the chat
+  window leaves out. Messages for you are lit and marked FOR YOU. The
+  pings, pongs and acknowledgements around them are listed in small print, and
+  `Every frame` adds each fragment as it is decoded. An addressee that has
+  never been heard transmitting shows as `#` and the CRC of its callsign,
+  because frames carry only that. Closing it only hides it; `Snooper` on the
+  console brings it back with everything heard meanwhile.
 
 `--glissando` is still accepted, so older scripts keep working, but it no
 longer changes anything.
@@ -79,6 +87,7 @@ longer changes anything.
 | Telemetry | SNR meter, Doppler spread, tempo of the last frame and how long ago, tempo we would send at, that tempo's frame length, and the scale the last frame was sung in. |
 | Engage | Starts and stops audio. |
 | Transmission log | Brings the chat window back if it was closed. |
+| Snooper | Brings the snooping window back if it was closed. |
 | Preferences | Drops down Options, Sound cards, Rig control (CAT and PTT), Audio filters and Easy setup. Sound cards, rig control and easy setup only change while disengaged. The app opens only the radio's two audio streams, input from the radio and output to it, so Sound cards and Easy setup ask for nothing else; leave the output as none to only listen. |
 
 Glissando keeps its own settings and never reads or changes FreeDV's, so the

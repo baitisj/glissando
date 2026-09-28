@@ -5,6 +5,7 @@ add_library(fdv_gui_dialogs STATIC
     dlg_filter.cpp
     dlg_options.cpp
     dlg_ptt.cpp
+    dlg_snoop.cpp
     dlg_text_messaging.cpp
     log_entry.cpp
     monitor_volume_adj.cpp

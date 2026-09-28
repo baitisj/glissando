@@ -563,6 +563,7 @@ void TextMessagingDialog::refreshFromSession()
     // operator has already told FreeDV about.
     session.protocol().setMyCallsign(
         wxGetApp().appConfiguration.reportingConfiguration.reportingCallsign->ToStdString());
+    session.snoop().setMyCallsign(session.protocol().myCallsign());
 
     m_messages = session.store().recentMessages(TextMessagingSession::MESSAGES_TO_RESTORE);
     m_chkAutoReply->SetChecked(session.protocol().autoReplyEnabled());
@@ -872,6 +873,7 @@ void TextMessagingDialog::addStation()
     }
 
     session.stations().pin(callsign);
+    session.snoop().addKnownCallsign(callsign);
     m_txtAddStation->Clear();
     refreshStations();
 
