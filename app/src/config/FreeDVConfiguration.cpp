@@ -118,7 +118,6 @@ FreeDVConfiguration::FreeDVConfiguration()
 void FreeDVConfiguration::load(wxConfigBase* config)
 {
     audioConfiguration.load(config);
-    filterConfiguration.load(config);
     rigControlConfiguration.load(config);
     reportingConfiguration.load(config);
     
@@ -205,7 +204,6 @@ void FreeDVConfiguration::load(wxConfigBase* config)
 void FreeDVConfiguration::save(wxConfigBase* config)
 {
     audioConfiguration.save(config);
-    filterConfiguration.save(config);
     rigControlConfiguration.save(config);
     reportingConfiguration.save(config);
     

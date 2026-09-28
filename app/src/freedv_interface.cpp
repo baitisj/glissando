@@ -382,14 +382,6 @@ int FreeDVInterface::getSync() const
     return sync_.load(std::memory_order_acquire);
 }
 
-void FreeDVInterface::setEq(int val)
-{
-    for (auto& dv : dvObjects_)
-    {
-        freedv_set_eq(dv, val);
-    }
-}
-
 void FreeDVInterface::setCarrierAmplitude(int c, float amp)
 {
     for (auto& dv : dvObjects_)
@@ -449,26 +441,6 @@ int FreeDVInterface::getTxNNomModemSamples() const FREEDV_NONBLOCKING
 {
     assert(currentTxMode_ != nullptr);
     return freedv_get_n_nom_modem_samples(currentTxMode_);   
-}
-
-void FreeDVInterface::setLpcPostFilter(int enable, int bassBoost, float beta, float gamma)
-{
-    for (auto& dv : dvObjects_)
-    {
-        struct CODEC2 *c2 = freedv_get_codec2(dv);
-        if (c2 != NULL) 
-        {
-            codec2_set_lpc_post_filter(c2, enable, bassBoost, beta, gamma);
-        }
-    }
-}
-
-void FreeDVInterface::setTextVaricodeNum(int num)
-{
-    for (auto& dv : dvObjects_)
-    {
-        freedv_set_varicode_code_num(dv, num);
-    }
 }
 
 int FreeDVInterface::getRxModemSampleRate() const

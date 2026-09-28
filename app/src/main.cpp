@@ -52,7 +52,6 @@
 #include "reporting/CsvReporter.h"
 
 #include "gui/dialogs/dlg_options.h"
-#include "gui/dialogs/dlg_filter.h"
 #include "gui/dialogs/dlg_easy_setup.h"
 #include "gui/dialogs/dlg_snoop.h"
 #include "gui/dialogs/dlg_text_messaging.h"
@@ -130,7 +129,6 @@ std::atomic<int>    g_analog;
 std::atomic<bool>   g_tx;
 float g_snr;
 std::atomic<bool>  g_half_duplex;
-std::atomic<bool>  g_agcEnabled;
 // sending and receiving Call Sign data
 
 // tx/rx processing states
@@ -938,11 +936,6 @@ void MainFrame::loadConfiguration_()
         SetSize(w, h);
     });
     
-    // Load AGC state
-    g_agcEnabled.store(wxGetApp().appConfiguration.filterConfiguration.agcEnabled, std::memory_order_release);
-    
-    // Load BW expander state
-    
     g_txLevel = wxGetApp().appConfiguration.transmitLevel;
     float dbLoss = g_txLevel / 10.0;
     float scaleFactor = exp(dbLoss/20.0 * log(10.0));
@@ -955,10 +948,6 @@ void MainFrame::loadConfiguration_()
     dbLoss = g_tuneLevel / 10.0;
     scaleFactor = exp(dbLoss/20.0 * log(10.0));
     g_tuneLevelScale.store(scaleFactor, std::memory_order_release);
-
-    m_sliderMicSpkrLevel->SetValue(wxGetApp().appConfiguration.filterConfiguration.spkOutChannel.volInDB * 10);
-    fmtString = wxString::Format(MIC_SPKR_LEVEL_FORMAT_STR, wxNumberFormatter::ToString((double)wxGetApp().appConfiguration.filterConfiguration.spkOutChannel.volInDB, 1), DECIBEL_STR);
-    m_txtMicSpkrLevelNum->SetLabel(fmtString);
 
     // Adjust frequency entry labels
     wxListItem colInfo;
@@ -1157,7 +1146,6 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("FreeDV ")
     m_textMessagingTransport = nullptr;
     m_data2gTransport = nullptr;
     m_glissandoConsole = nullptr;
-    m_filterDialog = nullptr;
 
     // Initialize panel pointers to null before creation since "page changed" 
     // events fire as we're adding these (and we compare against these pointers
@@ -1293,8 +1281,6 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("FreeDV ")
     g_TxFreqOffsetHz.store(0.0f, std::memory_order_relaxed);
 
     g_tx.store(false, std::memory_order_release);
-
-    sox_biquad_start();
 
     g_testFrames = 0;
     g_test_frame_sync_state = 0;
@@ -1805,11 +1791,6 @@ MainFrame::~MainFrame()
         m_textMessagingDialog = nullptr;
     }
 
-    if (m_filterDialog != nullptr)
-    {
-        m_filterDialog->Close();
-    }
-    
 #ifdef FTEST
     fclose(ftest);
     #endif
@@ -1831,7 +1812,6 @@ MainFrame::~MainFrame()
             freedvInterface.stop();
         }  
     }
-    sox_biquad_finish();
 
     auto playFile = g_sfPlayFile.load(std::memory_order_acquire);
     if (playFile != NULL)
@@ -2016,34 +1996,6 @@ void MainFrame::OnTimer(wxTimerEvent &evt)
             memcpy(g_avmag_spectrum, g_avmag_waterfall, sizeof(g_avmag_waterfall));
          }
 
-         // Synchronize changes with Filter dialog
-         if (m_filterDialog != nullptr)
-         {
-             // Sync Filter dialog as well
-             m_filterDialog->syncVolumes();
-
-             if (m_filterDialog->haveVolumesBeenChanged())
-             {
-                auto sliderVal = 0.0;
-                if (txState)
-                {
-                    sliderVal = wxGetApp().appConfiguration.filterConfiguration.micInChannel.volInDB;
-                }
-                else
-                {
-                    sliderVal = wxGetApp().appConfiguration.filterConfiguration.spkOutChannel.volInDB;
-                }
-
-                if ((sliderVal * 10) != m_sliderMicSpkrLevel->GetValue())
-                {
-                    m_sliderMicSpkrLevel->SetValue(sliderVal * 10);
-                    m_sliderMicSpkrLevel->Refresh();
-                    wxString fmt = wxString::Format(MIC_SPKR_LEVEL_FORMAT_STR, wxNumberFormatter::ToString((double)sliderVal, 1), DECIBEL_STR);
-                    m_txtMicSpkrLevelNum->SetLabel(fmt);
-                }
-            }
-         }
-
         // SNR text box and gauge ------------------------------------------------------------
 
         // LP filter freedvInterface.getCurrentRxModemStats()->snr_est some more to stabilise the
@@ -2136,31 +2088,6 @@ void MainFrame::OnTimer(wxTimerEvent &evt)
         }
         g_prev_State.store(state, std::memory_order_release);
 
-        // Run time update of EQ filters -----------------------------------
-
-        g_mutexProtectingCallbackData.Lock();
-
-        bool micEqEnableOld = g_rxUserdata->micInEQEnable.load(std::memory_order_relaxed);
-        bool spkrEqEnableOld = g_rxUserdata->spkOutEQEnable.load(std::memory_order_relaxed);
-
-        if (m_newMicInFilter || m_newSpkOutFilter ||
-            micEqEnableOld != wxGetApp().appConfiguration.filterConfiguration.micInChannel.eqEnable ||
-            spkrEqEnableOld != wxGetApp().appConfiguration.filterConfiguration.spkOutChannel.eqEnable) {
-            
-            deleteEQFilters(g_rxUserdata);
-        
-            g_rxUserdata->micInEQEnable.store(wxGetApp().appConfiguration.filterConfiguration.micInChannel.eqEnable, std::memory_order_relaxed);
-            g_rxUserdata->spkOutEQEnable.store(wxGetApp().appConfiguration.filterConfiguration.spkOutChannel.eqEnable, std::memory_order_relaxed);
-
-            if (m_newMicInFilter || m_newSpkOutFilter)
-            {
-                designEQFilters(g_rxUserdata, wxGetApp().appConfiguration.audioConfiguration.soundCard1In.sampleRate, 0);
-            }
-
-            m_newMicInFilter = m_newSpkOutFilter = false;
-        }
-        g_mutexProtectingCallbackData.Unlock();
-    
         // set some run time options (if applicable)
         freedvInterface.setRunTimeOptions(
             (int)wxGetApp().appConfiguration.freedv700Clip,
@@ -2394,10 +2321,6 @@ void MainFrame::OnChangeTxMode( wxCommandEvent& event )
             freedvInterface.changeTxMode(g_mode);
         }
     
-        // Force recreation of EQ filters.
-        m_newMicInFilter = true;
-        m_newSpkOutFilter = true;
-    
         // Report TX change to registered reporters
         auto txStatus = g_tx.load(std::memory_order_acquire);
         for (auto& obj : wxGetApp().m_reporters)
@@ -2497,9 +2420,6 @@ void MainFrame::performFreeDVOn_()
         wxGetApp().m_prevMode = g_mode;
         freedvInterface.start(g_mode, wxGetApp().appConfiguration.fifoSizeMs, !wxGetApp().appConfiguration.multipleReceiveEnabled || wxGetApp().appConfiguration.multipleReceiveOnSingleThread, false);
 
-        // Codec 2 VQ Equaliser
-        freedvInterface.setEq(wxGetApp().appConfiguration.filterConfiguration.enable700CEqualizer);
-
         g_error_hist = new short[MODEM_STATS_NC_MAX*2];
         g_error_histn = new short[MODEM_STATS_NC_MAX*2];
         int i;
@@ -2507,13 +2427,6 @@ void MainFrame::performFreeDVOn_()
             g_error_hist[i] = 0;
             g_error_histn[i] = 0;
         }
-
-        // init Codec 2 LPC Post Filter (FreeDV 1600)
-        freedvInterface.setLpcPostFilter(
-                                       wxGetApp().appConfiguration.filterConfiguration.codec2LPCPostFilterEnable,
-                                       wxGetApp().appConfiguration.filterConfiguration.codec2LPCPostFilterBassBoost,
-                                       wxGetApp().appConfiguration.filterConfiguration.codec2LPCPostFilterBeta,
-                                       wxGetApp().appConfiguration.filterConfiguration.codec2LPCPostFilterGamma);
 
         log_debug("freedv_get_n_speech_samples(tx): %d", freedvInterface.getTxNumSpeechSamples());
         log_debug("freedv_get_speech_sample_rate(tx): %d", freedvInterface.getTxSpeechSampleRate());
@@ -2620,7 +2533,6 @@ void MainFrame::performFreeDVOn_()
 
                 executeOnUiThreadAndWait_([&]() 
                 {
-                    m_sliderMicSpkrLevel->Enable(true);
 
         #ifdef _USE_TIMER
                     m_plotTimer.Start(_REFRESH_TIMER_PERIOD, wxTIMER_CONTINUOUS);
@@ -2671,7 +2583,6 @@ void MainFrame::performFreeDVOff_()
             OnTogBtnTune(tmpEvent);
         }
         
-        m_sliderMicSpkrLevel->Enable(false);
         m_btnTogTune->Enable(false);
 
         m_plotTimer.Stop();
@@ -2743,8 +2654,6 @@ void MainFrame::performFreeDVOff_()
     delete[] g_error_hist;
     delete[] g_error_histn;
     freedvInterface.stop();
-    
-    m_newMicInFilter = m_newSpkOutFilter = true;
     
 
     executeOnUiThreadAndWait_([&]() 
@@ -2910,10 +2819,6 @@ void MainFrame::stopRxStream()
         wxGetApp().linkStep = nullptr;
         destroy_fifos();
         
-        // Free memory allocated for filters.
-        m_newMicInFilter = true;
-        m_newSpkOutFilter = true;
-        deleteEQFilters(g_rxUserdata);
         delete g_rxUserdata;
         
         auto engine = AudioEngineFactory::GetAudioEngine();
@@ -3126,24 +3031,6 @@ void MainFrame::startRxStream()
         rxOutFifoSizeSamples += 0.04*modem_samplerate;
 
         log_debug("rxInFifoSizeSamples: %d rxOutFifoSizeSamples: %d", rxInFifoSizeSamples, rxOutFifoSizeSamples);
-
-        // Init Equaliser Filters ------------------------------------------------------
-
-        m_newMicInFilter = m_newSpkOutFilter = true;
-        g_mutexProtectingCallbackData.Lock();
-
-        g_rxUserdata->micInEQEnable.store(wxGetApp().appConfiguration.filterConfiguration.micInChannel.eqEnable, std::memory_order_relaxed);
-        g_rxUserdata->spkOutEQEnable.store(wxGetApp().appConfiguration.filterConfiguration.spkOutChannel.eqEnable, std::memory_order_relaxed);
-
-        // No microphone, so no microphone filters; the receive filters run at
-        // the radio input's rate, which is where the receive pipeline ends.
-        designEQFilters(
-            g_rxUserdata, 
-            wxGetApp().appConfiguration.audioConfiguration.soundCard1In.sampleRate, 
-            0);
-
-        m_newMicInFilter = m_newSpkOutFilter = false;
-        g_mutexProtectingCallbackData.Unlock();
 
         // optional tone in left channel to reliably trigger vox
 

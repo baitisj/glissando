@@ -83,7 +83,6 @@
 #include "text_messaging/TextMessagingTypes.h"
 #include "gui/controls/plot_spectrum.h"
 #include "sndfile.h"
-#include "sox_biquad.h"
 #include "comp_prim.h"
 #include "rig_control/HamlibRigController.h"
 #include "rig_control/SerialPortOutRigController.h"
@@ -147,7 +146,6 @@ void      clearLastUsedConfigPath();
 #define DS_SYNC_WAIT_TIME 5.0
 
 class MainFrame;
-class FilterDlg;
 class TextMessagingDialog;
 class SnoopDialog;
 class TextMessagingTransport;
@@ -278,7 +276,6 @@ class MainFrame : public TopFrame, public IGlissandoHost
         MainFrame(wxWindow *parent);
         virtual ~MainFrame();
 
-        FilterDlg*              m_filterDialog;
         TextMessagingDialog*    m_textMessagingDialog;
         SnoopDialog*            m_snoopDialog;
         TextMessagingTransport* m_textMessagingTransport;
@@ -483,7 +480,6 @@ private:
         void OnToolsAudioUI( wxUpdateUIEvent& event ) override;
         void OnToolsComCfg( wxCommandEvent& event ) override;
         void OnToolsComCfgUI( wxUpdateUIEvent& event ) override;
-        void OnToolsFilter( wxCommandEvent& event ) override;
         void OnToolsOptions(wxCommandEvent& event) override;
         void OnToolsOptionsUI(wxUpdateUIEvent& event) override;
 
@@ -549,7 +545,6 @@ private:
         void loadTuneAttenForBand_(FilterFrequency band);
         void autoSaveCurrentBandLevels_(bool writeConfig = true);
         
-        void OnChangeMicSpkrLevel( wxScrollEvent& event ) override;
         
         void OnChangeReportFrequency( wxCommandEvent& event ) override;
         void OnChangeReportFrequencyVerify( wxCommandEvent& event ) override;
@@ -570,7 +565,6 @@ private:
         
         void OnSetMonitorTxAudioVol( wxCommandEvent& event );
         
-        void OnResetMicSpkrLevel(wxMouseEvent& event) override;
 
         void OnRightClickCallsignList(wxMouseEvent& event) override;
 
@@ -629,14 +623,6 @@ private:
         // level Gauge
         float       m_maxLevel;
 
-        // flags to indicate when new EQ filters need to be designed
-
-        bool        m_newMicInFilter;
-        bool        m_newSpkOutFilter;
-
-        void*       designAnEQFilter(const char filterType[], float freqHz, float gaindB, float Q = 0.0, int sampleRate = 8000);
-        void        designEQFilters(paCallBackData *cb, int rxSampleRate, int txSampleRate);
-        void        deleteEQFilters(paCallBackData *cb);
 
         bool suppressFreqModeUpdates_;
         // The operator picked a frequency in the app while no radio was

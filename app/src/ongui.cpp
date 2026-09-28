@@ -17,7 +17,6 @@
 
 #include "git_version.h"
 #include "gui/dialogs/dlg_easy_setup.h"
-#include "gui/dialogs/dlg_filter.h"
 #include "gui/dialogs/dlg_audiooptions.h"
 #include "gui/dialogs/dlg_options.h"
 #include "gui/dialogs/dlg_ptt.h"
@@ -162,27 +161,6 @@ void MainFrame::OnToolsAudio(wxCommandEvent& event)
 void MainFrame::OnToolsAudioUI(wxUpdateUIEvent& event)
 {
     event.Enable(!m_RxRunning);
-}
-
-//-------------------------------------------------------------------------
-// OnToolsFilter()
-//-------------------------------------------------------------------------
-void MainFrame::OnToolsFilter(wxCommandEvent& event)
-{
-    wxUnusedVar(event);
-    
-    if (m_filterDialog == nullptr)
-    {
-         m_filterDialog = new FilterDlg(NULL, m_RxRunning, &m_newMicInFilter, &m_newSpkOutFilter);
-    }
-    else
-    {
-        m_filterDialog->Iconize(false);
-        m_filterDialog->SetFocus();
-        m_filterDialog->Raise();
-    }
-    
-    m_filterDialog->Show();
 }
 
 //-------------------------------------------------------------------------
@@ -874,28 +852,6 @@ void MainFrame::OnTuneAttenContextMenu( wxContextMenuEvent& )
 }
 
 //-------------------------------------------------------------------------
-// OnChangeMicSpkrLevel()
-//-------------------------------------------------------------------------
-void MainFrame::OnChangeMicSpkrLevel( wxScrollEvent& )
-{
-    auto sliderLevel = (double)m_sliderMicSpkrLevel->GetValue() / 10.0;
-    
-    if (g_tx.load(std::memory_order_acquire))
-    {
-        wxGetApp().appConfiguration.filterConfiguration.micInChannel.volInDB = sliderLevel;
-        m_newMicInFilter = true;
-    }
-    else
-    {
-        wxGetApp().appConfiguration.filterConfiguration.spkOutChannel.volInDB = sliderLevel;
-        m_newSpkOutFilter = true;
-    }
-    
-    wxString fmtString = wxString::Format(MIC_SPKR_LEVEL_FORMAT_STR, wxNumberFormatter::ToString((double)sliderLevel, 1), DECIBEL_STR);
-    m_txtMicSpkrLevelNum->SetLabel(fmtString);
-}
-
-//-------------------------------------------------------------------------
 // OnCheckSQClick()
 //-------------------------------------------------------------------------
 void MainFrame::OnCheckSQClick(wxCommandEvent&)
@@ -1559,26 +1515,8 @@ void MainFrame::togglePTT(void) {
     m_cboReportFrequency->Enable(!newTx);
     m_btnTogTune->Enable(!newTx);
 
-    if (newTx)
-    {
-        micSpeakerBox->SetLabel("Mic &Level");
-
-        m_sliderMicSpkrLevel->SetValue(wxGetApp().appConfiguration.filterConfiguration.micInChannel.volInDB * 10);
-        wxString fmtString = wxString::Format(MIC_SPKR_LEVEL_FORMAT_STR, wxNumberFormatter::ToString((double)wxGetApp().appConfiguration.filterConfiguration.micInChannel.volInDB, 1), DECIBEL_STR);
-        m_txtMicSpkrLevelNum->SetLabel(fmtString);
-    }
-    else
-    {
-        micSpeakerBox->SetLabel("Speaker &Level");
-
-        m_sliderMicSpkrLevel->SetValue(wxGetApp().appConfiguration.filterConfiguration.spkOutChannel.volInDB * 10);
-        wxString fmtString = wxString::Format(MIC_SPKR_LEVEL_FORMAT_STR, wxNumberFormatter::ToString((double)wxGetApp().appConfiguration.filterConfiguration.spkOutChannel.volInDB, 1), DECIBEL_STR);
-        m_txtMicSpkrLevelNum->SetLabel(fmtString);
-    }
-
     CallAfter([&]() {
         txChangeoverOccurring_ = false;
-        m_sliderMicSpkrLevel->Refresh(); // Redraw doesn't happen immediately otherwise in some environments
     });
 
     if (newTx && m_momentaryKeyReleasedDuringChangeover_)
@@ -1757,8 +1695,6 @@ void MainFrame::resetStats_()
             g_error_hist[i] = 0;
             g_error_histn[i] = 0;
         }
-        // resets variance stats every time it is called
-        freedvInterface.setEq(wxGetApp().appConfiguration.filterConfiguration.enable700CEqualizer);
     }
 }
 
@@ -1973,25 +1909,6 @@ void MainFrame::updateReportingFreqList_()
     {
         m_freqBox->SetLabel(_("Radio Freq. (MHz)"));
     }
-}
-
-void MainFrame::OnResetMicSpkrLevel(wxMouseEvent&)
-{
-    auto sliderLevel = 0;
-    if (g_tx.load(std::memory_order_acquire))
-    {
-        wxGetApp().appConfiguration.filterConfiguration.micInChannel.volInDB = sliderLevel;
-        m_newMicInFilter = true;
-    }
-    else
-    {
-        wxGetApp().appConfiguration.filterConfiguration.spkOutChannel.volInDB = sliderLevel;
-        m_newSpkOutFilter = true;
-    }
-    
-    wxString fmtString = wxString::Format(MIC_SPKR_LEVEL_FORMAT_STR, wxNumberFormatter::ToString((double)sliderLevel, 1), DECIBEL_STR);
-    m_txtMicSpkrLevelNum->SetLabel(fmtString);
-    m_sliderMicSpkrLevel->SetValue(sliderLevel);
 }
 
 void MainFrame::OnToolsExportConfigUI(wxUpdateUIEvent& event)

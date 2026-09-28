@@ -90,7 +90,7 @@ longer changes anything.
 | Engage | Starts and stops audio. |
 | Transmission log | Brings the chat window back if it was closed. |
 | Snooper | Lit while the snooping window is up. Press it to open or close that window. |
-| Preferences | Drops down Options, Sound cards, Rig control (CAT and PTT), Audio filters and Easy setup. Sound cards, rig control and easy setup only change while disengaged. The app opens only the radio's two audio streams, input from the radio and output to it, so Sound cards and Easy setup ask for nothing else; leave the output as none to only listen. |
+| Preferences | Drops down Options, Sound cards, Rig control (CAT and PTT) and Easy setup. Sound cards, rig control and easy setup only change while disengaged. The app opens only the radio's two audio streams, input from the radio and output to it, so Sound cards and Easy setup ask for nothing else; leave the output as none to only listen. |
 
 ![The visi-scope at Presto, 10 rows a second, with a message from K6ABC and W1AW's acknowledgement written on it as each frame decoded (a simulated channel, drawn by the scope's own code)](images/visi-scope-captions.png)
 

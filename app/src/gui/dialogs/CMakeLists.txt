@@ -1,7 +1,6 @@
 add_library(fdv_gui_dialogs STATIC
     dlg_audiooptions.cpp
     dlg_easy_setup.cpp
-    dlg_filter.cpp
     dlg_options.cpp
     dlg_ptt.cpp
     dlg_snoop.cpp

@@ -79,7 +79,6 @@ public:
     
     int getSync() const;
     void setSync(int val) FREEDV_NONBLOCKING;
-    void setEq(int val);
     void setVerbose(bool val);
     
     void setTextCallbackFn(void (*rxFunc)(void *, char), char (*txFunc)(void *));
@@ -96,9 +95,7 @@ public:
     int getRxNumSpeechSamples() const FREEDV_NONBLOCKING;
     int getRxSpeechSampleRate() const FREEDV_NONBLOCKING;
     
-    void setLpcPostFilter(int enable, int bassBoost, float beta, float gamma);
     
-    void setTextVaricodeNum(int num);
     
     void setSquelch(bool enable, float level) FREEDV_NONBLOCKING;
     

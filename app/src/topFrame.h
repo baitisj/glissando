@@ -115,8 +115,6 @@ class TopFrame : public wxFrame
         wxButton* m_btnTxLevelM;
         wxButton* m_btnTxLevelP;
         wxButton* m_btnTxLevelPP;
-        wxSlider* m_sliderMicSpkrLevel;
-        wxStaticText* m_txtMicSpkrLevelNum;
         
         wxSlider* m_sliderSQ;        
         wxCheckBox* m_ckboxSQ;
@@ -170,8 +168,6 @@ class TopFrame : public wxFrame
         virtual void OnToolsTextMessagingUI( wxUpdateUIEvent& event ) { event.Skip(); }
         virtual void OnToolsAudio( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnToolsAudioUI( wxUpdateUIEvent& event ) { event.Skip(); }
-        virtual void OnToolsFilter( wxCommandEvent& event ) { event.Skip(); }
-        virtual void OnToolsFilterUI( wxUpdateUIEvent& event ) { event.Skip(); }
         virtual void OnToolsOptions( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnCenterRx( wxCommandEvent& event ) { event.Skip(); }
 
@@ -222,7 +218,6 @@ class TopFrame : public wxFrame
         virtual void OnTxLevelContextMenu( wxContextMenuEvent& event ) { event.Skip(); }
         virtual void OnTuneAttenContextMenu( wxContextMenuEvent& event ) { event.Skip(); }
 
-        virtual void OnChangeMicSpkrLevel( wxScrollEvent& event ) { event.Skip(); }
         
         virtual void OnChangeReportFrequency( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnChangeReportFrequencyVerify( wxCommandEvent& event ) { event.Skip(); }
@@ -232,7 +227,6 @@ class TopFrame : public wxFrame
 
         virtual void OnSystemColorChanged(wxSysColourChangedEvent& event) { event.Skip(); }
                 
-        virtual void OnResetMicSpkrLevel(wxMouseEvent& event) { event.Skip(); }
         
         virtual void OnRightClickCallsignList(wxMouseEvent& event) { event.Skip(); }
 
@@ -253,7 +247,6 @@ class TopFrame : public wxFrame
         wxStaticBox*  m_freqBox;
         wxStaticBox*  squelchBox;
         wxStaticBox*  m_txLevelBox;
-        wxStaticBox* micSpeakerBox;
 
         TopFrame( wxWindow* parent, wxWindowID id = wxID_ANY, const wxString& title = _("FreeDV "), const wxPoint& pos = wxDefaultPosition, const wxSize& size = wxSize(561,300 ), long style = wxDEFAULT_FRAME_STYLE|wxRESIZE_BORDER );
 

@@ -70,7 +70,6 @@ enum class GlissandoSetup
     Options,
     AudioDevices,
     RigControl,
-    Filters,
     EasySetup,
 };
 

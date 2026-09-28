@@ -53,7 +53,6 @@ using namespace std::chrono_literals;
 #include "PlaybackStep.h"
 #include "EitherOrStep.h"
 #include "RNNoiseStep.h"
-#include "EqualizerStep.h"
 #include "ResamplePlotStep.h"
 #include "ResampleStep.h"
 #include "TapStep.h"
@@ -118,7 +117,6 @@ extern std::atomic<int> g_State;
 extern std::atomic<int> g_channel_noise;
 extern std::atomic<float> g_RxFreqOffsetHz;
 extern float g_sig_pwr_av;
-extern std::atomic<bool> g_agcEnabled;
 
 #include "../freedv_interface.h"
 extern FreeDVInterface freedvInterface;
@@ -148,7 +146,6 @@ extern std::atomic<SNDFILE*> g_sfPlayFileFromRadio;
 extern std::atomic<bool> g_recFileFromMic;
 extern bool g_recFileFromDecoder;
 
-#include "sox_biquad.h"
 
 void TxRxThread::initializePipeline_()
 {
@@ -304,17 +301,6 @@ void TxRxThread::initializePipeline_()
             rfDemodulationPipeline);
 
         activeRxPipeline->appendPipelineStep(eitherOrRfDemodulationStep);
-
-        // Equalizer step (optional based on filter state)
-        auto equalizerStep = new EqualizerStep(
-            outputSampleRate_, 
-            &g_rxUserdata->spkOutEQEnable,
-            &g_rxUserdata->sbqSpkOutBass,
-            &g_rxUserdata->sbqSpkOutMid,
-            &g_rxUserdata->sbqSpkOutTreble,
-            &g_rxUserdata->sbqSpkOutVol,
-            g_rxUserdata->spkEqLock);
-        activeRxPipeline->appendPipelineStep(equalizerStep);
 
         // Record from decoder step (optional)
         auto recordDecoderStep = new RecordStep(

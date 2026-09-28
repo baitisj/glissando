@@ -27,7 +27,6 @@
 #include "WxWidgetsConfigStore.h"
 #include "ConfigurationDataElement.h"
 #include "AudioConfiguration.h"
-#include "FilterConfiguration.h"
 #include "RigControlConfiguration.h"
 #include "ReportingConfiguration.h"
 
@@ -38,7 +37,6 @@ public:
     virtual ~FreeDVConfiguration() = default;
     
     AudioConfiguration audioConfiguration;
-    FilterConfiguration filterConfiguration;
     RigControlConfiguration rigControlConfiguration;
     ReportingConfiguration reportingConfiguration;
     
