@@ -171,6 +171,16 @@ public:
     // keyed transmitter.
     bool isTransmitting() const;
 
+    // True while anything of ours is waiting to go on the air: a message, a
+    // retry, a ping or a reply. With the console disengaged there is no
+    // transmitter to take it, and the operator is told so.
+    bool hasQueuedTransmissions() const;
+
+    // Whether the chat message with this id is one of them. A message left
+    // queued when the app last closed is in the history but not the queue,
+    // and engaging will not send it.
+    bool isMessageQueued(int64_t messageId) const;
+
 private:
     enum class TransmissionState
     {

@@ -47,6 +47,7 @@ enum class DeliveryChipKind
 {
     None,            // a received message has no chip
     Queued,
+    EngageToSend,    // queued, but the console is disengaged and nothing can key
     Sending,         // the first attempt, on the air
     Sent,            // the first attempt, or a broadcast, done
     Retry,           // an attempt after one that got nothing through
@@ -71,7 +72,9 @@ struct DeliveryChipState
     }
 };
 
-inline DeliveryChipState deliveryChipState(const TextMessage& message)
+// waitingForEngage: the console is disengaged, so there is no transmitter for
+// a queued message to go out on until the operator engages it.
+inline DeliveryChipState deliveryChipState(const TextMessage& message, bool waitingForEngage = false)
 {
     DeliveryChipState state;
     state.retry = message.retryCount;
@@ -81,7 +84,7 @@ inline DeliveryChipState deliveryChipState(const TextMessage& message)
     switch (message.status)
     {
         case MessageStatus::Queued:
-            state.kind = DeliveryChipKind::Queued;
+            state.kind = waitingForEngage ? DeliveryChipKind::EngageToSend : DeliveryChipKind::Queued;
             break;
         case MessageStatus::Transmitting:
         case MessageStatus::AwaitingAck:

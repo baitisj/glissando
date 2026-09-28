@@ -17,6 +17,7 @@
 
 #include "ChaoticaControls.h"
 #include "ChaoticaTheme.h"
+#include "ChaoticaTheme.h"
 #include "GlissandoScope.h"
 
 using namespace Chaotica;
@@ -588,6 +589,10 @@ void GlissandoConsole::refreshTelemetry()
     }
     engageButton_->SetChecked(t.audioRunning);
     engageButton_->SetLabel(aborts ? _("Abort") : t.audioRunning ? _("Disengage") : _("Engage"));
+
+    // A chat message is waiting for a transmitter that only Engage brings up:
+    // the button flashes red with the message's chip until it is pressed.
+    engageButton_->SetAlarm(t.engageToSend && Chaotica::blinkLit());
     engagedLamp_->SetLit(t.audioRunning);
     receivingLamp_->SetLit(t.receiving);
     transmittingLamp_->SetLit(t.transmitting);
