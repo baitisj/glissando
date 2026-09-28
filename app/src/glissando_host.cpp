@@ -202,6 +202,8 @@ GlissandoTelemetry MainFrame::glissandoTelemetry()
                              (m_RxRunning && m_textMessagingTransport != nullptr &&
                               m_textMessagingTransport->isTransmitting());
     telemetry.audioRunning = m_RxRunning;
+    telemetry.engageToSend =
+        chatWaitsForEngage() && TextMessaging::TextMessagingSession::instance().protocol().hasQueuedTransmissions();
 
     int64_t frequency = wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency;
     telemetry.rigFrequencyKnown = frequency > 0;

@@ -62,6 +62,11 @@ void drawSpacedTextCentred(wxGraphicsContext* gc, const wxString& text, double c
                            double spacing);
 
 // A domed rivet head.
+// Whether something blinking is in its lit half right now. Everything that
+// blinks takes its phase from the one clock, so a chip in the chat window and
+// a button on the console flash together.
+bool blinkLit();
+
 void drawRivet(wxGraphicsContext* gc, double cx, double cy, double radius);
 
 // A bevelled, riveted plate filling the rectangle.

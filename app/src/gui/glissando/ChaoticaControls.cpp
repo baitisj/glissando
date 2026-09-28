@@ -146,7 +146,6 @@ Button::Button(wxWindow* parent, wxWindowID id, const wxString& label, bool togg
     , toggle_(toggle)
     , checked_(false)
     , hinted_(false)
-    , alarm_(false)
     , pressed_(false)
 {
     SetCursor(wxCursor(wxCURSOR_HAND));
@@ -186,7 +185,7 @@ void Button::SetHinted(bool hinted)
 
 void Button::SetAlarm(bool alarm)
 {
-    if (alarm_ == alarm) return;
+    if (alarm == alarm_) return;
     alarm_ = alarm;
     Refresh();
 }
@@ -243,21 +242,20 @@ void Button::OnMouseLeave(wxMouseEvent&)
 
 void Button::paint(wxGraphicsContext* gc, const wxSize& size)
 {
-    bool lit = checked_ || pressed_;
+    bool alarm = alarm_ && !pressed_;
+    bool lit = checked_ || pressed_ || alarm;
     double x = 3, y = 3, w = size.x - 6, h = size.y - 6;
     double r = h / 2.0;
 
-    // Chrome rim, then the face: dark bakelite, or glowing white when lit
-    // (red, for an alarm).
+    // Chrome rim, then the face: dark bakelite, or glowing white when lit.
     gc->SetPen(*wxTRANSPARENT_PEN);
     gc->SetBrush(gc->CreateLinearGradientBrush(x, y, x, y + h, Colour::Chrome, Colour::PlateShadow));
     gc->DrawRoundedRectangle(x, y, w, h, r);
 
     double inset = 2.5;
-    if (lit && alarm_)
+    if (alarm)
     {
-        gc->SetBrush(gc->CreateLinearGradientBrush(x, y, x, y + h, wxColour(255, 120, 104),
-                                                   wxColour(150, 30, 24)));
+        gc->SetBrush(gc->CreateLinearGradientBrush(x, y, x, y + h, Colour::Alarm, wxColour(142, 42, 32)));
     }
     else if (lit)
     {
@@ -271,10 +269,7 @@ void Button::paint(wxGraphicsContext* gc, const wxSize& size)
     gc->DrawRoundedRectangle(x + inset, y + inset + (pressed_ ? 1 : 0), w - 2 * inset,
                              h - 2 * inset, r - inset);
 
-    wxColour ink = !IsEnabled() ? Colour::Dim
-                 : lit          ? Colour::Bakelite
-                 : alarm_       ? Colour::Alarm
-                                : Colour::Bone;
+    wxColour ink = !IsEnabled() ? Colour::Dim : (lit ? Colour::Bakelite : Colour::Bone);
     gc->SetFont(font(FontRole::Button), ink);
     double tw = 0, th = 0;
     gc->GetTextExtent("X", &tw, &th);

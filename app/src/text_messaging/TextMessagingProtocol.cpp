@@ -34,6 +34,7 @@
 
 #include "TextMessagingProtocol.h"
 
+#include <algorithm>
 #include <bit>
 #include <chrono>
 #include <cmath>
@@ -1008,6 +1009,20 @@ bool TextMessagingProtocol::isTransmitting() const
     // Asked outside the lock: the transport reaches into the audio pipeline,
     // which has no business waiting on the protocol's mutex.
     return transport != nullptr && transport->isTransmitting();
+}
+
+bool TextMessagingProtocol::hasQueuedTransmissions() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return std::any_of(outbox_.begin(), outbox_.end(), [](const PendingTransmission& pending)
+                       { return pending.state == TransmissionState::Queued; });
+}
+
+bool TextMessagingProtocol::isMessageQueued(int64_t messageId) const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return std::any_of(outbox_.begin(), outbox_.end(), [&](const PendingTransmission& pending)
+                       { return pending.state == TransmissionState::Queued && pending.message.id == messageId; });
 }
 
 // When the transmitter may next be used. Beyond the plain turnaround, a

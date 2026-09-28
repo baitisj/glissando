@@ -5,10 +5,21 @@
 
 #include "ChaoticaTheme.h"
 
+#include <chrono>
 #include <cmath>
 
 namespace Chaotica
 {
+
+bool blinkLit()
+{
+    // Once a second, lit for half of it: quick enough to catch the eye from
+    // across the shack, slow enough to read the lettering in either half.
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                  std::chrono::steady_clock::now().time_since_epoch())
+                  .count();
+    return (ms / 500) % 2 == 0;
+}
 
 wxFont font(FontRole role)
 {

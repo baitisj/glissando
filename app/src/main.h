@@ -418,6 +418,11 @@ public:
     // or 180 s, the usual setting on a rig, when the app's is off.
     int chatTimeOutSeconds();
 
+    // True when chat goes through our own modem and the console is
+    // disengaged: there is no transmitter, so anything queued waits for the
+    // operator to press Engage. Data2G keys its own radio and never waits.
+    bool chatWaitsForEngage();
+
 private:
 
 public:
