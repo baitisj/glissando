@@ -185,19 +185,41 @@ std::string TextMessagingProtocol::transmitInhibitedReason() const
     return inhibitReason_;
 }
 
+void TextMessagingProtocol::abortTransmission()
+{
+    std::vector<PendingEvent> events;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        dropOutboxLocked(MessageStatus::Aborted, true, events);
+    }
+
+    deliver(events);
+}
+
 // Everything waiting for the transmitter, dropped. A chat line says it was
 // not sent; an acknowledgement or pong has no line and simply goes.
 void TextMessagingProtocol::discardQueuedLocked(std::vector<PendingEvent>& events)
 {
+    dropOutboxLocked(MessageStatus::NotSent, false, events);
+}
+
+// Drops what is waiting for the transmitter and, with onTheAirToo, what is on
+// the air now, leaving each chat line with the given status. Anything already
+// sent and waiting for its acknowledgement stays.
+void TextMessagingProtocol::dropOutboxLocked(MessageStatus status, bool onTheAirToo,
+                                             std::vector<PendingEvent>& events)
+{
     for (auto it = outbox_.begin(); it != outbox_.end();)
     {
-        if (it->state != TransmissionState::Queued)
+        bool drop = it->state == TransmissionState::Queued ||
+                    (onTheAirToo && it->state == TransmissionState::Transmitting);
+        if (!drop)
         {
             ++it;
             continue;
         }
 
-        updateStatusLocked(*it, MessageStatus::NotSent, events);
+        updateStatusLocked(*it, status, events);
         it = outbox_.erase(it);
     }
 }

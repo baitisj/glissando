@@ -429,6 +429,7 @@ public:
     virtual void glissandoSettingsChanged(const GlissandoConsoleSettings& settings) override;
     virtual bool glissandoSpectrum(std::vector<float>& magnitudesDb, double& nyquistHz) override;
     virtual void glissandoSetAudioRunning(bool running) override;
+    virtual void glissandoAbortTransmit() override;
     virtual void glissandoSetRigFrequency(double hz) override;
     virtual std::vector<double> glissandoFrequencyPresets() override;
     virtual void glissandoShowChat() override;

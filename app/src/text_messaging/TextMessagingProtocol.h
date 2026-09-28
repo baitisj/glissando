@@ -125,6 +125,12 @@ public:
     void setTransmitInhibited(const std::string& reason);
     std::string transmitInhibitedReason() const;
 
+    // The operator has stopped the transmitter. What was on the air and
+    // everything waiting behind it is dropped as aborted, so nothing keys
+    // again on its own; the transport stops the keying itself. A message
+    // already sent and waiting for its acknowledgement is left to it.
+    void abortTransmission();
+
     // Replaces the clocks the protocol reads. Milliseconds must be monotonic
     // (timeouts) and the wall clock is what the chat window timestamps with.
     void setClocks(std::function<uint64_t()> monotonicMs, std::function<std::time_t()> wallClock);
@@ -257,6 +263,7 @@ private:
                             std::vector<PendingEvent>& events);
     void purgeStaleReassembliesLocked(uint64_t nowMs);
     void discardQueuedLocked(std::vector<PendingEvent>& events);
+    void dropOutboxLocked(MessageStatus status, bool onTheAirToo, std::vector<PendingEvent>& events);
 
     // Holds the transmitter off until the far end has had its turn. Never
     // shortens a wait that is already running. The first holds everything;

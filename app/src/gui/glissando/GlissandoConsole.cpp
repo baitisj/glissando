@@ -386,7 +386,18 @@ void GlissandoConsole::buildControls()
         applySettings(true);
     });
     engageButton_->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& event) {
-        host_->glissandoSetAudioRunning(event.GetInt() != 0);
+        // While anything is on the air the button is Abort. Decided afresh
+        // on the click as well: a transmission that started since the label
+        // last changed is stopped, not the audio under it, and one that ended
+        // leaves the audio running.
+        if (engageAborts_ || host_->glissandoTelemetry().transmitBusy)
+        {
+            host_->glissandoAbortTransmit();
+        }
+        else
+        {
+            host_->glissandoSetAudioRunning(event.GetInt() != 0);
+        }
         refreshTelemetry();
     });
     chatButton_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { host_->glissandoShowChat(); });
@@ -534,8 +545,15 @@ void GlissandoConsole::refreshTelemetry()
 {
     GlissandoTelemetry t = host_->glissandoTelemetry();
 
+    bool aborts = t.audioRunning && t.transmitBusy;
+    if (aborts != engageAborts_)
+    {
+        engageAborts_ = aborts;
+        engageButton_->SetToolTip(aborts ? _("Stop transmitting now. The message is dropped, not retried.")
+                                         : _("Start or stop the audio."));
+    }
     engageButton_->SetChecked(t.audioRunning);
-    engageButton_->SetLabel(t.audioRunning ? _("Disengage") : _("Engage"));
+    engageButton_->SetLabel(aborts ? _("Abort") : t.audioRunning ? _("Disengage") : _("Engage"));
     engagedLamp_->SetLit(t.audioRunning);
     receivingLamp_->SetLit(t.receiving);
     transmittingLamp_->SetLit(t.transmitting);

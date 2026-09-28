@@ -54,6 +54,7 @@ enum class DeliveryChipKind
     Acknowledged,
     NotAcknowledged, // out of retries
     NotSent,         // discarded before it went out
+    Aborted,         // the operator stopped it
 };
 
 struct DeliveryChipState
@@ -113,6 +114,9 @@ inline DeliveryChipState deliveryChipState(const TextMessage& message)
             break;
         case MessageStatus::NotSent:
             state.kind = DeliveryChipKind::NotSent;
+            break;
+        case MessageStatus::Aborted:
+            state.kind = DeliveryChipKind::Aborted;
             break;
         case MessageStatus::Sent:
             state.kind = DeliveryChipKind::Sent;
