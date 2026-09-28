@@ -59,6 +59,7 @@ struct GlissandoTelemetry
     bool transmitting = false;
     bool transmitBusy = false;      // a chat burst on the air, pauses included
     bool audioRunning = false;
+    bool engageToSend = false;      // chat has something to send and no transmitter until Engage
     bool rigFrequencyKnown = false;
     double rigFrequencyHz = 0.0;
 };

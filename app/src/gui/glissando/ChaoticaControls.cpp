@@ -183,6 +183,13 @@ void Button::SetHinted(bool hinted)
     Refresh();
 }
 
+void Button::SetAlarm(bool alarm)
+{
+    if (alarm == alarm_) return;
+    alarm_ = alarm;
+    Refresh();
+}
+
 bool Button::Enable(bool enable)
 {
     bool changed = Control::Enable(enable);
@@ -235,7 +242,8 @@ void Button::OnMouseLeave(wxMouseEvent&)
 
 void Button::paint(wxGraphicsContext* gc, const wxSize& size)
 {
-    bool lit = checked_ || pressed_;
+    bool alarm = alarm_ && !pressed_;
+    bool lit = checked_ || pressed_ || alarm;
     double x = 3, y = 3, w = size.x - 6, h = size.y - 6;
     double r = h / 2.0;
 
@@ -245,7 +253,11 @@ void Button::paint(wxGraphicsContext* gc, const wxSize& size)
     gc->DrawRoundedRectangle(x, y, w, h, r);
 
     double inset = 2.5;
-    if (lit)
+    if (alarm)
+    {
+        gc->SetBrush(gc->CreateLinearGradientBrush(x, y, x, y + h, Colour::Alarm, wxColour(142, 42, 32)));
+    }
+    else if (lit)
     {
         gc->SetBrush(gc->CreateLinearGradientBrush(x, y, x, y + h, Colour::Glow, Colour::Chrome));
     }

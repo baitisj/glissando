@@ -75,6 +75,11 @@ public:
     // Faintly lit without being checked: "this is what automatic chose".
     void SetHinted(bool hinted);
 
+    // Lit red instead of white: the button is what the operator has to press
+    // before anything else can happen. Blinking is the caller's, by turning
+    // this on and off.
+    void SetAlarm(bool alarm);
+
     // A smaller second line under the label, in its own colour; empty for
     // none.
     void SetNote(const wxString& note, const wxColour& colour);
@@ -96,6 +101,7 @@ private:
     bool toggle_;
     bool checked_;
     bool hinted_;
+    bool alarm_ = false;
     bool pressed_;
 };
 

@@ -1683,6 +1683,33 @@ void testPartialAckWithNoNewsCountsAsARetry()
 // first attempt alone; a retry keeps its number through the whole attempt so
 // the chip never appears to go backwards; a message the far end holds part
 // of says so, and how much.
+// With the console disengaged the transport refuses every keying. The chat
+// window asks whether anything is still waiting, to tell the operator to
+// engage; it stops asking once the message is on the air.
+void testQueuedTransmissionsAreReported()
+{
+    Station sender("W1AW");
+    CHECK(!sender.protocol.hasQueuedTransmissions());
+
+    std::string error;
+    sender.transport.refuse = true;
+    CHECK(sender.protocol.sendMessage("Anybody there?", "VK3ABC", error));
+    sender.nowMs += MAX_TURNAROUND_MILLISECONDS + 1;
+    sender.protocol.tick();
+    CHECK(sender.transport.transmissions.empty());
+    CHECK(sender.protocol.hasQueuedTransmissions());
+    int64_t id = sender.observer.added[0].id;
+    CHECK(sender.protocol.isMessageQueued(id));
+    CHECK(!sender.protocol.isMessageQueued(id + 1));
+
+    // Engaged: it goes, and is waiting on an answer, not on the transmitter.
+    sender.transport.refuse = false;
+    sender.completeOneTransmission();
+    CHECK(sender.transport.transmissions.size() == 1);
+    CHECK(!sender.protocol.hasQueuedTransmissions());
+    CHECK(!sender.protocol.isMessageQueued(id));
+}
+
 void testDeliveryChip()
 {
     auto kindOf = [](MessageStatus status, int retry, int confirmed, int count)
@@ -1696,6 +1723,16 @@ void testDeliveryChip()
     };
 
     CHECK(kindOf(MessageStatus::Queued, 0, 0, 3).kind == DeliveryChipKind::Queued);
+
+    // Disengaged, a queued message says what it is waiting for. Nothing else
+    // changes: a message already sent is past needing the transmitter.
+    TextMessage waiting;
+    waiting.status = MessageStatus::Queued;
+    CHECK(deliveryChipState(waiting, true).kind == DeliveryChipKind::EngageToSend);
+    waiting.status = MessageStatus::AwaitingAck;
+    CHECK(deliveryChipState(waiting, true).kind == DeliveryChipKind::Sent);
+    waiting.status = MessageStatus::Acknowledged;
+    CHECK(deliveryChipState(waiting, true).kind == DeliveryChipKind::Acknowledged);
     CHECK(kindOf(MessageStatus::Transmitting, 0, 0, 3).kind == DeliveryChipKind::Sending);
     CHECK(kindOf(MessageStatus::AwaitingAck, 0, 0, 3).kind == DeliveryChipKind::Sent);
     CHECK(kindOf(MessageStatus::Sent, 0, 0, 3).kind == DeliveryChipKind::Sent);
@@ -1879,6 +1916,7 @@ int main()
     testMissingFragmentsAreAskedForAndResent();
     testLostLastFragmentStillAsksForTheRest();
     testQueuedReportsStayCurrent();
+    testQueuedTransmissionsAreReported();
     testProgressDoesNotUseUpRetries();
     testPartialAckWithNoNewsCountsAsARetry();
     testDeliveryChip();
