@@ -443,10 +443,17 @@ void StreamingReceiver::Impl::search(GearState& state, unsigned generation)
     {
         std::vector<std::shared_ptr<const detail::VoiceTemplates>> held;
         std::vector<const detail::VoiceTemplates*> hypotheses;
+        std::vector<Scale> hypothesisScales;
+        std::vector<int> hypothesisDegrees;
         for (Scale scale : activeScales)
         {
-            held.push_back(detail::voiceTemplates(scale, voice, state.gear, activeTuning));
-            hypotheses.push_back(held.back().get());
+            for (int degree = 0; degree <= MAX_SCALE_DEGREE; ++degree)
+            {
+                held.push_back(detail::voiceTemplates(scale, voice, state.gear, degree, activeTuning));
+                hypotheses.push_back(held.back().get());
+                hypothesisScales.push_back(scale);
+                hypothesisDegrees.push_back(degree);
+            }
         }
         detail::VoiceDecode result = detail::receiveVoice(z, info, hypotheses, first - 2 * geo.step - windowStart,
                                                           first + geo.hop - windowStart, MAX_OFFSET_HZ, CANDIDATES);
@@ -469,7 +476,8 @@ void StreamingReceiver::Impl::search(GearState& state, unsigned generation)
         decode.gear = state.gear;
         decode.decode = result.decode;
         decode.decode.voice = voice;
-        decode.decode.scale = activeScales[(size_t)result.hypothesis];
+        decode.decode.scale = hypothesisScales[(size_t)result.hypothesis];
+        decode.decode.scaleDegree = hypothesisDegrees[(size_t)result.hypothesis];
         decode.decode.startSample = start;
         found.push_back(decode);
     }

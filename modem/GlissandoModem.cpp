@@ -149,6 +149,44 @@ std::array<double, NOTES> scaleNotes(Scale scale, int voice)
     return notes;
 }
 
+std::array<double, NOTES> scaleDegreeNotes(Scale scale, int voice, int degree)
+{
+    std::array<double, NOTES> notes = scaleNotes(scale, voice);
+    degree = std::max(0, std::min(MAX_SCALE_DEGREE, degree));
+    if (degree == 0) return notes;
+
+    // Derive this voice's pitch classes from its actual scale notes. The
+    // duet's high pentatonic voice is a different pentatonic collection from
+    // the low voice, so using a fixed interval list would transpose it badly.
+    const double rootMidi = 69.0 + 12.0 * std::log2(notes[0] / 440.0);
+    const int root = (int)std::lround(rootMidi);
+    std::vector<int> steps;
+    for (double hz : notes)
+    {
+        int relative = (int)std::lround(69.0 + 12.0 * std::log2(hz / 440.0)) - root;
+        int pitch = relative % 12;
+        if (pitch < 0) pitch += 12;
+        if (std::find(steps.begin(), steps.end(), pitch) == steps.end()) steps.push_back(pitch);
+    }
+    std::sort(steps.begin(), steps.end());
+    const int count = (int)steps.size();
+    for (double& hz : notes)
+    {
+        const double midi = 69.0 + 12.0 * std::log2(hz / 440.0);
+        int relative = (int)std::lround(midi - rootMidi);
+        int octave = relative / 12;
+        int pitch = relative % 12;
+        if (pitch < 0) { pitch += 12; --octave; }
+        int index = 0;
+        while (index + 1 < count && steps[(size_t)index + 1] <= pitch) ++index;
+        int target = index + degree;
+        octave += target / count;
+        target %= count;
+        hz = 440.0 * std::pow(2.0, (rootMidi + octave * 12 + steps[(size_t)target] - 69.0) / 12.0);
+    }
+    return notes;
+}
+
 namespace detail
 {
 
@@ -167,9 +205,9 @@ void pitchTrack(double fa, double fb, int L, double glide, double* f)
     }
 }
 
-std::array<double, NOTES> voiceFrequencies(Scale scale, int voice, double tuningOffsetHz)
+std::array<double, NOTES> voiceFrequencies(Scale scale, int voice, int degree, double tuningOffsetHz)
 {
-    std::array<double, NOTES> notes = scaleNotes(scale, voice);
+    std::array<double, NOTES> notes = scaleDegreeNotes(scale, voice, degree);
     for (double& note : notes) note += tuningOffsetHz;
     return notes;
 }
@@ -214,8 +252,9 @@ std::vector<float> modulate(const std::vector<Payload>& payloads, const ModemSet
         Payload payload{};
         if ((size_t)voice < payloads.size()) payload = payloads[(size_t)voice];
         std::array<int, SYMBOLS_PER_FRAME> notes = detail::frameNotes(encodeFrame(payload));
-        modulateVoice(notes, detail::voiceFrequencies(settings.scale, voice, settings.tuningOffsetHz), gear,
-                      audio.data());
+        modulateVoice(notes,
+                      detail::voiceFrequencies(settings.scale, voice, settings.scaleDegree, settings.tuningOffsetHz),
+                      gear, audio.data());
     }
 
     // Short raised cosine fade in and out (10 ms), which keeps the key-down
@@ -250,16 +289,24 @@ std::vector<Decode> receive(const float* audio, size_t numSamples, const ModemSe
     {
         std::vector<std::shared_ptr<const detail::VoiceTemplates>> held;
         std::vector<const detail::VoiceTemplates*> hypotheses;
+        std::vector<Scale> hypothesisScales;
+        std::vector<int> hypothesisDegrees;
         for (Scale scale : scales)
         {
-            held.push_back(detail::voiceTemplates(scale, voice, gear.number, settings.tuningOffsetHz));
-            hypotheses.push_back(held.back().get());
+            for (int degree = 0; degree <= MAX_SCALE_DEGREE; ++degree)
+            {
+                held.push_back(detail::voiceTemplates(scale, voice, gear.number, degree, settings.tuningOffsetHz));
+                hypotheses.push_back(held.back().get());
+                hypothesisScales.push_back(scale);
+                hypothesisDegrees.push_back(degree);
+            }
         }
         detail::VoiceDecode result =
             detail::receiveVoice(z, gear, hypotheses, searchFrom, searchTo, maxOffsetHz, candidates);
         decodes[(size_t)voice] = result.decode;
         decodes[(size_t)voice].voice = voice;
-        decodes[(size_t)voice].scale = scales[(size_t)result.hypothesis];
+        decodes[(size_t)voice].scale = hypothesisScales[(size_t)result.hypothesis];
+        decodes[(size_t)voice].scaleDegree = hypothesisDegrees[(size_t)result.hypothesis];
     }
     return decodes;
 }

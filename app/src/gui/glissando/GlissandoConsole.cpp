@@ -12,6 +12,7 @@
 #include <wx/dcbuffer.h>
 #include <wx/graphics.h>
 #include <wx/sizer.h>
+#include <wx/stattext.h>
 #include <wx/textdlg.h>
 #include <wx/tglbtn.h>
 
@@ -267,8 +268,8 @@ void GlissandoConsole::buildControls()
     telemetryPlate->GetContentSizer()->Add(grid, 0, wxEXPAND | wxBOTTOM, 4);
     // The receiver hears every scale, whichever one we sing in.
     heardScaleReadout_ = new Readout(telemetryPlate, _("Heard singing in"), wxSize(196, 44));
-    heardScaleReadout_->SetToolTip(_("The scale of the last frame heard. Every scale is heard, "
-                                     "whichever one this station sends in."));
+    heardScaleReadout_->SetToolTip(_("The scale and transposition of the last frame heard. "
+                                     "Every supported degree is searched automatically."));
     telemetryPlate->GetContentSizer()->Add(heardScaleReadout_, 0, wxEXPAND);
     column->Add(telemetryPlate, 1, wxEXPAND);
 
@@ -312,6 +313,14 @@ void GlissandoConsole::buildControls()
         scaleRow->Add(button, 0, wxRIGHT, 4);
     }
     modulationPlate->GetContentSizer()->Add(scaleRow, 0);
+
+    auto* degreeRow = row();
+    degreeButton_ = new Button(modulationPlate, wxID_ANY, wxEmptyString, false, wxSize(180, 34));
+    degreeButton_->SetToolTip(_("Choose a scale-degree transposition for transmissions. The receiver searches all three positions automatically; the +2 limit keeps the highest duet voice inside a 4 kHz passband."));
+    degreeRow->Add(new wxStaticText(modulationPlate, wxID_ANY, _("Transmit degree:")), 0,
+                   wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
+    degreeRow->Add(degreeButton_, 0);
+    modulationPlate->GetContentSizer()->Add(degreeRow, 0, wxTOP, 8);
     bottom->Add(modulationPlate, 1, wxEXPAND | wxRIGHT, 6);
 
     // Command: the master switches beside the radio's dial.
@@ -369,7 +378,7 @@ void GlissandoConsole::buildControls()
         else
         {
             // Put the scale's lowest note where the click was.
-            double low = Glissando::scaleNotes(settings_.scale, 0)[0];
+            double low = Glissando::scaleDegreeNotes(settings_.scale, 0, settings_.scaleDegree)[0];
             setTuning(event.GetInt() / 10.0 - low);
         }
     });
@@ -380,6 +389,14 @@ void GlissandoConsole::buildControls()
     listenAllButton_->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& event) {
         settings_.listenAllGears = event.GetInt() != 0;
         applySettings(true);
+    });
+    degreeButton_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+        const std::vector<Choice> choices = {
+            {_("Root (0)"), true, _("Current pitch placement; compatible with older Glissando stations.")},
+            {_("Scale step +1"), true, _("Move each note up one scale degree.")},
+            {_("Scale step +2"), true, _("Move each note up two scale degrees; highest supported position for 4 kHz use.")},
+        };
+        ShowChoices(degreeButton_, choices, [this](int index) { selectScaleDegree(index); });
     });
     wideButton_->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& event) {
         settings_.wideScope = event.GetInt() != 0;
@@ -463,6 +480,12 @@ void GlissandoConsole::selectScale(Glissando::Scale scale)
     applySettings(true);
 }
 
+void GlissandoConsole::selectScaleDegree(int degree)
+{
+    settings_.scaleDegree = std::max(0, std::min(Glissando::MAX_SCALE_DEGREE, degree));
+    applySettings(true);
+}
+
 void GlissandoConsole::setTuning(double hz)
 {
     hz = std::round(std::min(MAX_TUNING_HZ, std::max(-MAX_TUNING_HZ, hz)) * 10.0) / 10.0;
@@ -481,6 +504,7 @@ void GlissandoConsole::applySettings(bool notifyHost)
     {
         scaleButtons_[i]->SetChecked(scales[i] == settings_.scale);
     }
+    degreeButton_->SetLabel(wxString::Format(_("Scale step +%d"), settings_.scaleDegree));
     autoButton_->SetChecked(settings_.autoGear);
     listenAllButton_->SetChecked(settings_.listenAllGears);
     wideButton_->SetChecked(settings_.wideScope);
@@ -516,11 +540,11 @@ void GlissandoConsole::updateStaff()
     bool duet = settings_.wideScope || Glissando::gearInfo(sending).voices > 1;
     for (int voice = 0; voice < (duet ? 2 : 1); voice++)
     {
-        auto scaleNotes = Glissando::scaleNotes(settings_.scale, voice);
+        auto scaleNotes = Glissando::scaleDegreeNotes(settings_.scale, voice, settings_.scaleDegree);
         for (double note : scaleNotes)
         {
             notes.push_back(note + settings_.tuningOffsetHz);
-            names.push_back(noteName(note));
+            names.push_back(noteName(note + settings_.tuningOffsetHz));
         }
     }
     scope_->setStaff(notes, names, SEARCH_HALF_WIDTH_HZ);
@@ -550,7 +574,7 @@ void GlissandoConsole::refreshTelemetry()
         wxString ago = s < 90 ? wxString::Format("%.0fs", s)
                               : s < 5400 ? wxString::Format("%.0fm", s / 60) : wxString::Format("%.0fh", s / 3600);
         heardReadout_->SetText(wxString::Format("%s %s", gearLabel(t.heardGear).Left(4), ago));
-        heardScaleReadout_->SetText(scaleLabel(t.heardScale));
+        heardScaleReadout_->SetText(wxString::Format(_("%s, +%d"), scaleLabel(t.heardScale), t.heardScaleDegree));
     }
     else
     {

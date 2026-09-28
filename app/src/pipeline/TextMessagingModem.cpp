@@ -306,6 +306,7 @@ bool TextMessagingModem::modulate(const std::vector<OutgoingBurst>& bursts,
             std::lock_guard<std::mutex> lock(glissandoMutex_);
             settings.gear = transmitGearLocked();
             settings.scale = glissando_.scale;
+            settings.scaleDegree = glissando_.scaleDegree;
             settings.tuningOffsetHz = glissando_.tuningOffsetHz;
         }
         const Glissando::GearInfo& gear = Glissando::gearInfo(settings.gear);
@@ -608,6 +609,7 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
         glissandoStatus_.report = d.report;
         glissandoStatus_.heardGear = decode.gear;
         glissandoStatus_.heardScale = d.scale;
+        glissandoStatus_.heardScaleDegree = d.scaleDegree;
         glissandoStatus_.heardAtMs = steadyMs();
         glissandoStatus_.advisedGear = Glissando::recommendGear(d.report.snrDb, d.report.dopplerHz);
 
@@ -620,8 +622,8 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
 
     if (rxLogEnabled())
     {
-        log_info("RX: Glissando %s %s voice %d, %.1f dB, %.2f Hz Doppler, offset %+.1f Hz%s",
-                 Glissando::gearInfo(decode.gear).tempo, Glissando::scaleName(d.scale), d.voice, d.report.snrDb,
+        log_info("RX: Glissando %s %s degree +%d voice %d, %.1f dB, %.2f Hz Doppler, offset %+.1f Hz%s",
+                 Glissando::gearInfo(decode.gear).tempo, Glissando::scaleName(d.scale), d.scaleDegree, d.voice, d.report.snrDb,
                  d.report.dopplerHz, d.frequencyOffsetHz, complete ? ", burst complete" : "");
     }
     if (!complete) return;

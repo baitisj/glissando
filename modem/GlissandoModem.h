@@ -29,6 +29,9 @@ constexpr int SAMPLE_RATE_HZ = 8000;
 constexpr int PAYLOAD_BITS = 77;
 constexpr int NOTES = 8;
 constexpr int SYMBOLS_PER_FRAME = 86;
+// A shared transmit choice that keeps every scale/voice combination within
+// the useful part of a nominal 4 kHz SSB passband.
+constexpr int MAX_SCALE_DEGREE = 2;
 
 // The prototype's gears: 1 Adagio, 2 Andante, 3 Allegro, 4 Presto,
 // 5 Presto duet (two voices, two payloads per frame).
@@ -68,6 +71,7 @@ bool scaleFromName(const std::string& name, Scale& scaleOut);
 // The 8 note frequencies of one voice (0 low, 1 high) of a scale, in Hz,
 // before any tuning offset.
 std::array<double, NOTES> scaleNotes(Scale scale, int voice);
+std::array<double, NOTES> scaleDegreeNotes(Scale scale, int voice, int degree);
 
 // 77 bits, one per element (0 or 1), first bit first as in the prototype.
 using Payload = std::array<uint8_t, PAYLOAD_BITS>;
@@ -76,9 +80,11 @@ struct ModemSettings
 {
     int gear = 3;
     Scale scale = Scale::Pentatonic;
+    int scaleDegree = 0;            // 0..MAX_SCALE_DEGREE, scale steps above the root
 
     // Receive only: listen for every scale, not just `scale`, and say in
-    // Decode::scale which one each frame was sung in. A pentatonic station
+    // Decode::scale which one each frame was sung in. Every receive search
+    // also checks each supported scale degree. A pentatonic station
     // and a diabolus station can then talk to each other, each sending in
     // its own scale. Transmit always uses `scale`.
     bool anyScale = false;
@@ -106,6 +112,7 @@ struct Decode
     bool ok = false;            // CRC passed
     int voice = 0;
     Scale scale = Scale::Pentatonic;    // the scale the frame was heard in
+    int scaleDegree = 0;                // transposition hypothesis heard
     Payload payload{};
     long long startSample = 0;  // of symbol 0, in the buffer's (or stream's) sample count
     double frequencyOffsetHz = 0.0;

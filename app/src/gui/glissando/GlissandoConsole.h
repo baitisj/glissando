@@ -38,6 +38,7 @@ struct GlissandoConsoleSettings
     int gear = 3;                   // the tempo chosen by hand, 1..5
     bool autoGear = true;           // shift tempo from the measured path
     Glissando::Scale scale = Glissando::Scale::Pentatonic;
+    int scaleDegree = 0;
     double tuningOffsetHz = 0.0;
     bool listenAllGears = true;     // decode every tempo, not just ours
     double scanRate = 4.0;          // visi-scope rows per second
@@ -52,6 +53,7 @@ struct GlissandoTelemetry
     double dopplerHz = 0.0;
     int heardGear = 0;              // tempo of the last frame heard
     Glissando::Scale heardScale = Glissando::Scale::Pentatonic;    // and the scale it was sung in
+    int heardScaleDegree = 0;
     double secondsSinceHeard = 0.0;
     int transmitGear = 3;           // what we would send with now
     int advisedGear = 0;            // what the last report recommends, 0 none
@@ -121,6 +123,7 @@ private:
     void refreshTelemetry();
     void selectGear(int gear);
     void selectScale(Glissando::Scale scale);
+    void selectScaleDegree(int degree);
     void setTuning(double hz);
     void enterRigFrequency();
     void showFrequencyPresets();
@@ -149,6 +152,7 @@ private:
     Chaotica::Readout* frameReadout_;
     std::vector<Chaotica::Button*> gearButtons_;
     std::vector<Chaotica::Button*> scaleButtons_;
+    Chaotica::Button* degreeButton_;
     Chaotica::Button* autoButton_;
     Chaotica::Button* listenAllButton_;
     Chaotica::Button* wideButton_;

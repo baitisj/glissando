@@ -100,6 +100,7 @@ public:
     ConfigurationDataElement<int> glissandoGear;
     ConfigurationDataElement<bool> glissandoAutoGear;
     ConfigurationDataElement<wxString> glissandoScale;
+    ConfigurationDataElement<int> glissandoScaleDegree;
     ConfigurationDataElement<int> glissandoTuningDeciHz;
     ConfigurationDataElement<bool> glissandoListenAllGears;
     ConfigurationDataElement<int> glissandoScanRateDeci;

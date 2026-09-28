@@ -56,6 +56,7 @@ GlissandoConsoleSettings MainFrame::loadGlissandoSettings_() const
     settings.autoGear = config.glissandoAutoGear;
     Glissando::Scale scale;
     if (Glissando::scaleFromName(((wxString)config.glissandoScale).ToStdString(), scale)) settings.scale = scale;
+    settings.scaleDegree = std::max(0, std::min(Glissando::MAX_SCALE_DEGREE, (int)config.glissandoScaleDegree));
     settings.tuningOffsetHz = config.glissandoTuningDeciHz / 10.0;
     settings.listenAllGears = config.glissandoListenAllGears;
     settings.scanRate = std::max(0.5, config.glissandoScanRateDeci / 10.0);
@@ -120,6 +121,7 @@ void MainFrame::applyGlissandoToModem_(bool enabled)
     modemConfig.autoGear = config.glissandoAutoGear;
     Glissando::Scale scale;
     if (Glissando::scaleFromName(((wxString)config.glissandoScale).ToStdString(), scale)) modemConfig.scale = scale;
+    modemConfig.scaleDegree = std::max(0, std::min(Glissando::MAX_SCALE_DEGREE, (int)config.glissandoScaleDegree));
     modemConfig.tuningOffsetHz = config.glissandoTuningDeciHz / 10.0;
     modemConfig.listenAllGears = config.glissandoListenAllGears;
     textMessagingModem().setGlissando(modemConfig);
@@ -144,6 +146,7 @@ void MainFrame::glissandoSettingsChanged(const GlissandoConsoleSettings& setting
     config.glissandoGear = settings.gear;
     config.glissandoAutoGear = settings.autoGear;
     config.glissandoScale = wxString(Glissando::scaleName(settings.scale));
+    config.glissandoScaleDegree = settings.scaleDegree;
     config.glissandoTuningDeciHz = (int)std::lround(settings.tuningOffsetHz * 10.0);
     config.glissandoListenAllGears = settings.listenAllGears;
     config.glissandoScanRateDeci = (int)std::lround(settings.scanRate * 10.0);
@@ -163,6 +166,7 @@ GlissandoTelemetry MainFrame::glissandoTelemetry()
     telemetry.dopplerHz = status.report.dopplerHz;
     telemetry.heardGear = status.heardGear;
     telemetry.heardScale = status.heardScale;
+    telemetry.heardScaleDegree = status.heardScaleDegree;
     telemetry.secondsSinceHeard = status.haveReport ? (steadyNowMs() - status.heardAtMs) / 1000.0 : 0.0;
     telemetry.transmitGear = status.transmitGear;
     telemetry.advisedGear = status.advisedGear;

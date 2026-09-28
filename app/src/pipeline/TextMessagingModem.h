@@ -122,6 +122,7 @@ public:
         int gear = 3;                   // chosen by hand
         bool autoGear = true;           // shift from the last report
         Glissando::Scale scale = Glissando::Scale::Pentatonic;    // the scale we send in
+        int scaleDegree = 0;
         double tuningOffsetHz = 0.0;
         bool listenAllGears = true;
         bool listenAllScales = true;    // hear stations singing in any scale, not just ours
@@ -136,6 +137,7 @@ public:
         Glissando::ChannelReport report;
         int heardGear = 0;
         Glissando::Scale heardScale = Glissando::Scale::Pentatonic;
+        int heardScaleDegree = 0;
         uint64_t heardAtMs = 0;         // steady clock
         int advisedGear = 0;            // recommendGear() of the report, 0 none
         int transmitGear = 3;           // the tempo modulate() will use now

@@ -80,6 +80,7 @@ FreeDVConfiguration::FreeDVConfiguration()
     , glissandoGear("/Glissando/Gear", 3)
     , glissandoAutoGear("/Glissando/AutoGear", true)
     , glissandoScale("/Glissando/Scale", "pentatonic")
+    , glissandoScaleDegree("/Glissando/ScaleDegree", 0)
     , glissandoTuningDeciHz("/Glissando/TuningDeciHz", 0)
     , glissandoListenAllGears("/Glissando/ListenAllGears", true)
     , glissandoScanRateDeci("/Glissando/ScanRateDeci", 40)
@@ -214,6 +215,7 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     load_(config, glissandoGear);
     load_(config, glissandoAutoGear);
     load_(config, glissandoScale);
+    load_(config, glissandoScaleDegree);
     load_(config, glissandoTuningDeciHz);
     load_(config, glissandoListenAllGears);
     load_(config, glissandoScanRateDeci);
@@ -315,6 +317,7 @@ void FreeDVConfiguration::save(wxConfigBase* config)
     save_(config, glissandoGear);
     save_(config, glissandoAutoGear);
     save_(config, glissandoScale);
+    save_(config, glissandoScaleDegree);
     save_(config, glissandoTuningDeciHz);
     save_(config, glissandoListenAllGears);
     save_(config, glissandoScanRateDeci);
