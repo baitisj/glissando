@@ -869,15 +869,13 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
             heard.gear = decode.gear;
             heard.scale = d.scale;
             heard.voice = d.voice;
-            heard.notesHz = Glissando::scaleNotes(d.scale, d.voice);
+            heard.notesHz = Glissando::scaleDegreeNotes(d.scale, d.voice, d.scaleDegree);
             for (double& hz : heard.notesHz) hz += glissando_.tuningOffsetHz + d.frequencyOffsetHz;
             heard.melody = Glissando::payloadMelody(d.payload);
             heard.snrDb = d.report.snrDb;
             if (glissandoHeard_.size() >= GLISSANDO_HEARD_LIMIT) glissandoHeard_.erase(glissandoHeard_.begin());
             glissandoHeard_.push_back(std::move(heard));
         }
-        chorusBeacon = glissando_.chorus &&
-            decodeChorusBeacon(d.payload, announcedCallsign, announcedGear, announcedScale, announcedDegree);
         if (chorusBeacon)
         {
             if (announcedCallsign != glissando_.callsign)
@@ -887,7 +885,6 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
                 updateChorusReceiverLocked();
             }
         }
-        else complete = reassembler_.add(d.payload, d.startSample, duplicate, burst);
     }
     if (complete) completedFrameEnd_.store(glissandoRx_->lastFrameEnd(), std::memory_order_release);
     lastSyncMs_.store(steadyMs(), std::memory_order_release);

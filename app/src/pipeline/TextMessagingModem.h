@@ -201,6 +201,8 @@ public:
     double glissandoMessageSeconds(size_t textBytes) const;
 
 private:
+    friend struct TextMessagingModemTestAccess;
+
     struct Demodulator
     {
         struct freedv* modem = nullptr;
@@ -252,6 +254,12 @@ private:
     GlissandoStatus glissandoStatus_;
     Glissando::Reassembler reassembler_;
     std::vector<GlissandoHeard> glissandoHeard_;
+    std::map<std::string, ChorusStation> chorusStations_;
+    uint64_t lastChorusAnnouncementMs_ = 0;
+    std::string lastAnnouncedCallsign_;
+    int lastAnnouncedGear_ = 0;
+    Glissando::Scale lastAnnouncedScale_ = Glissando::Scale::Pentatonic;
+    int lastAnnouncedDegree_ = -1;
     std::vector<GlissandoSent> glissandoSent_;
     std::unique_ptr<Glissando::StreamingReceiver> glissandoRx_;
     std::atomic<bool> glissandoOn_;
