@@ -36,6 +36,7 @@
 #ifndef __OS_INTERFACE__
 #define __OS_INTERFACE__
 
+#include <cctype>
 #include <future>
 #include <string>
 
@@ -66,5 +67,14 @@ void StopLowLatencyActivity();
 
 // Sets the name of the current thread in the OS.
 void SetThreadName(std::string const& name);
+
+// The name a thread goes by in the OS: "GUI" becomes "glissando-gui". The
+// main thread's is what ps and top show as the process name.
+inline std::string GlissandoThreadName(std::string const& name)
+{
+    std::string fullName = "glissando-";
+    for (char c : name) fullName += (char)std::tolower((unsigned char)c);
+    return fullName;
+}
 
 #endif // __OS_INTERFACE__
