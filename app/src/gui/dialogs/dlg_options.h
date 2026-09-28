@@ -69,7 +69,6 @@ class OptionsDlg : public wxDialog
         void    OnReportingEnable(wxCommandEvent& event);
         void    OnToneStateEnable(wxCommandEvent& event);
         void    OnMultipleRxEnable(wxCommandEvent& event);
-        void    OnFreqModeChangeEnable(wxCommandEvent& event);
         void    OnEnableSpacebarForPTT(wxCommandEvent& event);
         void    OnSetPTTKey(wxCommandEvent& event);
         void    OnTOTTimerEnable(wxCommandEvent& event);
@@ -92,10 +91,8 @@ class OptionsDlg : public wxDialog
         wxNotebookPage *m_debugTab; // Debug
         
         /* Hamlib options */
-        wxCheckBox    *m_ckboxUseAnalogModes;
-        wxRadioButton *m_ckboxEnableFreqModeChanges;
-        wxRadioButton *m_ckboxEnableFreqChangesOnly;
-        wxRadioButton *m_ckboxNoFreqModeChanges;
+        wxRadioButton *m_rbFrequencyControl;
+        wxRadioButton *m_rbNoFrequencyControl;
         wxCheckBox    *m_ckboxEnableSpacebarForPTT;
         wxCheckBox    *m_ckboxPTTMomentaryMode;
         wxTextCtrl    *m_txtPTTKeyName;

@@ -300,23 +300,19 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     sizerRigControl->Add(sbSizer_ptt,0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
     
     wxStaticBoxSizer* sbSizer_hamlib;
-    wxStaticBox *sb_hamlib = new wxStaticBox(m_rigControlTab, wxID_ANY, _("Frequency/Mode Control Options"));
+    wxStaticBox *sb_hamlib = new wxStaticBox(m_rigControlTab, wxID_ANY, _("Frequency Control Options"));
     sbSizer_hamlib = new wxStaticBoxSizer(sb_hamlib, wxVERTICAL);
     
+    // The radio's mode (USB, LSB, DIGU...) is the operator's to set; only the
+    // frequency is ever changed from here.
     wxSizer* freqModeSizer = new wxBoxSizer(wxHORIZONTAL);
-    m_ckboxEnableFreqModeChanges = new wxRadioButton(sb_hamlib, wxID_ANY, _("Enable frequency and mode changes"), wxDefaultPosition, wxDefaultSize, wxRB_GROUP);
-    freqModeSizer->Add(m_ckboxEnableFreqModeChanges, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
+    m_rbFrequencyControl = new wxRadioButton(sb_hamlib, wxID_ANY, _("Set the radio's frequency"), wxDefaultPosition, wxDefaultSize, wxRB_GROUP);
+    freqModeSizer->Add(m_rbFrequencyControl, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
     
-    m_ckboxEnableFreqChangesOnly = new wxRadioButton(sb_hamlib, wxID_ANY, _("Enable frequency changes only"), wxDefaultPosition, wxDefaultSize);
-    freqModeSizer->Add(m_ckboxEnableFreqChangesOnly, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
-    
-    m_ckboxNoFreqModeChanges = new wxRadioButton(sb_hamlib, wxID_ANY, _("No frequency or mode changes"), wxDefaultPosition, wxDefaultSize);
-    freqModeSizer->Add(m_ckboxNoFreqModeChanges, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
+    m_rbNoFrequencyControl = new wxRadioButton(sb_hamlib, wxID_ANY, _("Leave the radio's frequency alone"), wxDefaultPosition, wxDefaultSize);
+    freqModeSizer->Add(m_rbNoFrequencyControl, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
     
     sbSizer_hamlib->Add(freqModeSizer, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
-    
-    m_ckboxUseAnalogModes = new wxCheckBox(sb_hamlib, wxID_ANY, _("Use USB/LSB instead of DIGU/DIGL"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    sbSizer_hamlib->Add(m_ckboxUseAnalogModes, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
     
     m_ckboxFrequencyEntryAsKHz = new wxCheckBox(sb_hamlib, wxID_ANY, _("Frequency entry in kHz"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
     sbSizer_hamlib->Add(m_ckboxFrequencyEntryAsKHz, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
@@ -886,9 +882,6 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     
     m_ckboxMultipleRx->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnMultipleRxEnable), NULL, this);
     
-    m_ckboxEnableFreqModeChanges->Connect(wxEVT_RADIOBUTTON, wxCommandEventHandler(OptionsDlg::OnFreqModeChangeEnable), NULL, this);
-    m_ckboxEnableFreqChangesOnly->Connect(wxEVT_RADIOBUTTON, wxCommandEventHandler(OptionsDlg::OnFreqModeChangeEnable), NULL, this);
-    m_ckboxNoFreqModeChanges->Connect(wxEVT_RADIOBUTTON, wxCommandEventHandler(OptionsDlg::OnFreqModeChangeEnable), NULL, this);
 
     m_ckboxEnableSpacebarForPTT->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnEnableSpacebarForPTT), NULL, this);
     m_btnSetPTTKey->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(OptionsDlg::OnSetPTTKey), NULL, this);
@@ -943,9 +936,6 @@ OptionsDlg::~OptionsDlg()
     
     m_ckboxMultipleRx->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnMultipleRxEnable), NULL, this);
     
-    m_ckboxEnableFreqModeChanges->Disconnect(wxEVT_RADIOBUTTON, wxCommandEventHandler(OptionsDlg::OnFreqModeChangeEnable), NULL, this);
-    m_ckboxEnableFreqChangesOnly->Disconnect(wxEVT_RADIOBUTTON, wxCommandEventHandler(OptionsDlg::OnFreqModeChangeEnable), NULL, this);
-    m_ckboxNoFreqModeChanges->Disconnect(wxEVT_RADIOBUTTON, wxCommandEventHandler(OptionsDlg::OnFreqModeChangeEnable), NULL, this);
 
     m_ckboxEnableSpacebarForPTT->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnEnableSpacebarForPTT), NULL, this);
     m_btnSetPTTKey->Disconnect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(OptionsDlg::OnSetPTTKey), NULL, this);
@@ -991,10 +981,13 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         m_txtTOTTimerSecs->SetValue(wxString::Format("%d", wxGetApp().appConfiguration.rigControlConfiguration.totTimerSecs.get()));
         m_txtTOTTimerSecs->Enable(wxGetApp().appConfiguration.rigControlConfiguration.totTimerEnabled);
 
-        m_ckboxUseAnalogModes->SetValue(wxGetApp().appConfiguration.rigControlConfiguration.hamlibUseAnalogModes);
-        m_ckboxEnableFreqModeChanges->SetValue(wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqModeChanges);
-        m_ckboxEnableFreqChangesOnly->SetValue(wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqChangesOnly);
-        m_ckboxNoFreqModeChanges->SetValue(!wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqModeChanges && !wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqChangesOnly);
+        // A FreeDV-era "frequency and mode changes" setting now means
+        // frequency changes: the mode is never touched.
+        bool frequencyControl =
+            wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqModeChanges ||
+            wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqChangesOnly;
+        m_rbFrequencyControl->SetValue(frequencyControl);
+        m_rbNoFrequencyControl->SetValue(!frequencyControl);
         m_ckboxFrequencyEntryAsKHz->SetValue(wxGetApp().appConfiguration.reportingConfiguration.reportingFrequencyAsKhz);
         
         /* Plot settings */
@@ -1160,10 +1153,8 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
             wxGetApp().appConfiguration.rigControlConfiguration.totTimerSecs = (int)totSecs;
         }
 
-        wxGetApp().appConfiguration.rigControlConfiguration.hamlibUseAnalogModes = m_ckboxUseAnalogModes->GetValue();
-        
-        wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqModeChanges = m_ckboxEnableFreqModeChanges->GetValue();
-        wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqChangesOnly = m_ckboxEnableFreqChangesOnly->GetValue();
+        wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqModeChanges = false;
+        wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqChangesOnly = m_rbFrequencyControl->GetValue();
         
         wxGetApp().appConfiguration.reportingConfiguration.reportingFreeTextString = m_txtCtrlCallSign->GetValue();
 
@@ -1585,20 +1576,16 @@ void OptionsDlg::updateRigControlState()
 {
     if (!sessionActive_)
     {
-        m_ckboxEnableFreqModeChanges->Enable(true);
-        m_ckboxEnableFreqChangesOnly->Enable(true);
-        m_ckboxNoFreqModeChanges->Enable(true);
+        m_rbFrequencyControl->Enable(true);
+        m_rbNoFrequencyControl->Enable(true);
         m_ckboxEnableSpacebarForPTT->Enable(true);
         m_txtTxRxDelayMilliseconds->Enable(true);
-        m_ckboxUseAnalogModes->Enable(m_ckboxEnableFreqModeChanges->GetValue());
     }
     else
     {
         // Rig control settings cannot be updated during a session.
-        m_ckboxUseAnalogModes->Enable(false);
-        m_ckboxEnableFreqModeChanges->Enable(false);
-        m_ckboxEnableFreqChangesOnly->Enable(false);
-        m_ckboxNoFreqModeChanges->Enable(false);
+        m_rbFrequencyControl->Enable(false);
+        m_rbNoFrequencyControl->Enable(false);
         m_ckboxEnableSpacebarForPTT->Enable(false);
         m_txtTxRxDelayMilliseconds->Enable(false);
     }
@@ -1617,11 +1604,6 @@ void OptionsDlg::OnToneStateEnable(wxCommandEvent&)
 void OptionsDlg::OnMultipleRxEnable(wxCommandEvent&)
 {
     updateMultipleRxState();
-}
-
-void OptionsDlg::OnFreqModeChangeEnable(wxCommandEvent&)
-{
-    updateRigControlState();
 }
 
 void OptionsDlg::OnEnableSpacebarForPTT(wxCommandEvent&)

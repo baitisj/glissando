@@ -709,7 +709,6 @@ private:
         void exportConfiguration_(wxConfigBase* config);
         void setConfiguration_(wxConfigBase* config);
 
-        HamlibRigController::Mode getCurrentMode_();
         
         void performFreeDVOn_();
         void performFreeDVOff_();

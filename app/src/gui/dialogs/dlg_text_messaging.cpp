@@ -340,6 +340,60 @@ TextMessagingDialog::Palette TextMessagingDialog::palette() const
     return palette;
 }
 
+// No autoresize: a label that sized itself to its text would feed that width
+// back to the layout, which would wrap it to that, and so on. The minimum width
+// is nil so that a long line does not hold the window open; the height follows
+// the wrapped text.
+WrappingText::WrappingText(wxWindow* parent)
+    : wxStaticText(parent, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize,
+                   wxST_NO_AUTORESIZE)
+    , m_wrapWidth(-1)
+{
+    SetMinSize(wxSize(0, -1));
+    Bind(wxEVT_SIZE, &WrappingText::OnSize, this);
+}
+
+void WrappingText::setText(const wxString& text)
+{
+    if (text == m_text) return;
+
+    m_text = text;
+    m_wrapWidth = -1;
+    rewrap(GetSize().GetWidth());
+}
+
+void WrappingText::rewrap(int width)
+{
+    if (width == m_wrapWidth) return;
+    m_wrapWidth = width;
+
+    int oldHeight = GetBestSize().GetHeight();
+
+    // wxWidgets 3.3 skips a Wrap() to the width it last wrapped at, even when
+    // the label has changed since, which left a new label on one line cut off
+    // at the window edge. Wrap(-1), no wrapping, resets that.
+    SetLabelText(m_text);
+    Wrap(-1);
+    if (width > 0) Wrap(width);
+    InvalidateBestSize();
+
+    // More lines or fewer: the window has to make room. Not from inside the
+    // size event that got us here, though.
+    if (GetBestSize().GetHeight() != oldHeight)
+    {
+        CallAfter([this]() {
+            wxWindow* top = wxGetTopLevelParent(this);
+            if (top != nullptr) top->Layout();
+        });
+    }
+}
+
+void WrappingText::OnSize(wxSizeEvent& event)
+{
+    rewrap(event.GetSize().GetWidth());
+    event.Skip();
+}
+
 namespace
 {
 
@@ -462,13 +516,13 @@ void TextMessagingDialog::buildControls()
 
     // Why the station may not transmit, while it may not. A line of its own,
     // so that the ordinary status line cannot write over it.
-    m_txtInhibited = new wxStaticText(transmitPlate, wxID_ANY, wxEmptyString);
+    m_txtInhibited = new WrappingText(transmitPlate);
     m_txtInhibited->SetForegroundColour(wxColour("#E0A060"));
     m_txtInhibited->Hide();
     transmitPlate->GetContentSizer()->Add(m_txtInhibited, 0, wxEXPAND | wxBOTTOM, 4);
 
     // Which external modem chat goes through, and whether it is there.
-    m_txtModem = new wxStaticText(transmitPlate, wxID_ANY, wxEmptyString);
+    m_txtModem = new WrappingText(transmitPlate);
     m_txtModem->SetForegroundColour(Colour::Bone);
     m_txtModem->Hide();
     transmitPlate->GetContentSizer()->Add(m_txtModem, 0, wxEXPAND | wxBOTTOM, 4);
@@ -480,7 +534,7 @@ void TextMessagingDialog::buildControls()
         _("When lit, this station transmits on its own to confirm messages and answer pings."));
     bottomSizer->Add(m_chkAutoReply, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 10);
 
-    m_txtStatus = new wxStaticText(transmitPlate, wxID_ANY, wxEmptyString);
+    m_txtStatus = new WrappingText(transmitPlate);
     m_txtStatus->SetForegroundColour(Colour::Bone);
     bottomSizer->Add(m_txtStatus, 1, wxALIGN_CENTER_VERTICAL);
     transmitPlate->GetContentSizer()->Add(bottomSizer, 0, wxEXPAND);
@@ -490,6 +544,10 @@ void TextMessagingDialog::buildControls()
     updateSelectionControls();
 
     SetSizer(mainSizer);
+
+    // As narrow as the plates allow and no narrower: below that their
+    // nameplates and buttons are cut off. The status lines wrap to fit.
+    SetMinClientSize(mainSizer->GetMinSize());
     Layout();
 }
 
@@ -522,7 +580,7 @@ void TextMessagingDialog::refreshFromSession()
 void TextMessagingDialog::setStatus(const wxString& status, StatusKind kind)
 {
     m_statusKind = status.empty() ? StatusKind::Sticky : kind;
-    m_txtStatus->SetLabel(status);
+    m_txtStatus->setText(status);
 
     if (uiLogEnabled()) log_info("UI: status \"%s\"", (const char*)status.ToUTF8());
 }
@@ -1054,9 +1112,9 @@ void TextMessagingDialog::updateModemStatus()
 {
     MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
     wxString line = frame != nullptr ? frame->chatModemStatus() : wxString();
-    if (line == m_txtModem->GetLabel() && m_txtModem->IsShown() == !line.IsEmpty()) return;
+    if (line == m_txtModem->text() && m_txtModem->IsShown() == !line.IsEmpty()) return;
 
-    m_txtModem->SetLabel(line);
+    m_txtModem->setText(line);
     m_txtModem->Show(!line.IsEmpty());
     Layout();
 }
@@ -1072,14 +1130,9 @@ void TextMessagingDialog::updateTransmitControls()
     if (reason != m_inhibitReason)
     {
         m_inhibitReason = reason;
-        m_txtInhibited->SetLabel(
+        m_txtInhibited->setText(
             reason.empty() ? wxString()
                            : wxString::Format(_("Receive only. %s"), wxString::FromUTF8(reason)));
-        // wxWidgets 3.3 skips a Wrap() to the width it last wrapped at, even
-        // when the label has changed since, which left the next reason on one
-        // line cut off at the window edge. Wrap(-1), no wrapping, resets that.
-        m_txtInhibited->Wrap(-1);
-        m_txtInhibited->Wrap(GetClientSize().GetWidth() - 16);
         m_txtInhibited->Show(!reason.empty());
         updateSelectionControls();
         Layout();

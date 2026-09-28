@@ -2892,17 +2892,13 @@ void MainFrame::performFreeDVOn_()
                 }
     #endif // defined(WIN32)
                 
-                // Set frequency/mode to the one pre-selected by the user before start.
+                // Set the frequency pre-selected by the user before start. The
+                // mode is the operator's to set on the radio.
                 if (wxGetApp().rigFrequencyController && 
                     (wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqModeChanges || wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqChangesOnly) &&
                     wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency > 0)
                 {
                     wxGetApp().rigFrequencyController->setFrequency(wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency);
-        
-                    if (wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqModeChanges)
-                    {
-                        wxGetApp().rigFrequencyController->setMode(getCurrentMode_());
-                    }
                 }
                     
                 // Initialize PSK Reporter reporting.
