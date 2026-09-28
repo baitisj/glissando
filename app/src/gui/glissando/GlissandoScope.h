@@ -182,11 +182,15 @@ private:
     bool transmitting_;
     int hoverX_;
 
-    // History, newest row first, one byte of brightness per pixel. It holds
-    // more rows than the trace is tall when the lens squeezes them in.
+    // History, newest row first, one byte of brightness per spectrum bin
+    // from 0 Hz to historyNyquistHz_, whatever part of it is on show, so
+    // retuning or widening the view keeps it. It holds more rows than the
+    // trace is tall when the lens squeezes them in.
     std::vector<unsigned char> history_;
-    int historyWidth_;
+    int historyWidth_;              // bins per row
+    double historyNyquistHz_;
     int historyRows_;
+    int traceWidth_;
     int traceHeight_;
 
     bool lens_;

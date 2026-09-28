@@ -151,7 +151,9 @@ GlissandoScope::GlissandoScope(wxWindow* parent, wxWindowID id)
     , transmitting_(false)
     , hoverX_(-1)
     , historyWidth_(0)
+    , historyNyquistHz_(0.0)
     , historyRows_(0)
+    , traceWidth_(0)
     , traceHeight_(0)
     , lens_(true)
     , lensK_(1.0)
@@ -204,9 +206,10 @@ void GlissandoScope::setSpan(double lowHz, double highHz)
     if (lowHz == lowHz_ && highHz == highHz_) return;
     lowHz_ = lowHz;
     highHz_ = highHz;
-    // Old rows were drawn to the old scale and would now be in the wrong
-    // place.
-    clear();
+    // History is kept by frequency, not by pixel, so it is simply drawn
+    // again on the new scale: tuning and the duet's wider view pan and
+    // zoom it rather than wiping it.
+    Refresh();
 }
 
 void GlissandoScope::setActivity(bool receiving, bool transmitting)
@@ -220,7 +223,7 @@ void GlissandoScope::setActivity(bool receiving, bool transmitting)
 void GlissandoScope::clear()
 {
     // Decoded frames stay: they are placed by frequency and time, not by
-    // pixel, so they are still in the right place on the new scale.
+    // pixel.
     std::fill(history_.begin(), history_.end(), 0);
     Refresh();
 }
@@ -356,12 +359,12 @@ double GlissandoScope::yToAge(double y) const
 
 void GlissandoScope::sizeHistory()
 {
-    if (historyWidth_ <= 0 || traceHeight_ <= 0) return;
+    if (traceHeight_ <= 0) return;
     // The lens reaches back lensSpanSeconds(); a little more, so the bottom
     // pixel of the trace always has rows under it after a scan rate change.
     int rows = traceHeight_;
     if (lens_) rows = std::max(rows, (int)std::ceil(lensSpanSeconds() * scanRate_ * 1.1) + 2);
-    if (rows == historyRows_) return;
+    if (rows == historyRows_ && history_.size() == (size_t)historyWidth_ * rows) return;
     history_.resize((size_t)historyWidth_ * rows, 0);
     rowSeconds_.resize((size_t)rows, 0.0);
     historyRows_ = rows;
@@ -416,16 +419,10 @@ int GlissandoScope::hzToX(double hz) const
 void GlissandoScope::OnSize(wxSizeEvent& event)
 {
     wxRect r = traceRect();
-    if (r.width != historyWidth_ || r.height != traceHeight_)
+    if (r.width != traceWidth_ || r.height != traceHeight_)
     {
-        // A new width is a new picture; a new height keeps the rows.
-        if (r.width != historyWidth_)
-        {
-            history_.clear();
-            rowSeconds_.clear();
-            historyRows_ = 0;
-        }
-        historyWidth_ = r.width;
+        // History is kept in spectrum bins, so a resize keeps it all.
+        traceWidth_ = r.width;
         traceHeight_ = r.height;
         updateLens();
         sizeHistory();
@@ -443,11 +440,26 @@ void GlissandoScope::OnTimer(wxTimerEvent&)
 
 void GlissandoScope::addRow()
 {
-    if (historyWidth_ <= 0 || historyRows_ <= 0) return;
+    if (historyRows_ <= 0) return;
+
+    double nyquist = 0.0;
+    bool have = source_ && source_(spectrum_, nyquist) && !spectrum_.empty() && nyquist > 0.0;
+
+    // A spectrum of a new shape (the sound card's rate changed) cannot be
+    // drawn with the old one: start the history again.
+    if (have && ((int)spectrum_.size() != historyWidth_ || nyquist != historyNyquistHz_))
+    {
+        historyWidth_ = (int)spectrum_.size();
+        historyNyquistHz_ = nyquist;
+        history_.assign((size_t)historyWidth_ * historyRows_, 0);
+    }
 
     // Scroll everything down one row.
-    std::memmove(history_.data() + historyWidth_, history_.data(),
-                 (size_t)historyWidth_ * (historyRows_ - 1));
+    if (historyWidth_ > 0)
+    {
+        std::memmove(history_.data() + historyWidth_, history_.data(),
+                     (size_t)historyWidth_ * (historyRows_ - 1));
+    }
     std::move_backward(rowSeconds_.begin(), rowSeconds_.end() - 1, rowSeconds_.end());
     rowSeconds_[0] = steadySeconds();
 
@@ -465,8 +477,7 @@ void GlissandoScope::addRow()
     }
 
     unsigned char* row = history_.data();
-    double nyquist = 0.0;
-    if (!source_ || !source_(spectrum_, nyquist) || spectrum_.empty() || nyquist <= 0.0)
+    if (!have)
     {
         std::fill(row, row + historyWidth_, 0);
         return;
@@ -481,20 +492,13 @@ void GlissandoScope::addRow()
     // than PEAK_RANGE_DB under the loudest bin.
     float floor = std::max(sorted[sorted.size() / 2], peak - PEAK_RANGE_DB);
 
-    double binsPerHz = (spectrum_.size() - 1) / nyquist;
-    for (int x = 0; x < historyWidth_; x++)
+    // Kept bin by bin across the whole spectrum; renderTrace() picks out
+    // and stretches the part on show.
+    for (int b = 0; b < historyWidth_; b++)
     {
-        // Several pixels share a bin at this zoom; interpolate between bins
-        // so notes are smooth lines rather than stairs.
-        double hz = lowHz_ + (highHz_ - lowHz_) * x / std::max(1, historyWidth_ - 1);
-        double bin = hz * binsPerHz;
-        int b0 = std::min((int)spectrum_.size() - 1, std::max(0, (int)std::floor(bin)));
-        int b1 = std::min((int)spectrum_.size() - 1, b0 + 1);
-        double t = bin - b0;
-        float db = (float)((1.0 - t) * spectrum_[b0] + t * spectrum_[b1]);
-        float level = std::min(1.0f, std::max(0.0f, (db - floor) / DISPLAY_RANGE_DB));
+        float level = std::min(1.0f, std::max(0.0f, (spectrum_[(size_t)b] - floor) / DISPLAY_RANGE_DB));
         // A little gamma so weak signals show without the noise turning grey.
-        row[x] = (unsigned char)std::lround(255.0 * std::pow(level, 1.6));
+        row[b] = (unsigned char)std::lround(255.0 * std::pow(level, 1.6));
     }
 }
 
@@ -535,9 +539,9 @@ void GlissandoScope::OnPaint(wxPaintEvent&)
 
     // The trace itself, blitted as an image: phosphor white with a faint
     // blue-grey tint in the dark, like an old cathode ray tube.
-    if (historyWidth_ == trace.width && traceHeight_ == trace.height && !history_.empty())
+    if (traceWidth_ == trace.width && traceHeight_ == trace.height && traceWidth_ > 0 && traceHeight_ > 0)
     {
-        wxImage image(historyWidth_, traceHeight_, false);
+        wxImage image(traceWidth_, traceHeight_, false);
         renderTrace(image);
         dc.DrawBitmap(wxBitmap(image), trace.x, trace.y);
     }
@@ -881,32 +885,80 @@ void GlissandoScope::renderTrace(wxImage& image)
     // Phosphor white with a faint blue-grey tint in the dark, like an old
     // cathode ray tube.
     unsigned char* rgb = image.GetData();
-    auto put = [&](size_t pixel, unsigned v) {
-        rgb[3 * pixel + 0] = (unsigned char)(8 + v * 224 / 255);
-        rgb[3 * pixel + 1] = (unsigned char)(9 + v * 227 / 255);
-        rgb[3 * pixel + 2] = (unsigned char)(12 + v * 218 / 255);
-    };
-    const int w = historyWidth_;
-
-    if (!lens_ || rowSeconds_.empty() || rowSeconds_[0] <= 0.0)
+    const int w = traceWidth_;
+    const int bins = historyWidth_;
+    if (bins <= 0 || history_.empty())
     {
-        int rows = std::min(traceHeight_, historyRows_);
-        for (size_t i = 0; i < (size_t)w * rows; i++) put(i, history_[i]);
-        for (size_t i = (size_t)w * rows; i < (size_t)w * traceHeight_; i++) put(i, 0);
+        for (size_t i = 0; i < (size_t)w * traceHeight_; i++)
+        {
+            rgb[3 * i + 0] = 8;
+            rgb[3 * i + 1] = 9;
+            rgb[3 * i + 2] = 12;
+        }
         return;
     }
 
-    std::vector<unsigned> line((size_t)w);
-    double newest = rowSeconds_[0];
+    // Where each pixel column falls among the bins. Several pixels share a
+    // bin at this zoom; interpolating between bins keeps notes smooth lines
+    // rather than stairs. Columns beyond the spectrum stay dark.
+    std::vector<int> b0s((size_t)w);
+    std::vector<unsigned> fracs((size_t)w);
+    double binsPerHz = (bins - 1) / historyNyquistHz_;
+    for (int x = 0; x < w; x++)
+    {
+        double hz = lowHz_ + (highHz_ - lowHz_) * x / std::max(1, w - 1);
+        double bin = hz * binsPerHz;
+        if (bin < 0.0 || bin > bins - 1)
+        {
+            b0s[(size_t)x] = -1;
+            continue;
+        }
+        int b0 = std::min(bins - 2, (int)bin);
+        b0s[(size_t)x] = std::max(0, b0);
+        fracs[(size_t)x] = (unsigned)std::lround((bin - b0s[(size_t)x]) * 256.0);
+    }
+
+    std::vector<unsigned> line((size_t)bins + 1, 0u);
+    auto putLine = [&](int y) {
+        unsigned char* out = rgb + 3 * (size_t)y * w;
+        for (int x = 0; x < w; x++, out += 3)
+        {
+            int b0 = b0s[(size_t)x];
+            unsigned v = 0;
+            if (b0 >= 0)
+            {
+                unsigned f = std::min(256u, fracs[(size_t)x]);
+                v = (line[(size_t)b0] * (256 - f) + line[(size_t)b0 + 1] * f) >> 8;
+            }
+            out[0] = (unsigned char)(8 + v * 224 / 255);
+            out[1] = (unsigned char)(9 + v * 227 / 255);
+            out[2] = (unsigned char)(12 + v * 218 / 255);
+        }
+    };
+    auto rowAt = [&](int row) { return history_.data() + (size_t)row * bins; };
+
+    bool throughLens = lens_ && !rowSeconds_.empty() && rowSeconds_[0] > 0.0;
+    double newest = throughLens ? rowSeconds_[0] : 0.0;
     for (int y = 0; y < traceHeight_; y++)
     {
+        std::fill(line.begin(), line.end(), 0u);
+        if (!throughLens)
+        {
+            if (y < historyRows_)
+            {
+                const unsigned char* src = rowAt(y);
+                for (int b = 0; b < bins; b++) line[(size_t)b] = src[b];
+            }
+            putLine(y);
+            continue;
+        }
+
         // The rows under this pixel: its top and bottom edge, in rows back.
         double r0 = timeToRow(newest - yToAge(y));
         double r1 = timeToRow(newest - yToAge(y + 1));
-        size_t out = (size_t)y * w;
         if (r0 >= historyRows_ - 1)
         {
-            for (int x = 0; x < w; x++) put(out + x, 0);
+            putLine(y);
             continue;
         }
         if (r1 - r0 <= 1.0)
@@ -916,21 +968,21 @@ void GlissandoScope::renderTrace(wxImage& image)
             int a = std::min(historyRows_ - 1, (int)r);
             int b = std::min(historyRows_ - 1, a + 1);
             unsigned f = (unsigned)std::lround((r - a) * 256.0);
-            const unsigned char* ra = history_.data() + (size_t)a * w;
-            const unsigned char* rb = history_.data() + (size_t)b * w;
-            for (int x = 0; x < w; x++) put(out + x, (ra[x] * (256 - f) + rb[x] * f) >> 8);
+            const unsigned char* ra = rowAt(a);
+            const unsigned char* rb = rowAt(b);
+            for (int k = 0; k < bins; k++) line[(size_t)k] = (ra[k] * (256 - f) + rb[k] * f) >> 8;
+            putLine(y);
             continue;
         }
         // Squeezed: the brightest of the rows, so nothing faint is lost.
         int a = (int)r0;
         int b = std::min(historyRows_ - 1, std::max(a, (int)std::ceil(r1) - 1));
-        std::fill(line.begin(), line.end(), 0u);
         for (int row = a; row <= b; row++)
         {
-            const unsigned char* src = history_.data() + (size_t)row * w;
-            for (int x = 0; x < w; x++) line[(size_t)x] = std::max<unsigned>(line[(size_t)x], src[x]);
+            const unsigned char* src = rowAt(row);
+            for (int k = 0; k < bins; k++) line[(size_t)k] = std::max<unsigned>(line[(size_t)k], src[k]);
         }
-        for (int x = 0; x < w; x++) put(out + x, line[(size_t)x]);
+        putLine(y);
     }
 }
 
