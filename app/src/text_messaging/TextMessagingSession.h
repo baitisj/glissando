@@ -42,6 +42,7 @@
 
 #include "HeardStationList.h"
 #include "MessageStore.h"
+#include "SnoopFeed.h"
 #include "TextMessagingProtocol.h"
 
 namespace TextMessaging
@@ -71,6 +72,9 @@ public:
     MessageStore& store() { return store_; }
     HeardStationList& stations() { return stations_; }
 
+    // Every frame heard, whoever it was for; fed alongside the protocol.
+    SnoopFeed& snoop() { return snoop_; }
+
     std::string lastError() const { return lastError_; }
 
 private:
@@ -85,6 +89,7 @@ private:
     MessageStore store_;
     HeardStationList stations_;
     TextMessagingProtocol protocol_;
+    SnoopFeed snoop_;
     ITextMessagingTransport* transport_;
 
     std::atomic<bool> running_;

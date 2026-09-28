@@ -88,6 +88,10 @@ bool TextMessagingSession::start(const std::string& databasePath,
     store_.pruneHeardStationsOlderThan(now - HeardStationList::DEFAULT_MAX_AGE_SECONDS);
     stations_.restore(store_.heardStations(), now);
 
+    // Stations from earlier sessions, so traffic addressed to them is named
+    // before they are heard again.
+    for (const HeardStation& station : stations_.stations()) snoop_.addKnownCallsign(station.callsign);
+
     transport_ = transport;
     protocol_.setTransport(transport);
 

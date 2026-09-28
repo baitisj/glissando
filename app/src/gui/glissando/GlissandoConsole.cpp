@@ -340,7 +340,10 @@ void GlissandoConsole::buildControls()
     rigButton_ = new Button(commandPlate, wxID_ANY, _("Set"), false, wxSize(92, 32));
     rigButton_->SetToolTip(_("Type in a dial frequency. With rig control set up, the radio tunes to it."));
     dialButtons->Add(rigButton_, 0);
-    dial->Add(dialButtons, 0);
+    dial->Add(dialButtons, 0, wxBOTTOM, 4);
+    snoopButton_ = new Button(commandPlate, wxID_ANY, _("Snooper"), false, wxSize(190, 32));
+    snoopButton_->SetToolTip(_("Open the snooping window: every message heard, whoever it was sent to."));
+    dial->Add(snoopButton_, 0);
     commandRow->Add(dial, 0);
 
     commandPlate->GetContentSizer()->Add(commandRow, 0);
@@ -401,6 +404,7 @@ void GlissandoConsole::buildControls()
         refreshTelemetry();
     });
     chatButton_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { host_->glissandoShowChat(); });
+    snoopButton_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { host_->glissandoShowSnoop(); });
     preferencesButton_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { showPreferences(); });
     presetsButton_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { showFrequencyPresets(); });
     rigButton_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { enterRigFrequency(); });

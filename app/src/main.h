@@ -169,6 +169,7 @@ void      clearLastUsedConfigPath();
 class MainFrame;
 class FilterDlg;
 class TextMessagingDialog;
+class SnoopDialog;
 class TextMessagingTransport;
 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=--=-=-=-=
@@ -301,6 +302,7 @@ class MainFrame : public TopFrame, public IGlissandoHost
 
         FilterDlg*              m_filterDialog;
         TextMessagingDialog*    m_textMessagingDialog;
+        SnoopDialog*            m_snoopDialog;
         TextMessagingTransport* m_textMessagingTransport;
         TextMessaging::Data2GTransport* m_data2gTransport;
         GlissandoConsole*       m_glissandoConsole;
@@ -433,6 +435,7 @@ public:
     virtual void glissandoSetRigFrequency(double hz) override;
     virtual std::vector<double> glissandoFrequencyPresets() override;
     virtual void glissandoShowChat() override;
+    virtual void glissandoShowSnoop() override;
     virtual bool glissandoSetupAvailable(GlissandoSetup setup) override;
     virtual void glissandoOpenSetup(GlissandoSetup setup) override;
     virtual void glissandoConsoleClosed(const wxRect& lastPosition) override;
