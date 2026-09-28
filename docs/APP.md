@@ -59,6 +59,14 @@ Both open at launch:
 * **The chat window** ("Glissando Chat"): heard stations, the transmission
   log and the transmitter, in the same dress. Closing it only hides it;
   `Transmission log` on the console brings it back.
+* **The snooping window** ("Glissando Snooper"): every message the station
+  hears, including directed messages between other stations, which the chat
+  window leaves out. Messages for you are lit and marked FOR YOU. The
+  pings, pongs and acknowledgements around them are listed in small print, and
+  `Every frame` adds each fragment as it is decoded. An addressee that has
+  never been heard transmitting shows as `#` and the CRC of its callsign,
+  because frames carry only that. Closing it only hides it; `Snooper` on the
+  console brings it back with everything heard meanwhile.
 
 `--glissando` is still accepted, so older scripts keep working, but it no
 longer changes anything.
@@ -72,13 +80,14 @@ longer changes anything.
 | Duet voice | Widens the scope to show the duet gear's high voice (C6..E7). |
 | All tempos | Decode every gear at once, so a station that shifts gear is still heard. Off: only the chosen gear (and the one automatic shifting picked). |
 | Melody offset | Moves every note by up to +/-250 Hz, on transmit and receive: the audio equivalent of the tuning dial. |
-| Radio dial | Shows the rig frequency. `Presets` drops down the frequency list (edited in Preferences, Options) and `Set` takes a typed one. Rig control and the US data segment check follow it. |
+| Radio dial | Shows the rig frequency, read from the radio once a second and again just before each keying (the radio is not read while it transmits). The radio is the source of truth: turning its dial or retuning it with `rigctl` shows here, and the app never puts it back. Only `Presets` (the frequency list, edited in Preferences, Options) and `Set` (a typed frequency) retune the radio; one picked while disengaged is sent when the radio connects. Starting and stopping leave the radio where it is. The US data segment check follows the shown frequency. |
 | Tempo | Adagio (640 ms notes, 55 s frame), Andante, Allegro, Presto (80 ms, 7 s), Duet (two voices, two payloads per frame). |
 | Auto shift | Picks the fastest gear the SNR and Doppler spread measured on the last frame heard support (`recommendGear`, the prototype's table with 2 dB margin). The tempo being sent lights up; the hand-picked one glows faintly beside it, and is used until something is heard, and again 15 minutes after the last frame. |
 | Scale | Pentatonic (default, harmonious when stations overlap), whole tone, diminished, diabolus (tritones). The scale costs nothing in sensitivity (DESIGN.md 3.1a). It is the scale you send in: the receiver hears every scale and shows the one heard (DESIGN.md 3.1b). |
 | Telemetry | SNR meter, Doppler spread, tempo of the last frame and how long ago, tempo we would send at, that tempo's frame length, and the scale the last frame was sung in. |
 | Engage | Starts and stops audio. |
 | Transmission log | Brings the chat window back if it was closed. |
+| Snooper | Brings the snooping window back if it was closed. |
 | Preferences | Drops down Options, Sound cards, Rig control (CAT and PTT), Audio filters and Easy setup. Sound cards, rig control and easy setup only change while disengaged. The app opens only the radio's two audio streams, input from the radio and output to it, so Sound cards and Easy setup ask for nothing else; leave the output as none to only listen. |
 
 Glissando keeps its own settings and never reads or changes FreeDV's, so the

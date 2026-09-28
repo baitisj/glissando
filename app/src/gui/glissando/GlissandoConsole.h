@@ -98,6 +98,9 @@ public:
 
     virtual void glissandoShowChat() = 0;
 
+    // Every station's traffic, not only ours.
+    virtual void glissandoShowSnoop() = 0;
+
     // Some setup can only change while the audio is stopped.
     virtual bool glissandoSetupAvailable(GlissandoSetup setup) = 0;
     virtual void glissandoOpenSetup(GlissandoSetup setup) = 0;
@@ -164,6 +167,7 @@ private:
     Chaotica::Button* engageButton_;
     bool engageAborts_ = false;     // the button reads Abort
     Chaotica::Button* chatButton_;
+    Chaotica::Button* snoopButton_;
     Chaotica::Button* preferencesButton_;
     Chaotica::Lamp* engagedLamp_;
     Chaotica::Lamp* receivingLamp_;
