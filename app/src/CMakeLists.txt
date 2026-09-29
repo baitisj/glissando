@@ -35,8 +35,8 @@ add_subdirectory(text_messaging)
 # WIN32 is needed for Windows GUI apps and is ignored for UNIX like systems.
 # In addition, there are some required OSX-specific code files for platform specific handling.
 if(APPLE)
-    set(RES_FILES freedv.icns)
-    set_source_files_properties(freedv.icns PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
+    set(RES_FILES glissando.icns)
+    set_source_files_properties(glissando.icns PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
     add_executable(FreeDV MACOSX_BUNDLE ${FREEDV_SOURCES} ${RES_FILES})
     set_target_properties(FreeDV PROPERTIES
         BUNDLE True
@@ -46,7 +46,7 @@ if(APPLE)
         MACOSX_BUNDLE_BUNDLE_VERSION "${FreeDV_VERSION}"
         MACOSX_BUNDLE_BUNDLE_SHORT_VERSION_STRING "${FreeDV_VERSION}"
         MACOSX_BUNDLE_BUNDLE_LONG_VERSION_STRING "${FreeDV_VERSION}"
-        MACOSX_BUNDLE_ICON_FILE "freedv"
+        MACOSX_BUNDLE_ICON_FILE "glissando"
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/src/info.plist.in
     )
 else()
@@ -232,7 +232,7 @@ if(APPLE)
         COMMAND rm -rf dist_tmp FreeDV.dmg || true
         COMMAND DYLD_LIBRARY_PATH=${CODEC2_BUILD_DIR}/src:${portaudio_BINARY_DIR}:${DYLD_LIBRARY_PATH} ${CMAKE_SOURCE_DIR}/macdylibbundler/dylibbundler ARGS -od -b -x FreeDV.app/Contents/MacOS/FreeDV -d FreeDV.app/Contents/libs -p @loader_path/../libs/ -i /usr/lib -s ${CODEC2_BUILD_DIR}/src -s ${CMAKE_BINARY_DIR}/codec2_build/src ${PORTAUDIO_BUNDLE_ARG} -s `dirname ${CLANG_SANITIZER_FILE}` -ns
         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/clean-duplicate-rpaths.sh FreeDV.app/
-        COMMAND cp ARGS ${CMAKE_CURRENT_SOURCE_DIR}/freedv.icns FreeDV.app/Contents/Resources
+        COMMAND cp ARGS ${CMAKE_CURRENT_SOURCE_DIR}/glissando.icns FreeDV.app/Contents/Resources
         COMMAND rm ARGS -rf FreeDV.app/Contents/Frameworks
         COMMAND mkdir ARGS FreeDV.app/Contents/Frameworks
         
