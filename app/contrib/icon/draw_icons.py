@@ -8,8 +8,7 @@ head, and the red hourglass in the console's one red (Chaotica::Colour::Alarm).
     python3 app/contrib/icon/draw_icons.py            # writes the icon set
     python3 app/contrib/icon/draw_icons.py --options  # previews A to D here
 
-Needs Pillow. The icon set is app/contrib/glissando{48,64,128,256}.png,
-app/contrib/glissando.ico and app/src/glissando.icns.
+Needs Pillow. The icon set is app/contrib/glissando{48,64,128,256}.png.
 """
 import os
 import sys
@@ -227,7 +226,3 @@ if __name__ == '__main__':
     for size in (48, 64, 128, 256):
         icon.resize((size, size), Image.LANCZOS).save(
             os.path.join(app, 'contrib', f'glissando{size}x{size}.png'), optimize=True)
-    icon.resize((256, 256), Image.LANCZOS).save(
-        os.path.join(app, 'contrib', 'glissando.ico'),
-        sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
-    icon.save(os.path.join(app, 'src', 'glissando.icns'))
