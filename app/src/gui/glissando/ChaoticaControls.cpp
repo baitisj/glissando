@@ -327,10 +327,18 @@ void Dial::SetValue(double value)
     Refresh();
 }
 
+void Dial::SetWheelSteps(double plain, double shift, double control)
+{
+    wheelPlain_ = plain;
+    wheelShift_ = shift;
+    wheelControl_ = control;
+}
+
 void Dial::change(double value)
 {
     value = std::round(value / step_) * step_;
     value = std::min(maximum_, std::max(minimum_, value));
+    if (value == 0.0) value = 0.0; // never "-0.0"
     if (value == value_) return;
     value_ = value;
     Refresh();
@@ -361,14 +369,32 @@ void Dial::OnMouseMove(wxMouseEvent& event)
     // A full sweep of the dial for 300 pixels of travel, a tenth of that with
     // shift held.
     double perPixel = (maximum_ - minimum_) / 300.0 * (event.ShiftDown() ? 0.1 : 1.0);
-    change(dragValue_ + (dragY_ - event.GetY()) * perPixel);
+    double value = dragValue_ + (dragY_ - event.GetY()) * perPixel;
+    // Catch on the default for a few pixels either side, so it can be found
+    // again by hand.
+    if (std::fabs(value - defaultValue_) <= 4.0 * perPixel) value = defaultValue_;
+    change(value);
 }
 
 void Dial::OnMouseWheel(wxMouseEvent& event)
 {
-    int clicks = event.GetWheelRotation() / std::max(1, event.GetWheelDelta());
-    double coarse = std::max(step_, (maximum_ - minimum_) / 100.0);
-    change(value_ + clicks * (event.ShiftDown() ? step_ : coarse));
+    // Smooth-scrolling wheels and touchpads send part clicks: save them up.
+    int delta = std::max(1, event.GetWheelDelta());
+    wheelRotation_ += event.GetWheelRotation();
+    int clicks = wheelRotation_ / delta;
+    wheelRotation_ -= clicks * delta;
+    if (clicks == 0) return;
+
+    double stepBy;
+    if (wheelPlain_ > 0.0)
+    {
+        stepBy = event.ControlDown() ? wheelControl_ : event.ShiftDown() ? wheelShift_ : wheelPlain_;
+    }
+    else
+    {
+        stepBy = event.ShiftDown() ? step_ : std::max(step_, (maximum_ - minimum_) / 100.0);
+    }
+    change(value_ + clicks * stepBy);
 }
 
 void Dial::OnDoubleClick(wxMouseEvent&)

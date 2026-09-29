@@ -106,7 +106,8 @@ private:
 };
 
 // A rotary knob over an arc of engraved ticks. Drag up or down, or turn the
-// mouse wheel, to change it; shift for fine steps. Sends wxEVT_SLIDER.
+// mouse wheel, to change it; shift for fine steps. Dragging past the default
+// value catches on it, and a double click returns to it. Sends wxEVT_SLIDER.
 class Dial : public Control
 {
 public:
@@ -118,6 +119,13 @@ public:
     double GetValue() const { return value_; }
     void SetValue(double value);
     void SetFormatter(Formatter formatter) { formatter_ = formatter; Refresh(); }
+    // The value a double click returns to, and dragging catches on; the
+    // value the dial was made with until this is called.
+    void SetDefault(double value) { defaultValue_ = value; }
+    // How far one click of the mouse wheel turns the dial, alone and with
+    // shift or control held. Until this is called the wheel moves a
+    // hundredth of the range, or one step with shift.
+    void SetWheelSteps(double plain, double shift, double control);
 
 protected:
     virtual void paint(wxGraphicsContext* gc, const wxSize& size) override;
@@ -137,6 +145,10 @@ private:
     double value_;
     double defaultValue_;
     Formatter formatter_;
+    double wheelPlain_ = 0.0;
+    double wheelShift_ = 0.0;
+    double wheelControl_ = 0.0;
+    int wheelRotation_ = 0;
     bool dragging_;
     int dragY_;
     double dragValue_;

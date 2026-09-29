@@ -128,8 +128,9 @@ public:
 
     // Double clicking asks to retune so the lowest note of the scale sits
     // where the click was; EVT_GLISSANDO_SCOPE_TUNE carries the clicked
-    // frequency in tenths of a Hz in GetInt(). The wheel nudges by 1 Hz, as
-    // the same event with GetExtraLong() set to the nudge in tenths.
+    // frequency in tenths of a Hz in GetInt(). The wheel nudges by 0.1 Hz
+    // (10 Hz with shift, 1 Hz with control), as the same event with
+    // GetExtraLong() set to the nudge in tenths.
 
 private:
     void OnPaint(wxPaintEvent& event);
@@ -185,6 +186,7 @@ private:
     bool receiving_;
     bool transmitting_;
     int hoverX_;
+    int wheelRotation_ = 0;
 
     // History, newest row first, one byte of brightness per spectrum bin
     // from 0 Hz to historyNyquistHz_, whatever part of it is on show, so
