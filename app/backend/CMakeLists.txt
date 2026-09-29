@@ -47,34 +47,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Include helpers
 include(cmake/IsMacOSUniversalBinary.cmake)
 
-# Compile backend dependencies
-include(cmake/BuildRNNoise.cmake)
-
-# Look for libebur128 (loudness measurement) 
-if(NOT USE_STATIC_EBUR128)
-    message(STATUS "Looking for ebur128...")
-    find_library(LIBEBUR128 ebur128)
-    find_path(LIBEBUR128_INCLUDE_DIR ebur128.h)
-    message(STATUS "  ebur128 library: ${LIBEBUR128}")
-    message(STATUS "  ebur128 headers: ${LIBEBUR128_INCLUDE_DIR}")
-    IsMacOSUniversalBinary(${LIBEBUR128} LIBEBUR128_USABLE)
-    if (NOT LIBEBUR128_USABLE)
-        message(STATUS "libebur128 is not a universal binary, ignoring found library")
-        set(LIBEBUR128 0)
-        set(LIBEBUR128_INCLUDE_DIR "")
-    endif()
-    if(LIBEBUR128 AND LIBEBUR128_INCLUDE_DIR)
-        list(APPEND FREEDV_LINK_LIBS ${LIBEBUR128})
-        include_directories(${LIBEBUR128_INCLUDE_DIR})
-    else(LIBEBUR128 AND LIBEBUR128_INCLUDE_DIR)
-        message(STATUS "Will attempt static build of ebur128.")
-        include(cmake/BuildEbur128.cmake)
-    endif(LIBEBUR128 AND LIBEBUR128_INCLUDE_DIR)
-else(NOT USE_STATIC_LIBEBUR128)
-    message(STATUS "Will attempt static build of ebur128.")
-    include(cmake/BuildEbur128.cmake)
-endif(NOT USE_STATIC_EBUR128)
-
 # Samplerate Library
 #   
 if(NOT USE_STATIC_SAMPLERATE) 

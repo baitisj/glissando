@@ -39,10 +39,6 @@ using namespace std::chrono_literals;
 
 #include "freedv_sanitizers.h"
 
-// WebRTC uses FS, which is defined in defines.h. Thus, it needs to be included
-// first.
-#include "AgcStep.h"
-
 // This forces us to use freedv-gui's version rather than another one.
 // TBD -- may not be needed once we fully switch over to the audio pipeline.
 #include "../defines.h"
@@ -52,7 +48,6 @@ using namespace std::chrono_literals;
 
 #include "PlaybackStep.h"
 #include "EitherOrStep.h"
-#include "RNNoiseStep.h"
 #include "ResamplePlotStep.h"
 #include "ResampleStep.h"
 #include "TapStep.h"

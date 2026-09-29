@@ -32,7 +32,7 @@ Packages on Debian or Ubuntu:
 
     sudo apt install build-essential cmake git autoconf automake libtool \
         libwxgtk3.2-dev libpulse-dev libspeexdsp-dev libsndfile1-dev \
-        libhamlib-dev libasound2-dev libao-dev libgsm1-dev libebur128-dev sox
+        libhamlib-dev libasound2-dev libao-dev libgsm1-dev sox
 
 Then, from the top of the repository:
 
