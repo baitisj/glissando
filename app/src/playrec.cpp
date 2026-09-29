@@ -9,40 +9,24 @@
 
 
 extern wxMutex g_mutexProtectingCallbackData;
-std::atomic<SNDFILE*> g_sfPlayFile;
-std::atomic<bool>                g_playFileToMicIn;
-std::atomic<bool>   g_loopPlayFileToMicIn;
-int                 g_playFileToMicInEventId;
 
 SNDFILE            *g_sfRecFile;
 bool                g_recFileFromRadio;
 std::atomic<unsigned int> g_recFromRadioSamples;
 int                 g_recFileFromRadioEventId;
 
-std::atomic<SNDFILE*> g_sfRecMicFile;
-std::atomic<bool>   g_recFileFromMic;
-
-SNDFILE* g_sfRecDecoderFile;
-bool g_recFileFromDecoder;
-int                 g_recFileFromDecoderEventId;
-
 std::atomic<SNDFILE*> g_sfPlayFileFromRadio;
 std::atomic<bool>                g_playFileFromRadio;
 std::atomic<int>    g_sfFs;
-std::atomic<int>    g_sfTxFs;
 std::atomic<bool>   g_loopPlayFileFromRadio;
 int                 g_playFileFromRadioEventId;
 
 std::atomic<SNDFILE*>            g_sfRecFileFromModulator;
 std::atomic<bool>                g_recFileFromModulator;
 
-// Time-Out Timer beep: injected into the speaker output path during the warning window.
-std::atomic<bool>     g_totBeepActive(false);
-
 int                 g_recFromModulatorSamples;
 int                 g_recFileFromModulatorEventId;
 
-extern FreeDVInterface freedvInterface;
 extern std::atomic<bool> g_tx;
 
 // extra panel added to file open dialog to add loop checkbox
@@ -50,7 +34,7 @@ MyExtraPlayFilePanel::MyExtraPlayFilePanel(wxWindow *parent): wxPanel(parent)
 {
     m_cb = new wxCheckBox(this, -1, wxT("Loop"));
     m_cb->SetToolTip(_("When checked file will repeat forever"));
-    m_cb->SetValue(g_loopPlayFileToMicIn.load(std::memory_order_relaxed));
+    m_cb->SetValue(g_loopPlayFileFromRadio.load(std::memory_order_relaxed));
 
     // bug: I can't this to align right.....
     wxBoxSizer *sizerTop = new wxBoxSizer(wxHORIZONTAL);
@@ -61,19 +45,6 @@ MyExtraPlayFilePanel::MyExtraPlayFilePanel(wxWindow *parent): wxPanel(parent)
 static wxWindow* createMyExtraPlayFilePanel(wxWindow *parent)
 {
     return new MyExtraPlayFilePanel(parent);
-}
-
-void MainFrame::StopPlayFileToMicIn(void)
-{
-    g_mutexProtectingCallbackData.Lock();
-    if (g_playFileToMicIn.load(std::memory_order_acquire))
-    {
-        g_playFileToMicIn.store(false, std::memory_order_release);
-        sf_close(g_sfPlayFile.load(std::memory_order_acquire));
-        g_sfPlayFile.store(nullptr, std::memory_order_release);
-        SetStatusText(wxT(""));
-    }
-    g_mutexProtectingCallbackData.Unlock();
 }
 
 void MainFrame::StopPlaybackFileFromRadio()
@@ -139,7 +110,7 @@ void MainFrame::OnPlayFileFromRadio(wxCommandEvent& event)
             {
                 sfInfo.format     = SF_FORMAT_RAW | SF_FORMAT_PCM_16;
                 sfInfo.channels   = 1;
-                sfInfo.samplerate = freedvInterface.getRxModemSampleRate();
+                sfInfo.samplerate = FS; // raw files are taken to be 8 kHz
             }
         }
         g_sfPlayFileFromRadio.store(sf_open(soundFile.c_str(), SFM_READ, &sfInfo), std::memory_order_release);
@@ -157,7 +128,7 @@ void MainFrame::OnPlayFileFromRadio(wxCommandEvent& event)
         wxWindow * const ctrl = openFileDialog.GetExtraControl();
 
         // Huh?! I just copied wxWidgets-2.9.4/samples/dialogs ....
-        g_loopPlayFileFromRadio.store(static_cast<MyExtraPlayFilePanel*>(ctrl)->getLoopPlayFileToMicIn(), std::memory_order_relaxed);
+        g_loopPlayFileFromRadio.store(static_cast<MyExtraPlayFilePanel*>(ctrl)->getLoop(), std::memory_order_relaxed);
 
         wxString statusText = "";
         if(extension == wxT("raw")) {
@@ -192,19 +163,4 @@ void MainFrame::StopRecFileFromRadio()
     }
 }
 
-void MainFrame::StopRecFileFromDecoder()
-{
-    if (g_sfRecDecoderFile != nullptr)
-    {
-        log_debug("Stopping Record....");
-        g_mutexProtectingCallbackData.Lock();
-        g_recFileFromDecoder = false;
-        sf_close(g_sfRecDecoderFile);
-        g_sfRecDecoderFile = nullptr;
-        SetStatusText(wxT(""));
-        
-        g_mutexProtectingCallbackData.Unlock();
-        
-    }
-}
 

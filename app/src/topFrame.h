@@ -97,9 +97,6 @@ class TopFrame : public wxFrame
         wxMenu* file;
         wxMenu* edit;
         wxMenu* tools;
-        wxGauge* m_gaugeSNR;
-        wxStaticText* m_textSNR;
-        wxCheckBox* m_ckboxSNR;
         wxGauge* m_gaugeLevel;
 
         wxButton*     m_BtnCallSignReset;
@@ -116,37 +113,9 @@ class TopFrame : public wxFrame
         wxButton* m_btnTxLevelP;
         wxButton* m_btnTxLevelPP;
         
-        wxSlider* m_sliderSQ;        
-        wxCheckBox* m_ckboxSQ;
-        wxStaticText* m_textSQ;
         wxStatusBar* m_statusBar1;
 
-        wxStaticBox* statsBox;
-        wxButton*     m_BtnBerReset;
-        wxStaticText  *m_textCurrentDecodeMode;
-        wxStaticText  *m_textBits;
-        wxStaticText  *m_textErrors;
-        wxStaticText  *m_textBER;
-        wxStaticText  *m_textResyncs;
-        wxStaticText  *m_textClockOffset;
-        wxStaticText  *m_textFreqOffset;
-        wxStaticText  *m_textSyncMetric;
-        wxStaticText  *m_textCodec2Var;
-
-        wxStaticText  *m_textSync;
-        wxButton      *m_BtnReSync;
-        wxButton      *m_btnCenterRx;
-        
-        
-
-        wxRadioButton *m_rb700d;
-        wxRadioButton *m_rb700e;
-        wxRadioButton *m_rb1600;
-
         wxSizer* rightSizer;
-
-        wxStaticBox* modeBox;
-        wxStaticBoxSizer* sbSizer_mode;
         
         wxMenuItem* m_menuItemPlayFileFromRadio;
         wxMenuItem* m_menuItemExportConfig;
@@ -169,7 +138,6 @@ class TopFrame : public wxFrame
         virtual void OnToolsAudio( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnToolsAudioUI( wxUpdateUIEvent& event ) { event.Skip(); }
         virtual void OnToolsOptions( wxCommandEvent& event ) { event.Skip(); }
-        virtual void OnCenterRx( wxCommandEvent& event ) { event.Skip(); }
 
         virtual void OnToolsUDP( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnToolsOptionsUI( wxUpdateUIEvent& event ) { event.Skip(); }
@@ -183,14 +151,10 @@ class TopFrame : public wxFrame
         virtual void OnToolsLoadDefaultConfig( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnToolsLoadDefaultConfigUI( wxUpdateUIEvent& event ) { event.Skip(); }
 
-        virtual void OnCmdSliderScroll( wxScrollEvent& event ) { event.Skip(); }
-        virtual void OnCheckSQClick( wxCommandEvent& event ) { event.Skip(); }
-        virtual void OnCheckSNRClick( wxCommandEvent& event ) { event.Skip(); }
 
         virtual void OnTogBtnLoopRx( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnTogBtnLoopTx( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnTogBtnOnOff( wxCommandEvent& event ) { event.Skip(); }
-        virtual void OnTogBtnAnalogClick( wxCommandEvent& event ) { event.Skip(); }
 
         virtual void OnTogBtnPTT( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnTogBtnPTTRightClick( wxContextMenuEvent& event ) { event.Skip(); }
@@ -198,17 +162,12 @@ class TopFrame : public wxFrame
         
         
 
-        virtual void OnTogBtnAnalogClickUI(wxUpdateUIEvent& event) { event.Skip(); }
         virtual void OnTogBtnRxIDUI(wxUpdateUIEvent& event ) { event.Skip(); }
         virtual void OnTogBtnTxIDUI(wxUpdateUIEvent& event ) { event.Skip(); }
         virtual void OnTogBtnPTT_UI(wxUpdateUIEvent& event ) { event.Skip(); }
         virtual void OnTogBtnOnOffUI(wxUpdateUIEvent& event ) { event.Skip(); }
 
         virtual void OnCallSignReset( wxCommandEvent& event ) { event.Skip(); }
-        virtual void OnBerReset( wxCommandEvent& event ) { event.Skip(); }
-        virtual void OnReSync( wxCommandEvent& event ) { event.Skip(); }
-        
-        virtual void OnChangeTxMode( wxCommandEvent& event ) { event.Skip(); }
         
         virtual void OnTxLevelDecrBig( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnTxLevelDecr( wxCommandEvent& event ) { event.Skip(); }
@@ -239,13 +198,11 @@ class TopFrame : public wxFrame
         
     public:
         wxToggleButton* m_togBtnOnOff;
-        wxToggleButton* m_togBtnAnalog;
         wxToggleButton* m_btnTogPTT;
         wxToggleButton* m_btnTogTune;
         wxAuiNotebook* m_auiNbookCtrl;
         wxComboBox*   m_cboReportFrequency;
         wxStaticBox*  m_freqBox;
-        wxStaticBox*  squelchBox;
         wxStaticBox*  m_txLevelBox;
 
         TopFrame( wxWindow* parent, wxWindowID id = wxID_ANY, const wxString& title = _("FreeDV "), const wxPoint& pos = wxDefaultPosition, const wxSize& size = wxSize(561,300 ), long style = wxDEFAULT_FRAME_STYLE|wxRESIZE_BORDER );

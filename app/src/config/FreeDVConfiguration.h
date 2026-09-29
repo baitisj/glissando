@@ -54,9 +54,6 @@ public:
 
     ConfigurationDataElement<long> currentNotebookTab;
     
-    ConfigurationDataElement<long> squelchActive;
-    ConfigurationDataElement<long> squelchLevel;
-    
     ConfigurationDataElement<int> fifoSizeMs;
     ConfigurationDataElement<int> transmitLevel;
     ConfigurationDataElement<int> tuneLevel;
@@ -108,11 +105,9 @@ public:
     
     ConfigurationDataElement<bool> debugConsoleEnabled; // note: Windows only
     
-    ConfigurationDataElement<bool> snrSlow;
     
     
     
-    ConfigurationDataElement<int> currentFreeDVMode;
     
     
 

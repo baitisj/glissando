@@ -67,35 +67,28 @@
 #include <intrin.h>
 #endif
 
-#include "codec2.h"
-#include "codec2_fifo.h"
-#include "modem_stats.h"
+#include "defines.h"
 
 #include "topFrame.h"
 #include "gui/dialogs/filter_frequency.h"
 #include "gui/dialogs/tot_warning.h"
 #include "gui/controls/plot.h"
 #include "gui/controls/plot_scalar.h"
-#include "gui/controls/plot_scatter.h"
-#include "gui/controls/plot_waterfall.h"
 #include "gui/glissando/GlissandoConsole.h"
 #include "text_messaging/Data2GTransport.h"
 #include "text_messaging/TextMessagingTypes.h"
-#include "gui/controls/plot_spectrum.h"
 #include "sndfile.h"
 #include "comp_prim.h"
 #include "rig_control/HamlibRigController.h"
 #include "rig_control/SerialPortOutRigController.h"
 #include "rig_control/SerialPortInRigController.h"
 #include "reporting/IReporter.h"
-#include "freedv_interface.h"
 #include "audio/AudioEngineFactory.h"
 #include "audio/IAudioDevice.h"
 #include "config/FreeDVConfiguration.h"
 #include "pipeline/paCallbackData.h"
 #include "pipeline/LinkStep.h"
 #include "freedv_sanitizers.h"
-#include "gui/util/wxMessageBoxWrapper.h"
 
 #define _USE_TIMER              1
 #define _USE_ONIDLE             1
@@ -111,12 +104,7 @@
 
 enum {
         ID_START = wxID_HIGHEST,
-        ID_TIMER_WATERFALL,
-        ID_TIMER_SPECTRUM,
-        ID_TIMER_SPEECH_IN,
-        ID_TIMER_SPEECH_OUT,
         ID_TIMER_DEMOD_IN,
-        ID_TIMER_SNR,
         ID_TIMER_UPDATE_OTHER,
         ID_TIMER_UPD_FREQ,
         ID_TIMER_TOT,           // Time-Out Timer
@@ -220,7 +208,6 @@ class MainApp : public wxApp
         // debugging 700D audio break up
 
 
-        int        m_prevMode;
         
         std::shared_ptr<LinkStep> linkStep;
 
@@ -231,7 +218,6 @@ class MainApp : public wxApp
         int m_reportCounter;
     protected:
     private:
-        void UnitTest_();
 };
 
 // declare global static function wxGetApp()
@@ -245,7 +231,7 @@ class MyExtraPlayFilePanel : public wxPanel
 public:
     MyExtraPlayFilePanel(wxWindow *parent);
     void setLoopPlayFileToMicIn(bool checked) { m_cb->SetValue(checked); }
-    bool getLoopPlayFileToMicIn(void) { return m_cb->GetValue(); }
+    bool getLoop(void) { return m_cb->GetValue(); }
 private:
     wxCheckBox *m_cb;
 };
@@ -273,24 +259,11 @@ class MainFrame : public TopFrame, public IGlissandoHost
         TextMessagingTransport* m_textMessagingTransport;
         TextMessaging::Data2GTransport* m_data2gTransport;
         GlissandoConsole*       m_glissandoConsole;
-        PlotSpectrum*           m_panelSpectrum;
-        PlotWaterfall*          m_panelWaterfall;
-        PlotScalar*             m_panelSpeechIn;
-        PlotScalar*             m_panelSpeechOut;
         PlotScalar*             m_panelDemodIn;
-        PlotScalar*             m_panelSNR;
 
         bool                    m_RxRunning;
         bool                    txChangeoverOccurring_;
 
-        // True while togglePTT() is running on behalf of a text chat burst.
-        // Nobody is at the main window for one of those, so it must not
-        // switch the notebook page: on wxGTK the switch focuses the page,
-        // and focusing a widget presents its toplevel, which pulls the main
-        // window onto the operator's workspace and takes the keyboard away
-        // from whatever they were typing into. With space bar PTT enabled
-        // the next space they type then keys the radio.
-        bool                    textMessagingChangeover_;
         
         bool                    OpenHamlibRig();
 #if defined(WIN32)
@@ -308,13 +281,8 @@ class MainFrame : public TopFrame, public IGlissandoHost
         // Not sure why we have the option to disable timers. TBD?
         wxTimer                 m_updFreqStatusTimer; //[UP]
 
-        wxTimer                 m_plotWaterfallTimer;
-        wxTimer                 m_plotSpectrumTimer;
         wxTimer                 m_plotScatterTimer;
-        wxTimer                 m_plotSpeechInTimer;
-        wxTimer                 m_plotSpeechOutTimer;
         wxTimer                 m_plotDemodInTimer;
-        wxTimer                 m_plotSNRTimer;
 
         // Time-Out Timer (TOT): stops TX after configured period
         wxTimer                 m_totTimer;
@@ -349,7 +317,6 @@ class MainFrame : public TopFrame, public IGlissandoHost
         bool                    m_momentaryKeyReleasedDuringChangeover_{false};
 
         // TOT beep state
-        std::chrono::time_point<std::chrono::high_resolution_clock> m_totLastBeepTime_;
 
     void destroy_fifos(void);
 
@@ -436,16 +403,12 @@ private:
     bool                    m_schedule_restore;
 
 
-        void StopPlayFileToMicIn(void);
         void StopPlaybackFileFromRadio();
         void StopRecFileFromRadio();
-        void StopRecFileFromDecoder();
         
         bool isReceiveOnly();
         
     protected:
-
-        void setsnrBeta(bool snrSlow);
 
         // protected event handlers
         virtual void topFrame_OnSize( wxSizeEvent& event ) override;
@@ -483,15 +446,9 @@ private:
         void OnToolsLoadDefaultConfig( wxCommandEvent& event ) override;
         void OnToolsLoadDefaultConfigUI( wxUpdateUIEvent& event ) override;
 
-        void OnCenterRx(wxCommandEvent& event) override;
-
-        void OnCmdSliderScroll( wxScrollEvent& event ) override;
-        void OnCheckSQClick( wxCommandEvent& event ) override;
-        void OnCheckSNRClick( wxCommandEvent& event ) override;
 
         // Toggle Buttons
         void OnTogBtnSplitClick(wxCommandEvent& event);
-        void OnTogBtnAnalogClick(wxCommandEvent& event) override;
         void OnTogBtnPTT( wxCommandEvent& event ) override;
         void OnTogBtnPTTRightClick( wxContextMenuEvent& event ) override;
 
@@ -506,8 +463,6 @@ private:
 
         
         void OnCallSignReset( wxCommandEvent& event ) override;
-        void OnBerReset( wxCommandEvent& event ) override;
-        void OnReSync( wxCommandEvent& event ) override;
 
         //System Events
         void OnPaint(wxPaintEvent& event);
@@ -523,8 +478,6 @@ private:
 #endif
 
 
-        void OnChangeTxMode( wxCommandEvent& event ) override;
-        
         void applyTxLevel();
         void OnTxLevelDecrBig( wxCommandEvent& event ) override;
         void OnTxLevelDecr( wxCommandEvent& event ) override;
@@ -550,8 +503,6 @@ private:
         void OnTOTTimer(wxTimerEvent& evt);
         void OnTOTWarningTimer(wxTimerEvent& evt);
         void OnPttKeyPollTimer(wxTimerEvent& evt);
-        void playTotBeep_();
-        void stopTotBeep_();
         
         void OnSetMonitorTxAudio( wxCommandEvent& event );
         
@@ -566,31 +517,12 @@ private:
         void OnTogBtnTune(wxCommandEvent& event) override;
         
     private:
-        const wxString SNR_FORMAT_STR;
-        const wxString MODE_FORMAT_STR;
-        const wxString NO_SNR_LABEL;
         const wxString EMPTY_STR;
-        const wxString MODEM_LABEL;
-        const wxString BITS_UNK_LABEL;
-        const wxString ERRS_UNK_LABEL;
-        const wxString BER_UNK_LABEL;
-        const wxString FRQ_OFF_UNK_LABEL;
-        const wxString SYNC_UNK_LABEL;
-        const wxString VAR_UNK_LABEL;
-        const wxString CLK_OFF_UNK_LABEL;
         const wxString MIC_SPKR_LEVEL_FORMAT_STR;
         const wxString DECIBEL_STR;
         const wxString CURRENT_TIME_FORMAT_STR;
         const wxString SNR_FORMAT_STR_NO_DB;
         const wxString CALLSIGN_FORMAT_RGX;
-        const wxString BITS_FMT;
-        const wxString ERRS_FMT;
-        const wxString BER_FMT;
-        const wxString RESYNC_FMT;
-        const wxString FRQ_OFF_FMT;
-        const wxString SYNC_FMT;
-        const wxString VAR_FMT;
-        const wxString CLK_OFF_FMT;
 
         friend class MainApp; // needed for unit tests
         friend class TxRxThread; // XXX - needed for execOnUiThreadAndWait_().
@@ -601,11 +533,6 @@ private:
         bool        m_useMemory;
         wxTextCtrl* m_tc;
         int         m_zoom;
-        float       m_snrBeta;
-
-        // Callsign/text messaging
-        char        m_callsign[MAX_CALLSIGN];
-        char       *m_pcallsign;
 
         // Events
         void        processTxtEvent(char event[]);
@@ -636,8 +563,6 @@ private:
         wxMenuItem* adjustMonitorPttVolMenuItem_;
 
         bool terminating_; // used for terminating FreeDV
-        bool realigned_; // used to inhibit resize hack once already done
-        bool syncState_; // GUI copy of current sync state
 
         // Signalled once the detached rig PTT/frequency controller disconnect
         // threads (see performFreeDVOff_()) finish tearing down. Only waited on,
@@ -654,7 +579,6 @@ private:
         
         void loadConfiguration_();
         void restoreCallsignListFromCsv_();
-        void resetStats_();
         void exportConfiguration_(wxConfigBase* config);
         void setConfiguration_(wxConfigBase* config);
 
@@ -666,7 +590,6 @@ private:
         
         void updateReportingFreqList_();
         
-        int captureCurrentMicGroupTab_();
         
         void onFrequencyModeChange_(IRigFrequencyController*, uint64_t freq, IRigFrequencyController::Mode mode);
         void onRadioConnected_(IRigController* ptr);
@@ -695,17 +618,5 @@ private:
 
 void resample_for_plot(GenericFIFO<short> *plotFifo, short buf[], short* dec_samples, int length, int fs) FREEDV_NONBLOCKING;
 
-void txRxProcessing();
-
-// FreeDv API calls this when there is a test frame that needs a-plottin'
-
-void my_freedv_put_error_pattern(void *state, short error_pattern[], int sz_error_pattern);
-
-// FreeDv API calls these puppies when it needs/receives a text char
-
-
-// helper complex freq shift function
-
-void freq_shift_coh(COMP rx_fdm_fcorr[], COMP rx_fdm[], float foff, float Fs, COMP *foff_phase_rect, int nin) FREEDV_NONBLOCKING;
 
 #endif //__FDMDV2_MAIN__

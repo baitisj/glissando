@@ -24,7 +24,6 @@
 
 #include "../defines.h"
 #include "FreeDVConfiguration.h"
-#include "../freedv_interface.h"
 
 FreeDVConfiguration::FreeDVConfiguration()
     /* First time configuration options */
@@ -46,8 +45,6 @@ FreeDVConfiguration::FreeDVConfiguration()
     , currentNotebookTab("/MainFrame/rxNbookCtrl", 0)
         
     /* Squelch configuration */
-    , squelchActive("/Audio/SquelchActive", 1)
-    , squelchLevel("/Audio/SquelchLevel", (int)(SQ_DEFAULT_SNR*2))
         
     /* Misc. audio settings */
     , fifoSizeMs("/Audio/fifoSize_ms", (int)FIFO_SIZE)
@@ -90,11 +87,9 @@ FreeDVConfiguration::FreeDVConfiguration()
         
     , debugConsoleEnabled("/Debug/console", false)
         
-    , snrSlow("/Audio/snrSlow", false)
         
         
         
-    , currentFreeDVMode("/Audio/mode", FREEDV_MODE_700D)
         
     
 
@@ -128,8 +123,6 @@ void FreeDVConfiguration::load(wxConfigBase* config)
 
     load_(config, currentNotebookTab);
     
-    load_(config, squelchActive);
-    load_(config, squelchLevel);
     
     load_(config, fifoSizeMs);
     load_(config, transmitLevel);
@@ -167,11 +160,9 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     
     load_(config, debugConsoleEnabled);
     
-    load_(config, snrSlow);
     
     
     
-    load_(config, currentFreeDVMode);
     
     
     load_(config, monitorTxAudio);
@@ -207,8 +198,6 @@ void FreeDVConfiguration::save(wxConfigBase* config)
 
     save_(config, currentNotebookTab);
     
-    save_(config, squelchActive);
-    save_(config, squelchLevel);
     
     save_(config, fifoSizeMs);
     save_(config, transmitLevel);
@@ -247,11 +236,9 @@ void FreeDVConfiguration::save(wxConfigBase* config)
     
     save_(config, debugConsoleEnabled);
     
-    save_(config, snrSlow);
     
     
     
-    save_(config, currentFreeDVMode);
     
     
 

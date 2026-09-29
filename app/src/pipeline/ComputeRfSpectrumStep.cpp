@@ -32,27 +32,27 @@
 //
 //=========================================================================
 
+#include <algorithm>
+#include <cmath>
+
 #include "ComputeRfSpectrumStep.h"
 #include "../defines.h"
 
-ComputeRfSpectrumStep::ComputeRfSpectrumStep(
-    realtime_fp<struct MODEM_STATS*()> const& modemStatsFn,
-    realtime_fp<GenericFIFO<float>*()> const& getAvMagFn)
-    : modemStatsFn_(modemStatsFn)
-    , getAvMagFn_(getAvMagFn)
+ComputeRfSpectrumStep::ComputeRfSpectrumStep(realtime_fp<GenericFIFO<float>*()> const& getAvMagFn)
+    : getAvMagFn_(getAvMagFn)
+    , fft_(FFT_SIZE)
+    , window_(FFT_SIZE)
+    , history_(FFT_SIZE, 0.0f)
+    , fftData_(2 * FFT_SIZE)
+    , rxSpectrum_(MODEM_STATS_NSPEC)
 {
-    rxSpectrum_ = new float[MODEM_STATS_NSPEC];
-    assert(rxSpectrum_ != nullptr);
-
-    rxFdm_ = new COMP[FS];
-    assert(rxFdm_ != nullptr);
+    for (int i = 0; i < FFT_SIZE; i++)
+    {
+        window_[i] = 0.5f - 0.5f * cosf((float)i * 2.0f * (float)M_PI / FFT_SIZE);
+    }
 }
 
-ComputeRfSpectrumStep::~ComputeRfSpectrumStep()
-{
-    delete[] rxSpectrum_;
-    delete[] rxFdm_;
-}
+ComputeRfSpectrumStep::~ComputeRfSpectrumStep() = default;
 
 int ComputeRfSpectrumStep::getInputSampleRate() const FREEDV_NONBLOCKING
 {
@@ -66,17 +66,40 @@ int ComputeRfSpectrumStep::getOutputSampleRate() const FREEDV_NONBLOCKING
 
 short* ComputeRfSpectrumStep::execute(short* inputSamples, int numInputSamples, int* numOutputSamples) FREEDV_NONBLOCKING
 {
-    auto inputSamplesPtr = inputSamples;
-    for (int i = 0; i < numInputSamples; i++)
+    // Nothing below allocates: every buffer was sized in the constructor.
+    FREEDV_BEGIN_VERIFIED_SAFE
+
+    // Slide the newest samples into the history. A block longer than the
+    // FFT keeps only its tail.
+    int keep = std::max(0, FFT_SIZE - numInputSamples);
+    int skip = std::max(0, numInputSamples - FFT_SIZE);
+    std::copy(history_.begin() + (FFT_SIZE - keep), history_.end(), history_.begin());
+    for (int i = skip; i < numInputSamples; i++)
     {
-        rxFdm_[i].real = inputSamplesPtr[i];
+        history_[keep + (i - skip)] = inputSamples[i];
     }
-    
-    modem_stats_get_rx_spectrum(modemStatsFn_(), rxSpectrum_, rxFdm_, numInputSamples);
-    
-    // Average rx spectrum data using a simple IIR low pass filter
+
+    for (int i = 0; i < FFT_SIZE; i++)
+    {
+        fftData_[2 * i] = history_[i] * window_[i];
+        fftData_[2 * i + 1] = 0.0;
+    }
+    fft_.forward(fftData_.data());
+
+    // Scaled exactly as codec2's plot was, so the waterfall's colours don't
+    // move: 0 dB is MODEM_STATS_NSPEC times its nominal 16 bit modem level.
+    constexpr float FULL_SCALE_DB = 112.514478f; // 20 log10(512 * 825)
+    for (int i = 0; i < MODEM_STATS_NSPEC; i++)
+    {
+        double re = fftData_[2 * i];
+        double im = fftData_[2 * i + 1];
+        rxSpectrum_[i] = 10.0f * log10f((float)(re * re + im * im) + 1E-12f) - FULL_SCALE_DB;
+    }
+
+    FREEDV_END_VERIFIED_SAFE
+
     auto avMagPtr = getAvMagFn_();
-    avMagPtr->write(rxSpectrum_, MODEM_STATS_NSPEC);
+    avMagPtr->write(rxSpectrum_.data(), MODEM_STATS_NSPEC);
     
     // Tap only, no output.
     *numOutputSamples = 0;

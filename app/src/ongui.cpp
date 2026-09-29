@@ -26,20 +26,7 @@
 #include "rig_control/omnirig/OmniRigController.h"
 #endif // defined(WIN32)
 
-#include "codec2_fdmdv.h" // for FDMDV_FCENTRE
-
-extern int g_mode;
-
-extern int   g_SquelchActive;
-extern float g_SquelchLevel;
-extern std::atomic<int>   g_analog;
 extern std::atomic<bool>   g_tx;
-extern std::atomic<int>   g_State, g_prev_State;
-extern FreeDVInterface freedvInterface;
-extern std::atomic<bool> g_queueResync;
-extern short *g_error_hist, *g_error_histn;
-extern int g_resyncs;
-extern int g_Nc;
 extern int g_txLevel;
 extern std::atomic<float> g_txLevelScale;
 extern int g_tuneLevel;
@@ -57,16 +44,11 @@ extern bool g_recFileFromRadio;
 
 extern std::atomic<bool>                g_playFileFromRadio;
 
-extern std::atomic<SNDFILE*> g_sfRecMicFile;
 
 extern wxMutex g_mutexProtectingCallbackData;
 
-extern std::atomic<bool>     g_totBeepActive;
 
 static wxString bandNameForFilter(FilterFrequency band);
-
-
-void clickTune(float frequency); // callback to pass new click freq
 
 //-------------------------------------------------------------------------
 // Forces redraw of main panels on window resize.
@@ -182,9 +164,6 @@ void MainFrame::OnToolsOptions(wxCommandEvent& event)
     
         // Show/hide frequency box based on CAT control configuration.
         m_freqBox->Show(isFrequencyControlEnabled_());
-        
-        // Show/hide stats box
-        statsBox->Show(false);
         
         // XXX - with really short windows, wxWidgets sometimes doesn't size
         // the components properly until the user resizes the window (even if only
@@ -625,18 +604,6 @@ void MainFrame::OnPaint(wxPaintEvent& WXUNUSED(event))
 }
 
 //-------------------------------------------------------------------------
-// OnCmdSliderScroll()
-//-------------------------------------------------------------------------
-void MainFrame::OnCmdSliderScroll(wxScrollEvent& event)
-{
-    g_SquelchLevel = (float)m_sliderSQ->GetValue()/2.0 - 5.0;
-    wxString sqsnr_string = wxNumberFormatter::ToString(g_SquelchLevel, 1) + "dB"; // 0.5 dB steps
-    m_textSQ->SetLabel(sqsnr_string);
-
-    event.Skip();
-}
-
-//-------------------------------------------------------------------------
 // bandNameForFilter() - maps FilterFrequency enum to config key string
 //-------------------------------------------------------------------------
 static wxString bandNameForFilter(FilterFrequency band)
@@ -851,42 +818,6 @@ void MainFrame::OnTuneAttenContextMenu( wxContextMenuEvent& )
     PopupMenu(&menu);
 }
 
-//-------------------------------------------------------------------------
-// OnCheckSQClick()
-//-------------------------------------------------------------------------
-void MainFrame::OnCheckSQClick(wxCommandEvent&)
-{
-    if(!g_SquelchActive)
-    {
-        g_SquelchActive = true;
-    }
-    else
-    {
-        g_SquelchActive = false;
-    }
-}
-
-void MainFrame::setsnrBeta(bool snrSlow)
-{
-    if(snrSlow)
-    {
-        m_snrBeta = 0.95; // make this closer to 1.0 to smooth SNR est further
-    }
-    else
-    {
-        m_snrBeta = 0.0; // no smoothing of SNR estimate from demodulator
-    }
-}
-
-//-------------------------------------------------------------------------
-// OnCheckSQClick()
-//-------------------------------------------------------------------------
-void MainFrame::OnCheckSNRClick(wxCommandEvent&)
-{
-    wxGetApp().appConfiguration.snrSlow = m_ckboxSNR->GetValue();
-    setsnrBeta(wxGetApp().appConfiguration.snrSlow);
-}
-
 static bool PttKeyDown_ = false;
 int MainApp::FilterEvent(wxEvent& event)
 {
@@ -1029,26 +960,6 @@ void MainFrame::OnTogBtnPTT (wxCommandEvent&)
     togglePTT();
 }
 
-void MainFrame::playTotBeep_()
-{
-    log_info("Playing TOT beep");
-
-    if (g_totBeepActive.load(std::memory_order_acquire))
-        return;
-
-    g_totBeepActive.store(true, std::memory_order_release);
-}
-
-void MainFrame::stopTotBeep_()
-{
-    log_info("Stopping TOT beep");
-    m_totLastBeepTime_ = {};
-    if (!g_totBeepActive.load(std::memory_order_acquire))
-        return;
-
-    g_totBeepActive.store(false, std::memory_order_release);
-}
-
 //-------------------------------------------------------------------------
 // OnTOTTimer()
 // Time-Out Timer handler: fires when the configured TX time limit expires.
@@ -1070,7 +981,6 @@ void MainFrame::OnTOTTimer(wxTimerEvent&)
         dlg->Destroy();
     }
     m_totCurrentDurationMs = 0;
-    stopTotBeep_();
 
     {
         m_btnTogPTT->SetValue(false);
@@ -1116,13 +1026,6 @@ void MainFrame::OnTOTWarningTimer(wxTimerEvent&)
 
     if (remaining > 0 && remaining <= 15000)
     {
-        // Beep once when the window pops up.
-        bool firstBeep = (m_totLastBeepTime_ == decltype(m_totLastBeepTime_){});
-        if (firstBeep) {
-            playTotBeep_();
-            m_totLastBeepTime_ = now;
-        }
-
         if (!m_totWarningDialog_)
         {
             m_totWarningDialog_ = new TotWarningDialog(
@@ -1137,7 +1040,6 @@ void MainFrame::OnTOTWarningTimer(wxTimerEvent&)
                     m_totCurrentDurationMs = wxGetApp().appConfiguration.rigControlConfiguration.totTimerSecs * 1000;
                     m_totTxStartTime = std::chrono::high_resolution_clock::now();
                     m_totTimer.Start(m_totCurrentDurationMs, wxTIMER_ONE_SHOT);
-                    m_totLastBeepTime_ = decltype(m_totLastBeepTime_){};
                     log_info("Time-Out Timer (TOT) extended — %d ms remaining", m_totCurrentDurationMs);
                 }
             );
@@ -1155,37 +1057,7 @@ void MainFrame::OnTOTWarningTimer(wxTimerEvent&)
         auto dlg = m_totWarningDialog_;
         m_totWarningDialog_ = nullptr;
         dlg->Destroy();
-        m_totLastBeepTime_ = decltype(m_totLastBeepTime_){};
     }
-}
-
-// Returns the notebook page index that should be restored once we're done showing
-// "Frm Mic" (e.g. on RX, or after voice keyer recording finishes).
-//
-// GetSelection() isn't the right choice here since more than one tab group can be
-// visible at the same time once tabs have been split (e.g. via a saved custom tab
-// layout) - see https://forums.wxwidgets.org/viewtopic.php?t=14721. Instead, ask the
-// specific tab group that "Frm Mic" lives in what's actually active there.
-int MainFrame::captureCurrentMicGroupTab_()
-{
-    auto savedTab = m_auiNbookCtrl->GetSelection();
-
-#if wxCHECK_VERSION(3,1,4)
-    wxAuiTabCtrl* fromMicTabControl = nullptr;
-    int fromMicTabIndex = 0;
-    if (m_panelSpeechIn != nullptr &&
-        m_auiNbookCtrl->FindTab(m_panelSpeechIn, &fromMicTabControl, &fromMicTabIndex))
-    {
-        int localActiveIdx = fromMicTabControl->GetActivePage();
-        if (localActiveIdx >= 0 && localActiveIdx < (int)fromMicTabControl->GetPageCount())
-        {
-            wxWindow* activeWindow = fromMicTabControl->GetWindowFromIdx(localActiveIdx);
-            savedTab = m_auiNbookCtrl->GetPageIndex(activeWindow);
-        }
-    }
-#endif // wxCHECK_VERSION(3,1,4)
-
-    return savedTab;
 }
 
 void MainFrame::togglePTT(void) {
@@ -1209,8 +1081,6 @@ void MainFrame::togglePTT(void) {
     // Record direction now; button value may be toggled by a stray click during
     // the drain loops below, which would corrupt newTx at the end if not checked.
     const bool wasInTx = g_tx.load(std::memory_order_acquire);
-
-    // Change tabbed page in centre panel depending on PTT state
 
     if (wasInTx)
     {
@@ -1240,7 +1110,6 @@ void MainFrame::togglePTT(void) {
             dlg->Destroy();
         }
         m_totCurrentDurationMs = 0;
-        stopTotBeep_();
 
         // If PTT input is enabled, suspend further changes until after EOO is sent.
         if (wxGetApp().m_pttInSerialPort)
@@ -1248,8 +1117,10 @@ void MainFrame::togglePTT(void) {
             wxGetApp().m_pttInSerialPort->suspendChanges(true);
         }
         
-        // Sleep for long enough that we get the remaining [blocksize] ms of audio.
-        int msSleep = (1000 * freedvInterface.getTxNumSpeechSamples()) / freedvInterface.getTxSpeechSampleRate();
+        // Give the tail of the burst time to leave the transmit FIFO. The
+        // wait is the 160 ms it was when it was set by the voice modem's
+        // frame, which chat bursts have always been timed against.
+        constexpr int msSleep = 160;
         log_debug("Sleeping for %d ms prior to ending TX", msSleep);
 
         auto before = highResClock.now();
@@ -1339,28 +1210,8 @@ void MainFrame::togglePTT(void) {
             wxGetApp().m_pttInSerialPort->suspendChanges(false);
         }
         
-        // tx-> rx transition, swap to the page we were on for last rx. Not for
-        // a text chat burst, which never switched away: the switch would focus
-        // the page and, on wxGTK, present the main window over whatever the
-        // operator is doing (see textMessagingChangeover_ in main.h).
-        if (!textMessagingChangeover_)
-        {
-            m_auiNbookCtrl->ChangeSelection(wxGetApp().appConfiguration.currentNotebookTab);
-            for (size_t index = 0; index < m_auiNbookCtrl->GetPageCount(); index++)
-            {
-                auto page = m_auiNbookCtrl->GetPage(index);
-                page->Refresh();
-            }
-        }
-
-        // enable sync text
-
-        m_textSync->Enable();
-        m_textCurrentDecodeMode->Enable();
-        
         // Re-enable buttons.
         m_togBtnOnOff->Enable(true);
-        m_togBtnAnalog->Enable(true);
     }
     else
     {
@@ -1378,37 +1229,6 @@ void MainFrame::togglePTT(void) {
         {
             wxGetApp().m_pttInSerialPort->suspendChanges(true);
         }
-        
-        // rx-> tx transition, swap to Mic In page to monitor speech. A text
-        // chat burst carries no speech and has nobody at the main window, so
-        // it leaves the page alone: the switch would focus the page and, on
-        // wxGTK, present the main window over whatever the operator is doing
-        // (see textMessagingChangeover_ in main.h).
-        if (!textMessagingChangeover_)
-        {
-            // Save currently visible plot so we can go back to it on RX.
-            wxGetApp().appConfiguration.currentNotebookTab = captureCurrentMicGroupTab_();
-
-            // Note: GetPageIndex sometimes returns the incorrect results, so iterating and finding
-            // the current page ourselves is a better bet.
-            size_t index = 0;
-            for (; index < m_auiNbookCtrl->GetPageCount(); index++)
-            {
-                auto page = m_auiNbookCtrl->GetPage(index);
-                if (page != nullptr && page == (wxWindow *)m_panelSpeechIn)
-                {
-                    m_auiNbookCtrl->ChangeSelection(index);
-                    page->Refresh();
-                    break;
-                }
-            }
-        }
-
-        // disable sync text
-
-        m_textSync->Disable();
-        m_textCurrentDecodeMode->Disable();
-
         // Disable On/Off button.
         m_togBtnOnOff->Enable(false);
     }
@@ -1433,7 +1253,7 @@ void MainFrame::togglePTT(void) {
     // Report TX change to registered reporters
     for (auto& obj : wxGetApp().m_reporters)
     {
-        obj->transmit(freedvInterface.getCurrentTxModeStr(), newTx);
+        obj->transmit("GLISSANDO", newTx);
     }
     
     // If we're recording, switch to/from modulator and radio.
@@ -1575,66 +1395,14 @@ void MainFrame::OnTogBtnTune(wxCommandEvent&)
     m_auiNbookCtrl->SetFocus();
 }
 
-//-------------------------------------------------------------------------
-// OnTogBtnAnalogClick()
-//-------------------------------------------------------------------------
-void MainFrame::OnTogBtnAnalogClick (wxCommandEvent& event)
-{
-    if (g_analog.load(std::memory_order_relaxed) == 0) {
-        g_analog.store(1, std::memory_order_relaxed);
-        m_panelSpectrum->setFreqScale(MODEM_STATS_NSPEC*((float)MAX_F_HZ/(FS/2)));
-        m_panelWaterfall->setFs(FS);
-        
-        m_togBtnAnalog->SetLabel(wxT("Switch to Di&gital"));
-    }
-    else {
-        g_analog.store(0, std::memory_order_relaxed);
-        m_panelSpectrum->setFreqScale(MODEM_STATS_NSPEC*((float)MAX_F_HZ/(freedvInterface.getRxModemSampleRate()/2)));
-        m_panelWaterfall->setFs(freedvInterface.getRxModemSampleRate());
-        
-        m_togBtnAnalog->SetLabel(wxT("Switch to A&nalog"));
-    }
-
-    // Report analog change to registered reporters
-    for (auto& obj : wxGetApp().m_reporters)
-    {
-        obj->inAnalogMode(g_analog.load(std::memory_order_relaxed));
-    }
-
-
-    g_State.store(0, std::memory_order_release);
-    g_prev_State.store(0, std::memory_order_release);;
-    freedvInterface.getCurrentRxModemStats()->snr_est = 0;
-
-    event.Skip();
-}
-
 void MainFrame::OnCallSignReset(wxCommandEvent&)
 {
-    m_pcallsign = m_callsign;
-    memset(m_callsign, 0, MAX_CALLSIGN);
-    wxString s;
-    s.Printf("%s", m_callsign);
-    m_txtCtrlCallSign->SetValue(s);
+    m_txtCtrlCallSign->SetValue(wxEmptyString);
     
     m_lastReportedCallsignListView->DeleteAllItems();
     m_cboLastReportedCallsigns->SetText(_(""));
 }
 
-// Force manual resync, just in case demod gets stuck on false sync
-
-void MainFrame::OnReSync(wxCommandEvent&)
-{
-    if (m_RxRunning)  {
-        log_debug("OnReSync");
-        
-        // Resync must be triggered from the TX/RX thread, so pushing the button queues it until
-        // the next execution of the TX/RX loop.
-        g_queueResync.store(true, std::memory_order_release);
-    }
-}
-
-// Deselects item on right-click
 void MainFrame::OnRightClickCallsignList(wxMouseEvent&)
 {
     auto index = m_lastReportedCallsignListView->GetFirstSelected();
@@ -1683,24 +1451,6 @@ void MainFrame::OnCloseCallsignList( wxCommandEvent& event )
         });
     }
     event.Skip();
-}
-
-void MainFrame::resetStats_()
-{
-    if (m_RxRunning)  {
-        freedvInterface.resetBitStats();
-        g_resyncs = 0;
-        int i;
-        for(i=0; i<2*g_Nc; i++) {
-            g_error_hist[i] = 0;
-            g_error_histn[i] = 0;
-        }
-    }
-}
-
-void MainFrame::OnBerReset(wxCommandEvent&)
-{
-    resetStats_();
 }
 
 void MainFrame::OnChangeReportFrequencyVerify( wxCommandEvent& event )
@@ -1860,11 +1610,6 @@ void MainFrame::OnSystemColorChanged(wxSysColourChangedEvent& event)
         m_cboReportFrequency->SetForegroundColour(*wxRED);
     }
     TopFrame::OnSystemColorChanged(event);
-}
-
-void MainFrame::OnCenterRx(wxCommandEvent&)
-{
-    clickTune(FDMDV_FCENTRE);
 }
 
 void MainFrame::updateReportingFreqList_()

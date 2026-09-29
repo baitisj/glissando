@@ -25,7 +25,6 @@
 extern paCallBackData* g_rxUserdata;
 
 extern std::atomic<bool> g_tx;
-extern FreeDVInterface freedvInterface;
 extern float g_avmag_waterfall[MODEM_STATS_NSPEC];
 
 namespace
@@ -214,12 +213,11 @@ GlissandoTelemetry MainFrame::glissandoTelemetry()
 
 bool MainFrame::glissandoSpectrum(std::vector<float>& magnitudesDb, double& nyquistHz)
 {
-    // The same averaged spectrum the main waterfall draws, refreshed by the
-    // main window's timers while audio runs. Blank while transmitting, as
-    // the main waterfall is.
+    // The averaged spectrum of the radio input, refreshed by the main
+    // window's timers while audio runs. Blank while transmitting.
     if (!m_RxRunning || g_tx.load(std::memory_order_relaxed)) return false;
     magnitudesDb.assign(g_avmag_waterfall, g_avmag_waterfall + MODEM_STATS_NSPEC);
-    nyquistHz = freedvInterface.getTxModemSampleRate() / 2.0;
+    nyquistHz = FS / 2.0;
     return nyquistHz > 0.0;
 }
 

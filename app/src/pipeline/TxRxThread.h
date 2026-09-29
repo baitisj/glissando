@@ -51,7 +51,6 @@
 
 // Forward declarations
 class LinkStep;
-class BeepStep;
 
 //#define ENABLE_PROCESSING_STATS
 
@@ -111,7 +110,6 @@ private:
     std::unique_ptr<AudioPipeline> pipeline_;
     int inputSampleRate_;
     int outputSampleRate_;
-    BeepStep* beepStep_;
     std::shared_ptr<IRealtimeHelper> helper_;
     std::unique_ptr<short[]> inputSamples_;
     std::thread thread_;
