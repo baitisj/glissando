@@ -75,6 +75,7 @@ ReportingConfiguration::ReportingConfiguration()
         // the reasons band by band.
         _("1.8460"),
         _("3.5700"),
+        _("5.3610"),
         _("7.0670"),
         _("10.1330"),
         _("14.0670"),
