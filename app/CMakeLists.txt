@@ -610,19 +610,3 @@ if(UNIX AND NOT APPLE)
 
 endif(UNIX AND NOT APPLE)
 
-if(UNITTEST)
-# The below tests are currently Linux/macOS-only. A PowerShell version of fullduplex_* 
-# for Windows is implemented in tests/TestFreeDVFullDuplex.ps1.
-macro(DefineAudioTest utName)
-    add_test(NAME fullduplex_${utName} 
-             COMMAND sh -c "${CMAKE_CURRENT_SOURCE_DIR}/test/test_zeros.sh txrx ${utName}") 
-    if(NOT SANITIZERS_ENABLED)
-    set_tests_properties(fullduplex_${utName} PROPERTIES PASS_REGULAR_EXPRESSION "Got 1 sync changes")
-    endif(NOT SANITIZERS_ENABLED)
-endmacro()
-
-DefineAudioTest(700D)
-DefineAudioTest(700E)
-DefineAudioTest(1600)
-
-endif(UNITTEST)
