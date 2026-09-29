@@ -2,7 +2,7 @@
 Version=1.0
 Name=FreeDV
 Exec=glissando
-Icon=freedv
+Icon=glissando
 Type=Application
 Terminal=false
 Categories=GTK;GNOME;AudioVideo;Audio;HamRadio;

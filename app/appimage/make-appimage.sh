@@ -32,7 +32,7 @@ fi
 ./linuxdeploy-${MACH_ARCH}.AppImage \
   --executable "$APPEXEC" \
   --appdir "$APPDIR" \
-  --icon-file ../contrib/freedv256x256.png \
+  --icon-file ../contrib/glissando256x256.png \
   --custom-apprun "AppRun.sh" \
   --desktop-file $DESKTOP_FILE
 
