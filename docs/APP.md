@@ -32,7 +32,7 @@ Packages on Debian or Ubuntu:
 
     sudo apt install build-essential cmake git autoconf automake libtool \
         libwxgtk3.2-dev libpulse-dev libspeexdsp-dev libsndfile1-dev \
-        libhamlib-dev libasound2-dev libao-dev libgsm1-dev sox
+        libhamlib-dev libasound2-dev libao-dev libgsm1-dev
 
 Then, from the top of the repository:
 
@@ -44,8 +44,7 @@ Without a build type the build is Debug, and an unoptimised receiver cannot
 keep up with listening on every tempo at once: decodes fall further and
 further behind the air.
 
-The first configure fetches libsamplerate and RNNoise (from GitHub, and the
-RNNoise model from media.xiph.org). `ctest --test-dir build -R
+The first configure fetches libsamplerate from GitHub. `ctest --test-dir build -R
 "glissando|text_messaging"` runs the modem and chat tests.
 
 ## Two floating windows
