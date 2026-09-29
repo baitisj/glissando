@@ -67,8 +67,6 @@ osslsigncode sign -pkcs11engine /usr/lib/x86_64-linux-gnu/engines-3/pkcs11.so -p
 
 You will be asked for the token's's PIN in order to complete the signature process. To verify that the file is correctly signed, copy it to a Windows machine and view the file's properties (under the "Digital Signatures" tab); the subject should match what was provided either for the CSR submitted to Sectigo/other Certificate Authority or what was entered when generating the self-signed certificate above:
 
-![](./doc/digitally-signed.png)
-
 Notes:
 
 * The file specified by `-out` must not already exist. Otherwise, osslsigncode will error out.
