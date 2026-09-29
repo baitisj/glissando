@@ -45,7 +45,6 @@
 #endif // GDK_WINDOWING_WAYLAND
 #endif // defined(__WXGTK__) && defined(HAS_GTK3)
 
-extern int g_playFileToMicInEventId;
 
 wxPoint LeftOffsetContextMenuPosition(wxWindow* btn)
 {
@@ -62,7 +61,6 @@ wxPoint LeftOffsetContextMenuPosition(wxWindow* btn)
 }
 
 extern int g_recFileFromRadioEventId;
-extern int g_recFileFromDecoderEventId;
 extern int g_playFileFromRadioEventId;
 extern int g_recFileFromModulatorEventId;
 extern int g_txLevel;
@@ -519,33 +517,6 @@ TopFrame::TopFrame(wxWindow* parent, wxWindowID id, const wxString& title, const
     wxSizer* leftOuterSizer = new wxBoxSizer(wxVERTICAL);
     wxSizer* leftSizer = new wxWrapSizer(wxVERTICAL, wxREMOVE_LEADING_SPACES);
 
-    wxStaticBoxSizer* snrSizer;
-    wxStaticBox* snrBox = new wxStaticBox(m_panel, wxID_ANY, _("SNR"), wxDefaultPosition, wxSize(100,-1));
-    snrSizer = new wxStaticBoxSizer(snrBox, wxVERTICAL);
-
-    //------------------------------
-    // S/N ratio Gauge (vert. bargraph)
-    //------------------------------
-    m_gaugeSNR = new wxGauge(snrBox, wxID_ANY, 45, wxDefaultPosition, wxSize(135,15), wxGA_SMOOTH);
-    m_gaugeSNR->SetToolTip(_("Displays signal to noise ratio in dB."));
-    snrSizer->Add(m_gaugeSNR, 1, wxALIGN_CENTER_HORIZONTAL|static_cast<int>(wxALL), 10);
-
-    //------------------------------
-    // Box for S/N ratio (Numeric)
-    //------------------------------
-    m_textSNR = new wxStaticText(snrBox, wxID_ANY, wxT("--"), wxDefaultPosition, wxDefaultSize, wxALIGN_CENTRE);
-    m_textSNR->SetMinSize(wxSize(70,-1));
-    snrSizer->Add(m_textSNR, 0, wxALIGN_CENTER_HORIZONTAL, 1);
-
-    //------------------------------
-    // S/N ratio slow Checkbox
-    //------------------------------
-    m_ckboxSNR = new wxCheckBox(snrBox, wxID_ANY, _("Slow"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    m_ckboxSNR->SetToolTip(_("Smooth but slow SNR estimation"));
-    snrSizer->Add(m_ckboxSNR, 0, wxALIGN_CENTER_HORIZONTAL, 5);
-
-    leftSizer->Add(snrSizer, 0, static_cast<int>(wxEXPAND)|static_cast<int>(wxALL), 2);
-
     //------------------------------
     // Signal Level(vert. bargraph)
     //------------------------------
@@ -554,65 +525,11 @@ TopFrame::TopFrame(wxWindow* parent, wxWindowID id, const wxString& title, const
     levelSizer = new wxStaticBoxSizer(levelBox, wxHORIZONTAL);
 
     m_gaugeLevel = new wxGauge(levelBox, wxID_ANY, 100, wxDefaultPosition, wxSize(135,15), wxGA_SMOOTH);
-    m_gaugeLevel->SetToolTip(_("Peak of From Radio in Rx, or peak of From Mic in Tx mode."));
+    m_gaugeLevel->SetToolTip(_("Peak of From Radio."));
     levelSizer->Add(m_gaugeLevel, 1, wxALIGN_CENTER_VERTICAL|static_cast<int>(wxALL), 10);
     
     leftSizer->Add(levelSizer, 0, static_cast<int>(wxALL)|static_cast<int>(wxEXPAND), 2);
     
-    //------------------------------
-    // Sync  Indicator box
-    //------------------------------
-    wxStaticBoxSizer* sbSizer3_33;
-    wxStaticBox* syncBox = new wxStaticBox(m_panel, wxID_ANY, _("Sync"), wxDefaultPosition, wxSize(100,-1));
-    sbSizer3_33 = new wxStaticBoxSizer(syncBox, wxVERTICAL);
-
-    m_textSync = new wxStaticText(syncBox, wxID_ANY, wxT("Modem"), wxDefaultPosition, wxDefaultSize, wxALIGN_CENTRE);
-    sbSizer3_33->Add(m_textSync, 0, wxALIGN_CENTER_HORIZONTAL, 1);
-    m_textSync->Disable();
-
-    m_textCurrentDecodeMode = new wxStaticText(syncBox, wxID_ANY, wxT("Mode: unk"), wxDefaultPosition, wxDefaultSize, wxALIGN_CENTRE);
-    sbSizer3_33->Add(m_textCurrentDecodeMode, 0, wxALIGN_CENTER_HORIZONTAL, 1);
-    m_textCurrentDecodeMode->Disable();
-    
-    m_BtnReSync = new wxButton(syncBox, wxID_ANY, _("ReS&ync"), wxDefaultPosition, wxDefaultSize, 0);
-    sbSizer3_33->Add(m_BtnReSync, 0, static_cast<int>(wxALL) | wxALIGN_CENTRE, 5);
-    
-    m_btnCenterRx = new wxButton(syncBox, wxID_ANY, _("C&enter RX"), wxDefaultPosition, wxDefaultSize, 0);
-    sbSizer3_33->Add(m_btnCenterRx, 0, static_cast<int>(wxALL) | wxALIGN_CENTRE, 5);
-    
-    leftSizer->Add(sbSizer3_33,0, static_cast<int>(wxALL)|static_cast<int>(wxEXPAND)|wxFIXED_MINSIZE, 2);
-
-    //------------------------------
-    // BER Frames box
-    //------------------------------
-
-    wxStaticBoxSizer* sbSizer_ber;
-    statsBox = new wxStaticBox(m_panel, wxID_ANY, _("Stats"), wxDefaultPosition, wxSize(100,-1));
-    sbSizer_ber = new wxStaticBoxSizer(statsBox, wxVERTICAL);
-
-    m_BtnBerReset = new wxButton(statsBox, wxID_ANY, _("&Reset"), wxDefaultPosition, wxDefaultSize, 0);
-    sbSizer_ber->Add(m_BtnBerReset, 0, wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL|static_cast<int>(wxALL), 5);
-
-    m_textBits = new wxStaticText(statsBox, wxID_ANY, wxT("Bits: 0"), wxDefaultPosition, wxDefaultSize, wxALIGN_LEFT);
-    sbSizer_ber->Add(m_textBits, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 1);
-    m_textErrors = new wxStaticText(statsBox, wxID_ANY, wxT("Errs: 0"), wxDefaultPosition, wxDefaultSize, wxALIGN_LEFT);
-    sbSizer_ber->Add(m_textErrors, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 1);
-    m_textBER = new wxStaticText(statsBox, wxID_ANY, wxT("BER: 0.0"), wxDefaultPosition, wxDefaultSize, wxALIGN_LEFT);
-    sbSizer_ber->Add(m_textBER, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 1);
-    m_textResyncs = new wxStaticText(statsBox, wxID_ANY, wxT("Resyncs: 0"), wxDefaultPosition, wxDefaultSize, wxALIGN_LEFT);
-    sbSizer_ber->Add(m_textResyncs, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 1);
-    m_textClockOffset = new wxStaticText(statsBox, wxID_ANY, wxT("ClkOff: 0"), wxDefaultPosition, wxDefaultSize, wxALIGN_LEFT);
-    m_textClockOffset->SetMinSize(wxSize(125,-1));
-    sbSizer_ber->Add(m_textClockOffset, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 1);
-    m_textFreqOffset = new wxStaticText(statsBox, wxID_ANY, wxT("FreqOff: 0"), wxDefaultPosition, wxDefaultSize, wxALIGN_LEFT);
-    sbSizer_ber->Add(m_textFreqOffset, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 1);
-    m_textSyncMetric = new wxStaticText(statsBox, wxID_ANY, wxT("Sync: 0"), wxDefaultPosition, wxDefaultSize, wxALIGN_LEFT);
-    sbSizer_ber->Add(m_textSyncMetric, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 1);
-    m_textCodec2Var = new wxStaticText(statsBox, wxID_ANY, wxT("Var: 0"), wxDefaultPosition, wxDefaultSize, wxALIGN_LEFT);
-    sbSizer_ber->Add(m_textCodec2Var, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 1);
-
-    leftSizer->Add(sbSizer_ber,0, static_cast<int>(wxALL)|static_cast<int>(wxEXPAND)|wxFIXED_MINSIZE, 2);
-
     leftSizer->SetMinSize(wxSize(-1, 375));
     
 #if !wxCHECK_VERSION(3,2,0)
@@ -688,41 +605,6 @@ TopFrame::TopFrame(wxWindow* parent, wxWindowID id, const wxString& title, const
     //=====================================================
     rightSizer = new wxWrapSizer(wxVERTICAL, wxREMOVE_LEADING_SPACES);
 
-    //=====================================================
-    // Squelch Slider Control
-    //=====================================================
-    wxStaticBoxSizer* sbSizer3;
-    squelchBox = new wxStaticBox(m_panel, wxID_ANY, _("S&quelch"), wxDefaultPosition, wxSize(100,-1));
-    sbSizer3 = new wxStaticBoxSizer(squelchBox, wxVERTICAL);
-
-    m_sliderSQ = new wxSlider(squelchBox, wxID_ANY, 0, 0, 40, wxDefaultPosition, wxDefaultSize, wxSL_AUTOTICKS);
-    m_sliderSQ->SetMinSize(wxSize(135,-1));
-
-    // Add accessibility class so that the values are read back correctly.
-#if wxUSE_ACCESSIBILITY
-    auto squelchSliderAccessibility = new LabelOverrideAccessible([&]() {
-        return m_textSQ->GetLabel();
-    });
-    m_sliderSQ->SetAccessible(squelchSliderAccessibility);
-#endif // wxUSE_ACCESSIBILITY
-
-    sbSizer3->Add(m_sliderSQ, 1, wxALIGN_CENTER_HORIZONTAL, 0);
-
-    //------------------------------
-    // Squelch Level static text box
-    //------------------------------
-    m_textSQ = new wxStaticText(squelchBox, wxID_ANY, wxT(""), wxDefaultPosition, wxDefaultSize, wxALIGN_CENTRE);
-    m_textSQ->SetMinSize(wxSize(100,-1));
-    sbSizer3->Add(m_textSQ, 0, wxALIGN_CENTER_HORIZONTAL, 0);
-
-    //------------------------------
-    // Squelch Toggle Checkbox
-    //------------------------------
-    m_ckboxSQ = new wxCheckBox(squelchBox, wxID_ANY, _("Enable"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-
-    sbSizer3->Add(m_ckboxSQ, 0, wxALIGN_CENTER_HORIZONTAL, 0);
-    rightSizer->Add(sbSizer3, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 2);
-
     // Transmit Level slider
     m_txLevelBox = new wxStaticBox(m_panel, wxID_ANY, _("TX &Attenuation"), wxDefaultPosition, wxSize(100,-1));
     wxBoxSizer* txLevelSizer = new wxStaticBoxSizer(m_txLevelBox, wxVERTICAL);
@@ -770,21 +652,6 @@ TopFrame::TopFrame(wxWindow* parent, wxWindowID id, const wxString& title, const
     
     /* new --- */
 
-    //------------------------------
-    // Mode box
-    //------------------------------
-    modeBox = new wxStaticBox(m_panel, wxID_ANY, _("&Mode"), wxDefaultPosition, wxSize(100,-1));
-    sbSizer_mode = new wxStaticBoxSizer(modeBox, wxVERTICAL);
-
-    m_rb700d = new wxRadioButton( modeBox, wxID_ANY, wxT("700D"), wxDefaultPosition, wxDefaultSize,  wxRB_GROUP);
-    sbSizer_mode->Add(m_rb700d, 0, wxALIGN_LEFT|static_cast<int>(wxALL), 1);
-    m_rb700e = new wxRadioButton( modeBox, wxID_ANY, wxT("700E"), wxDefaultPosition, wxDefaultSize,  0);
-    sbSizer_mode->Add(m_rb700e, 0, wxALIGN_LEFT|static_cast<int>(wxALL), 1);
-    m_rb1600 = new wxRadioButton( modeBox, wxID_ANY, wxT("1600"), wxDefaultPosition, wxDefaultSize, 0);
-    sbSizer_mode->Add(m_rb1600, 0, wxALIGN_LEFT|static_cast<int>(wxALL), 1);
-
-    rightSizer->Add(sbSizer_mode,0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 2);
-
     //=====================================================
     // Control Toggles box
     //=====================================================
@@ -798,13 +665,6 @@ TopFrame::TopFrame(wxWindow* parent, wxWindowID id, const wxString& title, const
     m_togBtnOnOff = new wxToggleButton(controlBox, wxID_ANY, _("&Start Modem"), wxDefaultPosition, wxDefaultSize, 0);
     m_togBtnOnOff->SetToolTip(_("Begin/End receiving data."));
     sbSizer5->Add(m_togBtnOnOff, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
-
-    //------------------------------
-    // Analog Passthrough Toggle
-    //------------------------------
-    m_togBtnAnalog = new wxToggleButton(controlBox, wxID_ANY, _("Switch to A&nalog"), wxDefaultPosition, wxDefaultSize, 0);
-    m_togBtnAnalog->SetToolTip(_("Toggle analog/digital operation."));
-    sbSizer5->Add(m_togBtnAnalog, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
 
     //------------------------------
     // Tune Toggle
@@ -838,12 +698,8 @@ TopFrame::TopFrame(wxWindow* parent, wxWindowID id, const wxString& title, const
     // Tab ordering for accessibility
     //-------------------
     m_auiNbookCtrl->MoveBeforeInTabOrder(m_BtnCallSignReset);
-    m_sliderSQ->MoveBeforeInTabOrder(m_ckboxSQ);
-    m_rb700d->MoveBeforeInTabOrder(m_rb700e);
-    m_rb700e->MoveBeforeInTabOrder(m_rb1600);
     
-    m_togBtnOnOff->MoveBeforeInTabOrder(m_togBtnAnalog);
-    m_togBtnAnalog->MoveBeforeInTabOrder(m_btnTogTune);
+    m_togBtnOnOff->MoveBeforeInTabOrder(m_btnTogTune);
     m_btnTogTune->MoveBeforeInTabOrder(m_btnTogPTT);
     
     //-------------------
@@ -877,23 +733,7 @@ TopFrame::TopFrame(wxWindow* parent, wxWindowID id, const wxString& title, const
     this->Connect(m_menuItemLoadDefaultConfig->GetId(), wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TopFrame::OnToolsLoadDefaultConfig));
     this->Connect(m_menuItemLoadDefaultConfig->GetId(), wxEVT_UPDATE_UI, wxUpdateUIEventHandler(TopFrame::OnToolsLoadDefaultConfigUI));
 
-    m_sliderSQ->Connect(wxEVT_SCROLL_TOP, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
-    m_sliderSQ->Connect(wxEVT_SCROLL_BOTTOM, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
-    m_sliderSQ->Connect(wxEVT_SCROLL_LINEUP, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
-    m_sliderSQ->Connect(wxEVT_SCROLL_LINEDOWN, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
-    m_sliderSQ->Connect(wxEVT_SCROLL_PAGEUP, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
-    m_sliderSQ->Connect(wxEVT_SCROLL_PAGEDOWN, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
-    m_sliderSQ->Connect(wxEVT_SCROLL_THUMBTRACK, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
-    m_sliderSQ->Connect(wxEVT_SCROLL_THUMBRELEASE, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
-    m_sliderSQ->Connect(wxEVT_SCROLL_CHANGED, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
-    m_ckboxSQ->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(TopFrame::OnCheckSQClick), NULL, this);
-
-    m_ckboxSNR->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(TopFrame::OnCheckSNRClick), NULL, this);
-
-
-    
     m_togBtnOnOff->Connect(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTogBtnOnOff), NULL, this);
-    m_togBtnAnalog->Connect(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTogBtnAnalogClick), NULL, this);
     m_btnTogPTT->Connect(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTogBtnPTT), NULL, this);
 
 #if defined(__WXGTK__)
@@ -909,14 +749,7 @@ TopFrame::TopFrame(wxWindow* parent, wxWindowID id, const wxString& title, const
 #endif
 
     m_BtnCallSignReset->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnCallSignReset), NULL, this);
-    m_BtnBerReset->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnBerReset), NULL, this);
-    m_BtnReSync->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnReSync), NULL, this);
-    m_btnCenterRx->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnCenterRx), NULL, this);
-   
-    m_rb1600->Connect(wxEVT_RADIOBUTTON, wxCommandEventHandler(TopFrame::OnChangeTxMode), NULL, this);
-    m_rb700d->Connect(wxEVT_RADIOBUTTON, wxCommandEventHandler(TopFrame::OnChangeTxMode), NULL, this);
-    m_rb700e->Connect(wxEVT_RADIOBUTTON, wxCommandEventHandler(TopFrame::OnChangeTxMode), NULL, this);
-        
+
     m_btnTxLevelMM->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTxLevelDecrBig), NULL, this);
     m_btnTxLevelM->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTxLevelDecr), NULL, this);
     m_btnTxLevelP->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTxLevelIncr), NULL, this);
@@ -989,32 +822,13 @@ TopFrame::~TopFrame()
     this->Disconnect(wxID_ANY, wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TopFrame::OnToolsLoadDefaultConfig));
     this->Disconnect(wxID_ANY, wxEVT_UPDATE_UI, wxUpdateUIEventHandler(TopFrame::OnToolsLoadDefaultConfigUI));
 
-    m_sliderSQ->Disconnect(wxEVT_SCROLL_TOP, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
-    m_sliderSQ->Disconnect(wxEVT_SCROLL_BOTTOM, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
-    m_sliderSQ->Disconnect(wxEVT_SCROLL_LINEUP, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
-    m_sliderSQ->Disconnect(wxEVT_SCROLL_LINEDOWN, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
-    m_sliderSQ->Disconnect(wxEVT_SCROLL_PAGEUP, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
-    m_sliderSQ->Disconnect(wxEVT_SCROLL_PAGEDOWN, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
-    m_sliderSQ->Disconnect(wxEVT_SCROLL_THUMBTRACK, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
-    m_sliderSQ->Disconnect(wxEVT_SCROLL_THUMBRELEASE, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
-    m_sliderSQ->Disconnect(wxEVT_SCROLL_CHANGED, wxScrollEventHandler(TopFrame::OnCmdSliderScroll), NULL, this);
-    m_ckboxSQ->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(TopFrame::OnCheckSQClick), NULL, this);
-
     m_togBtnOnOff->Disconnect(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTogBtnOnOff), NULL, this);
-    m_togBtnAnalog->Disconnect(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTogBtnAnalogClick), NULL, this);
     m_btnTogPTT->Disconnect(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTogBtnPTT), NULL, this);
 #if !defined(__WXGTK__)
     m_btnTogPTT->Disconnect(wxEVT_CONTEXT_MENU, wxContextMenuEventHandler(TopFrame::OnTogBtnPTTRightClick), NULL, this);
 #endif
     
-    m_btnCenterRx->Disconnect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnCenterRx), NULL, this);
 
-    
-
-    m_rb1600->Disconnect(wxEVT_RADIOBUTTON, wxCommandEventHandler(TopFrame::OnChangeTxMode), NULL, this);
-    m_rb700d->Disconnect(wxEVT_RADIOBUTTON, wxCommandEventHandler(TopFrame::OnChangeTxMode), NULL, this);
-    m_rb700e->Disconnect(wxEVT_RADIOBUTTON, wxCommandEventHandler(TopFrame::OnChangeTxMode), NULL, this);
-        
     m_btnTxLevelMM->Disconnect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTxLevelDecrBig), NULL, this);
     m_btnTxLevelM->Disconnect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTxLevelDecr), NULL, this);
     m_btnTxLevelP->Disconnect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TopFrame::OnTxLevelIncr), NULL, this);

@@ -23,8 +23,7 @@
 
 #include "wx/wx.h"
 #include "logging/ulog.h"
-#include "freedv_api.h"
-#include "modem_stats.h"
+#include "modem_stats.h" // MODEM_STATS_NSPEC, the width of the spectrum
 
 // Spectrogram and Waterfall
 
@@ -39,15 +38,7 @@
 #define WATERFALL_SECS_Y    30      // number of seconds represented by y axis of waterfall
 #define WATERFALL_SECS_STEP 5       // graticule y axis steps of waterfall
 #define DT                  0.10    // time between real time graphing updates
-#define FS                  8000    // FDMDV modem sample rate
-
-// Scatter diagram 
-
-#define SCATTER_MEM_SECS    10
-// (symbols/frame)/(graphics update period) = symbols/s sent to scatter memory
-// memory (symbols) = secs of memory * symbols/sec
-#define SCATTER_MEM_SYMS_MAX    ((int)(SCATTER_MEM_SECS*((MODEM_STATS_NC_MAX+1)/DT)))
-#define SCATTER_EYE_MEM_ROWS    ((int)(SCATTER_MEM_SECS/DT))
+#define FS                  8000    // chat receiver and spectrum sample rate
 
 // Waveform plotting constants
 
@@ -55,33 +46,19 @@
 #define WAVEFORM_PLOT_TIME  5                              // length or entire waveform on screen
 #define WAVEFORM_PLOT_BUF   ((int)(DT*WAVEFORM_PLOT_FS))   // number of new samples we plot per DT
 
-// SNR plot constants
-#define NO_SNR_VAL (-10)
-#define MAX_SNR_VAL (35)
-#define SNR_PLOT_SECONDS (180)
-#define SNR_PLOT_SECOND_SEGMENTS (6)
-#define SNR_PLOT_DT (0.1)
-
 // sample rate I/O & conversion constants
 
 #define SAMPLE_RATE         48000                          // 48 kHz sampling rate rec. as we can trust accuracy of sound card
 #define N8                  160                            // processing buffer size at 8 kHz
-#define MEM8                (FDMDV_OS_TAPS/FDMDV_OS)
 #define N48                 (N8*SAMPLE_RATE/FS)            // processing buffer size at 48 kHz
 #define NUM_CHANNELS        2                              // I think most sound cards prefer stereo we will convert to mono
 #define VOX_TONE_FREQ       1000.0                         // optional left channel vox tone freq
 #define VOX_TONE_AMP        30000                          // optional left channel vox tone amp
+#define TUNE_TONE_FREQ      1500.0                         // carrier the Tune button sends
 #define FIFO_SIZE           640                            // default fifo size in ms
 #define FRAME_DURATION_MS   20                             // default frame length of 20 mS = 0.02 seconds
 #define MS_TO_SEC           1000
 #define RECORD_FILE_SAMPLE_RATE (SAMPLE_RATE)
-
-#define MAX_BITS_PER_CODEC_FRAME 64                            // 1600 bit/s mode
-#define MAX_BYTES_PER_CODEC_FRAME (MAX_BITS_PER_CODEC_FRAME/8)
-#define MAX_BITS_PER_FDMDV_FRAME 40                            // 2000 bit/s mode
-
-// Squelch
-#define SQ_DEFAULT_SNR       -2.0
 
 // Level Gauge
 #define FROM_RADIO_MAX       0.8
@@ -95,12 +72,6 @@
 #define TX_ATTENUATION_SMALL_STEP (2) /* 0.2 dB */
 #define TX_ATTENUATION_LARGE_STEP (10) /* 1 dB */
 
-// SNR
-#define SNRSLOW_BETA        0.5                           // time constant for slow SNR for display
-
-// Text messaging Data
-#define MAX_CALLSIGN         80
-
 // Real-time memory block size
 #define CODEC2_REAL_TIME_MEMORY_SIZE (512*1024)
    
@@ -111,14 +82,5 @@ enum
     ID_RESIZE,
     ID_PAINT_BG
 };
-
-// Codec 2 LPC Post Filter defaults, from codec-dev/src/quantise.c
-
-#define CODEC2_LPC_PF_GAMMA 0.5
-#define CODEC2_LPC_PF_BETA  0.2
-
-// PlugIns ...
-
-#define PLUGIN_MAX_PARAMS 4
 
 #endif  //__FDMDV2_DEFINES__

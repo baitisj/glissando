@@ -52,14 +52,9 @@ using namespace std::chrono_literals;
 #include "ResampleStep.h"
 #include "TapStep.h"
 #include "LevelAdjustStep.h"
-#include "FreeDVTransmitStep.h"
 #include "RecordStep.h"
 #include "ComputeRfSpectrumStep.h"
-#include "FreeDVReceiveStep.h"
 #include "MuteStep.h"
-#include "LinkStep.h"
-#include "BeepStep.h"
-#include "MixStep.h"
 #include "TextMessagingModem.h"
 #include "TextMessagingReceiveStep.h"
 #include "TextMessagingTxQueue.h"
@@ -82,36 +77,16 @@ using namespace std::chrono_literals;
 // External globals
 // TBD -- work on fully removing the need for these.
 extern paCallBackData* g_rxUserdata;
-extern std::atomic<int> g_analog;
 extern std::atomic<bool> g_half_duplex;
 extern std::atomic<bool> g_tx;
-extern std::atomic<bool> g_playFileToMicIn;
-extern std::atomic<int> g_sfTxFs;
-extern std::atomic<bool> g_loopPlayFileToMicIn;
-extern std::atomic<float> g_TxFreqOffsetHz;
-extern GenericFIFO<short> g_plotSpeechInFifo;
 extern GenericFIFO<short> g_plotDemodInFifo;
-extern GenericFIFO<short> g_plotSpeechOutFifo;
-extern int g_mode;
-extern int g_txLevel;
 extern std::atomic<float> g_txLevelScale;
-extern std::atomic<bool> g_queueResync;
-extern int g_resyncs;
 extern bool g_recFileFromRadio;
 extern std::atomic<unsigned int> g_recFromRadioSamples;
 extern std::atomic<bool> g_playFileFromRadio;
 extern std::atomic<int> g_sfFs;
-extern std::atomic<bool>     g_totBeepActive;
 extern std::atomic<bool> g_loopPlayFileFromRadio;
-extern int g_SquelchActive;
-extern float g_SquelchLevel;
 extern GenericFIFO<float> g_avmag;
-extern std::atomic<int> g_State;
-extern std::atomic<float> g_RxFreqOffsetHz;
-extern float g_sig_pwr_av;
-
-#include "../freedv_interface.h"
-extern FreeDVInterface freedvInterface;
 
 #include <wx/wx.h>
 #include "../main.h"
@@ -127,16 +102,8 @@ static auto& NonblockingWxGetApp() FREEDV_NONBLOCKING
 }
 
 #include <sndfile.h>
-extern std::atomic<SNDFILE*> g_sfPlayFile;
-extern std::atomic<SNDFILE*>            g_sfRecFileFromModulator;
-extern std::atomic<bool>                g_recFileFromModulator;
 extern SNDFILE* g_sfRecFile;
-extern std::atomic<SNDFILE*> g_sfRecMicFile;
-extern SNDFILE* g_sfRecDecoderFile;
 extern std::atomic<SNDFILE*> g_sfPlayFileFromRadio;
-
-extern std::atomic<bool> g_recFileFromMic;
-extern bool g_recFileFromDecoder;
 
 
 void TxRxThread::initializePipeline_()
@@ -210,9 +177,8 @@ void TxRxThread::initializePipeline_()
             eitherOrBypassPlayRadio);
         activeRxPipeline->appendPipelineStep(eitherOrPlayRadioStep);
 
-        // Text messaging data demodulation. This is a tap so the DATAC13 and
-        // DATAC4 demodulators run on the tap's own thread, leaving the voice
-        // path untouched whether or not anyone is chatting.
+        // Text messaging data demodulation. This is a tap so the chat
+        // receivers run on the tap's own thread.
         auto textMessagingPipeline = new AudioPipeline(inputSampleRate_, FS);
         textMessagingPipeline->appendPipelineStep(new TextMessagingReceiveStep(&textMessagingModem()));
         auto textMessagingTap = new TapStep(inputSampleRate_, textMessagingPipeline);
@@ -232,7 +198,6 @@ void TxRxThread::initializePipeline_()
 
         // RF spectrum computation step
         auto computeRfSpectrumStep = new ComputeRfSpectrumStep(
-            +[]() FREEDV_NONBLOCKING { return freedvInterface.getCurrentRxModemStats(); },
             +[]() FREEDV_NONBLOCKING { return &g_avmag; }
         );
         auto computeRfSpectrumPipeline = new AudioPipeline(
@@ -246,87 +211,13 @@ void TxRxThread::initializePipeline_()
         auto computeRfSpectrumTap = new TapStep(inputSampleRate_, computeRfSpectrumPipeline);
         activeRxPipeline->appendPipelineStep(computeRfSpectrumTap);
         
-        // RX demodulation step
-        auto bypassRfDemodulationPipeline = new AudioPipeline(inputSampleRate_, outputSampleRate_);
-        auto rfDemodulationPipeline = new AudioPipeline(inputSampleRate_, outputSampleRate_);
-        auto rfDemodulationStep = freedvInterface.createReceivePipeline(
-            inputSampleRate_, outputSampleRate_,
-            +[]() FREEDV_NONBLOCKING { return &g_State; },
-            +[]() FREEDV_NONBLOCKING { return g_RxFreqOffsetHz.load(std::memory_order_relaxed); },
-            +[]() FREEDV_NONBLOCKING { return &g_sig_pwr_av; },
-            helper_
-        );
-        rfDemodulationPipeline->appendPipelineStep(rfDemodulationStep);
-
-        // Resample for plot step (speech out)
-        auto resampleForPlotOutStep = new ResampleForPlotStep(&g_plotSpeechOutFifo);
-        auto resampleForPlotOutPipeline = new AudioPipeline(outputSampleRate_, resampleForPlotOutStep->getOutputSampleRate());
-#if defined(ENABLE_FASTER_PLOTS)
-        auto resampleForPlotOutResampler = new ResampleStep(outputSampleRate_, resampleForPlotOutStep->getInputSampleRate(), true); // need to create manually to get access to "plot only" optimizations
-        resampleForPlotOutPipeline->appendPipelineStep(resampleForPlotOutResampler);
-#endif // defined(ENABLE_FASTER_PLOTS)
-        resampleForPlotOutPipeline->appendPipelineStep(resampleForPlotOutStep);
-
-        auto resampleForPlotOutTap = new TapStep(outputSampleRate_, resampleForPlotOutPipeline);
-        rfDemodulationPipeline->appendPipelineStep(resampleForPlotOutTap);
-        
-        auto eitherOrRfDemodulationStep = new EitherOrStep(
-            +[]() FREEDV_NONBLOCKING { return g_analog.load(std::memory_order_relaxed) != 0; },
-            bypassRfDemodulationPipeline,
-            rfDemodulationPipeline);
-
-        activeRxPipeline->appendPipelineStep(eitherOrRfDemodulationStep);
-
-        // Record from decoder step (optional)
-        auto recordDecoderStep = new RecordStep(
-            outputSampleRate_, 
-            []() { return g_sfRecDecoderFile; }, 
-            [](int) {
-                // Recording stops when the user explicitly tells us to,
-                // no action required here.
-            }
-        );
-        auto recordDecoderPipeline = new AudioPipeline(outputSampleRate_, outputSampleRate_);
-        recordDecoderPipeline->appendPipelineStep(recordDecoderStep);
-        
-        auto recordDecoderTap = new TapStep(outputSampleRate_, recordDecoderPipeline);
-        auto bypassRecordDecoder = new AudioPipeline(outputSampleRate_, outputSampleRate_);
-        
-        auto eitherOrRecordDecoder = new EitherOrStep(
-            +[]() FREEDV_NONBLOCKING { return (g_recFileFromDecoder) && (g_sfRecDecoderFile != NULL); },
-            recordDecoderTap,
-            bypassRecordDecoder
-        );
-        activeRxPipeline->appendPipelineStep(eitherOrRecordDecoder);
+        // Nothing is decoded to audio: what the pipeline hands back is
+        // silence, and the receive side has nowhere to play it anyway.
+        activeRxPipeline->appendPipelineStep(new MuteStep(inputSampleRate_, outputSampleRate_));
 
         auto activeRxMutePipeline = new AudioPipeline(inputSampleRate_, outputSampleRate_);
         auto activeRxMuteStep = new MuteStep(inputSampleRate_, outputSampleRate_);
         activeRxMutePipeline->appendPipelineStep(activeRxMuteStep);
-
-        // TOT beep step: emits a warning beep during countdown
-        auto totBeepBypass = new AudioPipeline(inputSampleRate_, outputSampleRate_);
-        auto totBeepMuteStep = new MuteStep(inputSampleRate_, outputSampleRate_);
-        totBeepBypass->appendPipelineStep(totBeepMuteStep);
-
-        auto totBeepActivePath = new AudioPipeline(inputSampleRate_, outputSampleRate_);
-        beepStep_ = new BeepStep(
-            outputSampleRate_, 750, 80, 5, 
-            +[]() FREEDV_NONBLOCKING {
-                return g_totBeepActive.load(std::memory_order_acquire);
-            },
-            +[](BeepStep& thisStep) FREEDV_NONBLOCKING {
-                g_totBeepActive.store(false, std::memory_order_release);
-                thisStep.reset();
-            }
-        );
-        totBeepActivePath->appendPipelineStep(beepStep_);
-        auto totBeepEitherOr = new EitherOrStep(
-            +[]() FREEDV_NONBLOCKING {
-                return g_totBeepActive.load(std::memory_order_acquire);
-            },
-            totBeepActivePath,
-            totBeepBypass
-        );
 
         auto activeRxEitherOr = new EitherOrStep(
             +[]() FREEDV_NONBLOCKING {
@@ -339,12 +230,7 @@ void TxRxThread::initializePipeline_()
             activeRxPipeline,
             activeRxMutePipeline
         );
-        
-        auto totMixStep = new MixStep(
-            activeRxEitherOr,
-            totBeepEitherOr
-        );
-        pipeline_->appendPipelineStep(totMixStep);
+        pipeline_->appendPipelineStep(activeRxEitherOr);
        
         // Clear anything in the FIFO before resuming decode.
         clearFifos_();
@@ -543,7 +429,7 @@ void TxRxThread::clearFifos_() FREEDV_NONBLOCKING
 }
 
 //---------------------------------------------------------------------------------------------
-// Main real time processing for tx and rx of FreeDV signals, run in its own threads
+// Main real time processing for tx and rx, run in its own threads
 //---------------------------------------------------------------------------------------------
 
 bool TxRxThread::transmitTextMessagingAudio_(IRealtimeHelper* helper) FREEDV_NONBLOCKING
@@ -617,28 +503,15 @@ void TxRxThread::rxProcessing_(IRealtimeHelper* helper) FREEDV_NONBLOCKING
 {
     paCallBackData  *cbData = g_rxUserdata;
 
-    // Buffers reused by tx and rx processing.  We take samples from
-    // the sound card, and resample them for the freedv modem input
-    // sample rate.  Typically the sound card is running at 48 or 44.1
-    // kHz, and the modem at 8kHz.
+    // We take samples from the sound card, typically at 48 or 44.1 kHz;
+    // the pipeline resamples them to 8 kHz for the chat receivers and the
+    // spectrum.
 
     //
     //  RX side processing --------------------------------------------
     //
-    
-    if (g_queueResync.load(std::memory_order_acquire))
-    {
-        g_queueResync.store(false, std::memory_order_release);
-        freedvInterface.setSync(FREEDV_SYNC_UNSYNC);
-        g_resyncs++;
-    }
 
-    // Make sure we reset 
-    if (!g_totBeepActive.load(std::memory_order_acquire))
-    {
-        beepStep_->reset();
-    }
-    
+
     // Attempt to read one processing frame (about 20ms) of receive samples,  we 
     // keep this frame duration constant across modes and sound card sample rates
     int nsam = (inputSampleRate_ * FRAME_DURATION_MS) / MS_TO_SEC;
@@ -647,8 +520,8 @@ void TxRxThread::rxProcessing_(IRealtimeHelper* helper) FREEDV_NONBLOCKING
     int             nout;
 
     // While enough input samples are available. The pipeline feeds the chat
-    // receiver and the displays from taps along the way; what comes out of
-    // its end is decoded audio for a speaker, which Glissando doesn't have.
+    // receiver and the displays from taps along the way; nothing useful
+    // comes out of its end.
     while (!helper->mustStopWork()) {
         if (cbData->infifo1->read(inputSamples_.get(), nsam) != 0)
         {
@@ -658,9 +531,6 @@ void TxRxThread::rxProcessing_(IRealtimeHelper* helper) FREEDV_NONBLOCKING
 #if defined(ENABLE_PROCESSING_STATS)
         processingStats_.start();
 #endif // defined(ENABLE_PROCESSING_STATS)
-        
-        // send latest squelch level to FreeDV API, as it handles squelch internally
-        freedvInterface.setSquelch(g_SquelchActive, g_SquelchLevel);
 
         pipeline_->execute(inputSamples_.get(), nsam, &nout);
 

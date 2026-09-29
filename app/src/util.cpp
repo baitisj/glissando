@@ -5,40 +5,12 @@
 */
 
 #include "main.h"
-#include "codec2_fdmdv.h"
 
 #ifdef _WIN32
 #include <strsafe.h>
 #endif
 
-// Callback from plot_spectrum & plot_waterfall.  would be nice to
-// work out a way to do this without globals.
-extern std::atomic<float> g_RxFreqOffsetHz;
-extern std::atomic<float> g_TxFreqOffsetHz;
-extern FreeDVInterface freedvInterface;
 extern std::atomic<bool>             g_tx;
-
-void clickTune(float freq) {
-
-    // The demod is hard-wired to expect a centre frequency of
-    // FDMDV_FCENTRE.  So we want to take the signal centered on the
-    // click tune freq and re-centre it on FDMDV_FCENTRE.  For example
-    // if the click tune freq is 1500Hz, and FDMDV_CENTRE is 1200 Hz,
-    // we need to shift the input signal centred on 1500Hz down to
-    // 1200Hz, an offset of -300Hz.
-
-    // Bit of an "indent" as we are often trying to get it back
-    // exactly in the centre
-
-    if (fabs(FDMDV_FCENTRE - freq) < 10.0) {
-        log_info("Requested frequency close to center, just using center.");
-        freq = FDMDV_FCENTRE;
-    }
-
-    g_TxFreqOffsetHz.store(freq - FDMDV_FCENTRE, std::memory_order_relaxed);
-    g_RxFreqOffsetHz.store(FDMDV_FCENTRE - freq, std::memory_order_relaxed);
-    log_info("g_TxFreqOffsetHz: %f g_RxFreqOffsetHz: %f", g_TxFreqOffsetHz.load(std::memory_order_relaxed), g_RxFreqOffsetHz.load(std::memory_order_relaxed));
-}
 
 bool MainApp::CanAccessSerialPort(std::string const& portName)
 {
@@ -204,26 +176,6 @@ void MainFrame::ClosePTTInPort(void)
         wxGetApp().m_pttInSerialPort->disconnect();
         wxGetApp().m_pttInSerialPort = nullptr;
     }
-}
-
-void freq_shift_coh(COMP rx_fdm_fcorr[], COMP rx_fdm[], float foff, float Fs, COMP *foff_phase_rect, int nin) FREEDV_NONBLOCKING
-{
-    COMP  foff_rect;
-    float mag;
-    int   i;
-
-    foff_rect.real = cosf(2.0*M_PI*foff/Fs);
-    foff_rect.imag = sinf(2.0*M_PI*foff/Fs);
-    for(i=0; i<nin; i++) {
-	*foff_phase_rect = cmult(*foff_phase_rect, foff_rect);
-	rx_fdm_fcorr[i] = cmult(rx_fdm[i], *foff_phase_rect);
-    }
-
-    /* normalise digital oscillator as the magnitude can drift over time */
-
-    mag = cabsolute(*foff_phase_rect);
-    foff_phase_rect->real /= mag;
-    foff_phase_rect->imag /= mag;
 }
 
 // Decimates samples using an algorithm that produces nice plots of

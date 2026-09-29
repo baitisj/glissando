@@ -37,8 +37,10 @@
 
 #include <memory>
 #include <functional>
+#include <vector>
 
-#include "modem_stats.h"
+#include "modem_stats.h" // MODEM_STATS_NSPEC, the width every display uses
+#include "GlissandoFft.h"
 #include "IPipelineStep.h"
 #include "../util/realtime_fp.h"
 #include "../util/GenericFIFO.h"
@@ -48,9 +50,13 @@ class ComputeRfSpectrumStep : public IPipelineStep
 public:
     // Note: only supports 8 kHz, so needs to be inserted into an AudioPipeline
     // in order to downconvert properly.
-    ComputeRfSpectrumStep(
-        realtime_fp<struct MODEM_STATS*()> const& modemStatsFn,
-        realtime_fp<GenericFIFO<float>*()> const& getAvMagFn);
+    //
+    // The waterfall's own spectrum of the radio input: MODEM_STATS_NSPEC
+    // bins from 0 to 4 kHz in dB, from the same Hann windowed
+    // 1024 point FFT over the latest samples that codec2's
+    // modem_stats_get_rx_spectrum() used, scaled the same way. It used to take
+    // its FFT state from the voice modem.
+    explicit ComputeRfSpectrumStep(realtime_fp<GenericFIFO<float>*()> const& getAvMagFn);
     virtual ~ComputeRfSpectrumStep();
     
     virtual int getInputSampleRate() const FREEDV_NONBLOCKING override;
@@ -58,10 +64,14 @@ public:
     virtual short* execute(short* inputSamples, int numInputSamples, int* numOutputSamples) FREEDV_NONBLOCKING override;
     
 private:
-    realtime_fp<struct MODEM_STATS*()> modemStatsFn_;
+    static constexpr int FFT_SIZE = 2 * MODEM_STATS_NSPEC;
+
     realtime_fp<GenericFIFO<float>*()> getAvMagFn_;
-    float* rxSpectrum_;
-    COMP* rxFdm_;
+    Glissando::Fft fft_;
+    std::vector<float> window_;     // Hann
+    std::vector<float> history_;    // the latest FFT_SIZE samples, oldest first
+    std::vector<double> fftData_;   // interleaved re, im
+    std::vector<float> rxSpectrum_;
 };
 
 #endif // AUDIO_PIPELINE__COMPUTE_RF_SPECTRUM_STEP_H

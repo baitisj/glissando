@@ -19,9 +19,6 @@ REPO_ROOT="$( cd -- "$SCRIPTPATH/.." >/dev/null 2>&1 ; pwd -P )"
 
 WORKDIR="${FREEDV_TEXT_CHAT_WORKDIR:-$(pwd)/text_chat_loopback}"
 
-# FreeDV voice mode for both stations: 4 is 700D, 5 is 700E, 0 is 1600.
-FREEDV_TEST_MODE="${FREEDV_TEST_MODE:-4}"
-
 # Text chat transmits only where US rules permit data, and not at all while the
 # frequency is unknown, which it is with no rig control and nothing typed in.
 # Nothing here reaches the air, so both stations claim a 20 m data segment
@@ -83,7 +80,6 @@ writeStationConfig () {
     sed -e "s|@FREEDV_RADIO_TO_COMPUTER_DEVICE@|$rxin|g" \
         -e "s|@FREEDV_COMPUTER_TO_RADIO_DEVICE@|$txout|g" \
         -e "s|@FREEDV_CALLSIGN@|$callsign|g" \
-        -e "s|@FREEDV_TEST_MODE@|$FREEDV_TEST_MODE|g" \
         -e "s|@FREEDV_FREQUENCY_HZ@|$FREEDV_TEXT_CHAT_FREQUENCY_HZ|g" \
         "$SCRIPTPATH/freedv-text-chat-station.conf.tmpl" > "$dir/freedv.conf"
 }
@@ -111,7 +107,7 @@ doUp () {
         exit 1
     fi
 
-    echo "Using $BINARY (FreeDV mode $FREEDV_TEST_MODE)"
+    echo "Using $BINARY"
     mkdir -p "$WORKDIR"
     : > "$WORKDIR/modules"
 

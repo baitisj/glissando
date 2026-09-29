@@ -18,13 +18,15 @@ repository, `modem/` included, is MIT (`LICENSE`).
 It is the Glissando app, not a FreeDV release. Voice is outside its scope:
 it has no voice controls, no FreeDV main window, no FreeDV Reporter and no
 FreeDV Help menu, and text chat runs over Glissando. It does not carry RADE
-either. The codec2 code is still built in underneath, since the audio
-pipeline it came with is organised around it. The shared
+either, and the FreeDV voice modem is gone: nothing demodulates voice, and
+the console's waterfall takes its spectrum from its own FFT of the radio
+input. The codec2 library is still built in underneath for its data modes,
+which chat falls back to only if the console is closed. The shared
 [freedv-backend](https://github.com/tmiw/freedv-backend) library is no
 longer fetched at configure time: `app/backend/` holds a copy of it with RADE,
 RADE text, FARGAN and the Opus bandwidth expander taken out (see
-`app/backend/README.md`). Settings a RADE build wrote are harmless: a saved
-RADE mode falls back to 700D.
+`app/backend/README.md`). Settings a FreeDV build wrote, such as a saved
+voice mode or squelch level, are ignored.
 
 ## Building and running (Linux)
 

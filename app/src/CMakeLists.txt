@@ -6,7 +6,6 @@ set(FREEDV_SOURCES
     util.cpp
     playrec.cpp
     ongui.cpp
-    freedv_interface.cpp
     glissando_host.cpp
 )
 

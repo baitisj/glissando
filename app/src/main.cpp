@@ -45,9 +45,7 @@
 #include "git_version.h"
 #include "main.h"
 #include "os/os_interface.h"
-#include "freedv_interface.h"
 #include "audio/AudioEngineFactory.h"
-#include "codec2_fdmdv.h"
 #include "pipeline/TxRxThread.h"
 #include "reporting/CsvReporter.h"
 
@@ -90,28 +88,13 @@ extern "C" {
 // back functions
 // ------------------------------------------------------------------
 
-// freedv states
-int                 g_Nc;
-int                 g_mode;
-
-FreeDVInterface     freedvInterface;
 std::shared_ptr<TxRxThread> m_txThread;
 std::shared_ptr<TxRxThread> m_rxThread;
-float               g_pwr_scale;
-int                 g_clip;
-std::atomic<bool>   g_queueResync;
 
-// test Frames
-int                 g_test_frame_sync_state;
-int                 g_test_frame_count;
-int                 g_resyncs;
-float               g_sig_pwr_av = 0.0;
-short              *g_error_hist, *g_error_histn;
-
-// time averaged magnitude spectrum used for waterfall and spectrum display
+// time averaged magnitude spectrum of the radio input, which the Glissando
+// console's waterfall draws
 GenericFIFO<float>  g_avmag(MODEM_STATS_NSPEC * 10 / DT); // 1s worth
 float               g_avmag_waterfall[MODEM_STATS_NSPEC];
-float               g_avmag_spectrum[MODEM_STATS_NSPEC];
 
 // TX level for attenuation
 int g_txLevel = 0;
@@ -120,23 +103,14 @@ int g_tuneLevel = 0;
 std::atomic<float> g_tuneLevelScale;
 
 // GUI controls that affect rx and tx processes
-int   g_SquelchActive;
-float g_SquelchLevel;
-std::atomic<int>    g_analog;
 std::atomic<bool>   g_tx;
-float g_snr;
 std::atomic<bool>  g_half_duplex;
-// sending and receiving Call Sign data
 
-// tx/rx processing states
-std::atomic<int>                 g_State, g_prev_State;
 paCallBackData     *g_rxUserdata;
 
-// FIFOs used for plotting waveforms
+// FIFO used for plotting the radio's waveform
 constexpr int PLOT_BUF_MULTIPLIER=8;
 GenericFIFO<short>  g_plotDemodInFifo(PLOT_BUF_MULTIPLIER*WAVEFORM_PLOT_BUF);
-GenericFIFO<short>  g_plotSpeechOutFifo(PLOT_BUF_MULTIPLIER*WAVEFORM_PLOT_BUF);
-GenericFIFO<short>  g_plotSpeechInFifo(PLOT_BUF_MULTIPLIER*WAVEFORM_PLOT_BUF);
 
 // Soundcard config
 int                 g_nSoundCards;
@@ -152,21 +126,15 @@ int                 g_AEstatus2[4];
 
 // playing and recording from sound files
 
-extern std::atomic<SNDFILE*> g_sfPlayFile;
-extern std::atomic<bool>                g_playFileToMicIn;
-extern std::atomic<bool>   g_loopPlayFileToMicIn;
-extern int                 g_playFileToMicInEventId;
 
 extern SNDFILE            *g_sfRecFile;
 extern bool                g_recFileFromRadio;
 extern std::atomic<unsigned int> g_recFromRadioSamples;
 extern int                 g_recFileFromRadioEventId;
-extern int                 g_recFileFromDecoderEventId;
 
 extern std::atomic<SNDFILE*> g_sfPlayFileFromRadio;
 extern std::atomic<bool>                g_playFileFromRadio;
 extern std::atomic<int>    g_sfFs;
-extern std::atomic<int>    g_sfTxFs;
 extern std::atomic<bool>   g_loopPlayFileFromRadio;
 extern int                 g_playFileFromRadioEventId;
 
@@ -174,17 +142,9 @@ extern std::atomic<SNDFILE*>            g_sfRecFileFromModulator;
 extern std::atomic<bool>                g_recFileFromModulator;
 extern int                 g_recFileFromModulatorEventId;
 
-extern std::atomic<SNDFILE*> g_sfRecMicFile;
-extern std::atomic<bool>   g_recFileFromMic;
 
-extern SNDFILE* g_sfRecDecoderFile;
-extern bool g_recFileFromDecoder;
 
 wxWindow           *g_parent;
-
-// Click to tune rx and tx frequency offset states
-std::atomic<float>  g_RxFreqOffsetHz;
-std::atomic<float>  g_TxFreqOffsetHz;
 
 // experimental mutex to make sound card callbacks mutually exclusive
 // TODO: review code and see if we need this any more, as fifos should
@@ -240,16 +200,6 @@ void clearLastUsedConfigPath()
     stateConfig.Write(LAST_USED_CONFIG_KEY, wxEmptyString);
     stateConfig.Flush();
 }
-
-// Unit test management
-wxString testName;
-wxString utFreeDVMode;
-wxString utTxFile;
-wxString utTxOutFile;
-wxString utRxFile;
-wxString utRxOutFile;
-long utTxTimeSeconds;
-long utTxAttempts;
 
 // WxWidgets - initialize the application
 
@@ -307,273 +257,10 @@ void MainFrame::handleAudioDeviceChange_(std::string const& newDeviceName)
     wxGetApp().appConfiguration.save(pConfig);
 }
 
-void MainApp::UnitTest_()
-{
-    SetThreadName("UnitTest");
-
-    // List audio devices
-    auto engine = AudioEngineFactory::GetAudioEngine();
-    engine->start();
-    for (auto& dev : engine->getAudioDeviceList(IAudioEngine::AUDIO_ENGINE_IN))
-    {
-        log_info("Input audio device: %s (ID %d, sample rate %d, valid channels: %d-%d)", (const char*)dev.name.ToUTF8(), dev.deviceId,  dev.defaultSampleRate, dev.minChannels, dev.maxChannels);
-    }
-    for (auto& dev : engine->getAudioDeviceList(IAudioEngine::AUDIO_ENGINE_OUT))
-    {
-        log_info("Output audio device: %s (ID %d, sample rate %d, valid channels: %d-%d)", (const char*)dev.name.ToUTF8(), dev.deviceId,  dev.defaultSampleRate, dev.minChannels, dev.maxChannels);
-    }
-    engine->stop();
-
-    // Bring window to the front
-    CallAfter([this]() {
-        frame->Iconize(false);
-        frame->SetFocus();
-        frame->Raise();
-        frame->Show(true);
-    });
-    
-    // Wait 100ms for FreeDV to come to foreground
-    std::this_thread::sleep_for(100ms);
-
-    // Select FreeDV mode.
-    wxRadioButton* modeBtn = nullptr;
-    if (utFreeDVMode == "700D")
-    {
-        modeBtn = frame->m_rb700d;
-    }
-    else if (utFreeDVMode == "700E")
-    {
-        modeBtn = frame->m_rb700e;
-    }
-    else if (utFreeDVMode == "1600")
-    {
-        modeBtn = frame->m_rb1600;
-    }
-    
-    if (modeBtn != nullptr)
-    {
-        log_info("Firing mode change");
-        /*sim.MouseMove(modeBtn->GetScreenPosition());
-        sim.MouseClick();*/
-        CallAfter([this, modeBtn]() {
-            modeBtn->SetValue(true);
-            wxCommandEvent* modeEvent = new wxCommandEvent(wxEVT_RADIOBUTTON, modeBtn->GetId());
-            modeEvent->SetEventObject(modeBtn);
-            QueueEvent(modeEvent);
-        });
-    }
-    
-    // Fire event to start FreeDV
-    log_info("Firing start");
-    CallAfter([this]() {
-        frame->m_togBtnOnOff->SetValue(true);
-        wxCommandEvent* onEvent = new wxCommandEvent(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, frame->m_togBtnOnOff->GetId());
-        onEvent->SetEventObject(frame->m_togBtnOnOff);
-        frame->OnTogBtnOnOff(*onEvent);
-        delete onEvent;
-        //QueueEvent(onEvent);
-    });
-    /*sim.MouseMove(frame->m_togBtnOnOff->GetScreenPosition());
-    sim.MouseClick();*/
-    
-    // Wait for FreeDV to start
-    while (!isModemRunning.load(std::memory_order_acquire))
-    {
-        std::this_thread::sleep_for(20ms);
-    }
-    std::this_thread::sleep_for(2s);
-    
-    constexpr int MAX_TIME_AS_COUNTER = 12000; // 20 minutes
-    if (testName == "tx")
-    {
-        if (utTxOutFile != "")
-        {
-            SF_INFO recSf;
-            recSf.format     = SF_FORMAT_WAV | SF_FORMAT_PCM_16;
-            recSf.channels   = 1;
-            recSf.samplerate = RECORD_FILE_SAMPLE_RATE;
-
-            g_sfRecFileFromModulator = sf_open((const char*)utTxOutFile.ToUTF8(), SFM_WRITE, &recSf);
-            g_recFileFromModulator = true;
-        }
-
-        log_info("Transmitting %d times", utTxAttempts);
-        for (int numTimes = 0; numTimes < utTxAttempts; numTimes++)
-        {
-            // Fire event to begin TX
-            //sim.MouseMove(frame->m_btnTogPTT->GetScreenPosition());
-            //sim.MouseClick();
-            
-            if (utTxFile != "")
-            {
-                log_info("Using audio from file %s", (const char*)utTxFile.ToUTF8());
-                
-                // Transmit until file has finished playing
-                SF_INFO     sfInfo;
-                sfInfo.format = 0;
-                g_sfPlayFile.store(sf_open((const char*)utTxFile.ToUTF8(), SFM_READ, &sfInfo), std::memory_order_release);
-                g_sfTxFs.store(sfInfo.samplerate, std::memory_order_release);
-                g_loopPlayFileToMicIn.store(false, std::memory_order_relaxed);
-                g_playFileToMicIn.store(true, std::memory_order_release);
-
-                log_info("Firing PTT");
-                CallAfter([this]() {
-                    frame->m_btnTogPTT->SetValue(true);
-                    wxCommandEvent* txEvent = new wxCommandEvent(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, frame->m_btnTogPTT->GetId());
-                    txEvent->SetEventObject(frame->m_btnTogPTT);
-                    //QueueEvent(txEvent);
-                    frame->OnTogBtnPTT(*txEvent);
-                    delete txEvent;
-                });
-
-                int counter = 0;
-                while (g_playFileToMicIn.load(std::memory_order_acquire) && (counter++) < MAX_TIME_AS_COUNTER)
-                {
-                    std::this_thread::sleep_for(100ms);
-                } 
-            }
-            else
-            {
-                log_info("Firing PTT");
-                CallAfter([this]() {
-                    frame->m_btnTogPTT->SetValue(true);
-                    wxCommandEvent* txEvent = new wxCommandEvent(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, frame->m_btnTogPTT->GetId());
-                    txEvent->SetEventObject(frame->m_btnTogPTT);
-                    //QueueEvent(txEvent);
-                    frame->OnTogBtnPTT(*txEvent);
-                    delete txEvent;
-                });
-
-                // Transmit for user given time period (default 60 seconds)
-                log_info("Sleeping for %d seconds", utTxTimeSeconds);
-                std::this_thread::sleep_for(std::chrono::seconds(utTxTimeSeconds));
-            }
-            
-            // Stop transmitting
-            log_info("Firing PTT");
-            std::this_thread::sleep_for(1s);
-            CallAfter([this]() {
-                frame->m_btnTogPTT->SetValue(false);
-                endingTx.store(true, std::memory_order_release);
-                wxCommandEvent* rxEvent = new wxCommandEvent(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, frame->m_btnTogPTT->GetId());
-                rxEvent->SetEventObject(frame->m_btnTogPTT);
-                frame->OnTogBtnPTT(*rxEvent);
-                delete rxEvent;
-                //QueueEvent(rxEvent);
-            });
-            /*sim.MouseMove(frame->m_btnTogPTT->GetScreenPosition());
-            sim.MouseClick();*/
-            
-            // Wait 5 seconds for FreeDV to stop. Add up to 500ms of additional
-            // random delay to avoid mpp test failures.
-            std::random_device rd;
-            std::mt19937 gen(rd());
-            std::uniform_int_distribution<> distrib(0, 500);
-            std::this_thread::sleep_for(5s + std::chrono::milliseconds(distrib(gen)));
-        }
-
-        if (g_sfRecFileFromModulator)
-        {
-            g_recFileFromModulator = false;
-            sf_close(g_sfRecFileFromModulator);
-        }
-    }
-    else
-    {
-        if (utRxOutFile != "")
-        {
-            SF_INFO recSf;
-            recSf.format     = SF_FORMAT_WAV | SF_FORMAT_PCM_16;
-            recSf.channels   = 1;
-            recSf.samplerate = RECORD_FILE_SAMPLE_RATE;
-
-            g_sfRecDecoderFile = sf_open((const char*)utRxOutFile.ToUTF8(), SFM_WRITE, &recSf);
-            g_recFileFromDecoder = true;
-        }
-
-        if (utRxFile != "")
-        {
-            // Receive until file has finished playing
-            SF_INFO     sfInfo;
-            sfInfo.format = 0;
-            g_sfPlayFileFromRadio.store(sf_open((const char*)utRxFile.ToUTF8(), SFM_READ, &sfInfo), std::memory_order_release);
-            g_sfFs.store(sfInfo.samplerate, std::memory_order_release);
-            g_loopPlayFileFromRadio.store(false, std::memory_order_relaxed);
-            g_playFileFromRadio.store(true, std::memory_order_release);
-
-            auto sync = 0;
-            int counter = 0;
-            while (g_playFileFromRadio.load(std::memory_order_acquire) && (counter++) < MAX_TIME_AS_COUNTER)
-            {
-                std::this_thread::sleep_for(100ms);
-                auto newSync = freedvInterface.getSync();
-                if (newSync != sync)
-                {
-                    log_info("Sync changed from %d to %d", sync, newSync);
-                    sync = newSync;
-                }
-            }
-        }
-        else
-        {
-            // Receive for txtime seconds
-            auto sync = 0;
-            for (int i = 0; i < utTxTimeSeconds*10; i++)
-            {
-                std::this_thread::sleep_for(100ms);
-                auto newSync = freedvInterface.getSync();
-                if (newSync != sync)
-                {
-                    log_info("Sync changed from %d to %d", sync, newSync);
-                    sync = newSync;
-                }
-            } 
-        }
-
-        if (g_recFileFromDecoder)
-        {
-            g_recFileFromDecoder = false;
-            sf_close(g_sfRecDecoderFile);
-        }
-    }
-    
-    // Wait a second to make sure we're not doing any more processing
-    std::this_thread::sleep_for(1000ms);
- 
-    // Fire event to stop FreeDV
-    log_info("Firing stop");
-    CallAfter([this]() {
-        wxCommandEvent* offEvent = new wxCommandEvent(wxEVT_COMMAND_TOGGLEBUTTON_CLICKED, frame->m_togBtnOnOff->GetId());
-        offEvent->SetEventObject(frame->m_togBtnOnOff);
-        frame->m_togBtnOnOff->SetValue(false);
-        //QueueEvent(offEvent);
-        frame->OnTogBtnOnOff(*offEvent);
-        delete offEvent;
-    });
-    //sim.MouseMove(frame->m_togBtnOnOff->GetScreenPosition());
-    //sim.MouseClick();
-    
-    // Wait 5 seconds for FreeDV to stop
-    std::this_thread::sleep_for(5s);
-    
-    // Destroy main window to exit application. Must be done in UI thread to avoid problems.
-    CallAfter([this]() {
-        frame->Destroy();
-    });
-}
-
 void MainApp::OnInitCmdLine(wxCmdLineParser& parser)
 {
     wxApp::OnInitCmdLine(parser);
     parser.AddOption("f", "config", "Use different configuration file instead of the default.");
-    parser.AddOption("ut", "unit_test", "Execute FreeDV in unit test mode.");
-    parser.AddOption("utmode", wxEmptyString, "Switch FreeDV to the given mode before UT execution.");
-    parser.AddOption("rxfile", wxEmptyString, "In UT mode, pipes given WAV file through receive pipeline.");
-    parser.AddOption("rxoutfile", wxEmptyString, "In UT mode, records RX output to the given WAV file.");
-    parser.AddOption("txfile", wxEmptyString, "In UT mode, pipes given WAV file through transmit pipeline.");
-    parser.AddOption("txoutfile", wxEmptyString, "In UT mode, records TX output to the given WAV file.");
-    parser.AddOption("txtime", "60", "In UT mode, the amount of time to transmit (default 60 seconds)", wxCMD_LINE_VAL_NUMBER);
-    parser.AddOption("txattempts", "1", "In UT mode, the number of times to transmit (default 1)", wxCMD_LINE_VAL_NUMBER);
     // The console is always the window now; the switch stays so older
     // scripts that pass it still start.
     parser.AddSwitch("g", "glissando", "Accepted for compatibility; the Glissando console always opens.");
@@ -703,53 +390,6 @@ bool MainApp::OnCmdLineParsed(wxCmdLineParser& parser)
     pConfig = wxConfigBase::Get();
     pConfig->SetRecordDefaults();
     
-    if (parser.Found("ut", &testName))
-    {
-        log_info("Executing test %s", (const char*)testName.ToUTF8());
-        if (parser.Found("utmode", &utFreeDVMode))
-        {
-            log_info("Using mode %s for tests", (const char*)utFreeDVMode.ToUTF8());
-        }
-
-        if (parser.Found("rxfile", &utRxFile))
-        {
-            log_info("Piping %s through RX pipeline", (const char*)utRxFile.ToUTF8());
-        }
-        
-        if (parser.Found("rxoutfile", &utRxOutFile))
-        {
-            log_info("Recording RX output to %s", (const char*)utRxOutFile.ToUTF8());
-        }
-
-        if (parser.Found("txfile", &utTxFile))
-        {
-            log_info("Piping %s through TX pipeline", (const char*)utTxFile.ToUTF8());
-        }
-
-        if (parser.Found("txoutfile", &utTxOutFile))
-        {
-            log_info("Recording TX output to %s", (const char*)utTxOutFile.ToUTF8());
-        }
-
-        if (parser.Found("txtime", &utTxTimeSeconds))
-        {
-            log_info("Will transmit for %d seconds", utTxTimeSeconds);
-        }
-        else
-        {
-            utTxTimeSeconds = 60;
-        }
-
-        if (parser.Found("txattempts", &utTxAttempts))
-        {
-            log_info("Will transmit %d time(s)", utTxAttempts);
-        }
-        else
-        {
-            utTxAttempts = 1;
-        }
-    }
-    
     return true;
 }
 
@@ -849,13 +489,6 @@ bool MainApp::OnInit()
         wxGetApp().frame->glissandoShowChat(true);
         wxGetApp().frame->glissandoShowSnoop(true);
     });
-
-    // Begin test execution
-    if (testName != "")
-    {
-        std::thread utThread(std::bind(&MainApp::UnitTest_, this));
-        utThread.detach();
-    }
     
     return true;
 }
@@ -888,9 +521,6 @@ void MainFrame::loadConfiguration_()
     if (w < 0 || w > 2048) w = 800;
     if (h < 0 || h > 2048) h = 780;
 
-    g_SquelchActive = wxGetApp().appConfiguration.squelchActive;
-    g_SquelchLevel = wxGetApp().appConfiguration.squelchLevel;
-    g_SquelchLevel /= 2.0;
     
     wxSize size = GetMinSize();
 
@@ -992,44 +622,9 @@ void MainFrame::loadConfiguration_()
         m_cboReportFrequency->SetValue(sVal);
     }
 
-    // The saved mode is the radio button's index (0, 4 or 5), not a
-    // FREEDV_MODE_* value, so the configuration's default (FREEDV_MODE_700D)
-    // matches none of them.
-    int mode = wxGetApp().appConfiguration.currentFreeDVMode;
-    if (mode == 0)
-    {
-        m_rb1600->SetValue(1);
-    }
-    else if (mode == 4)
-    {
-        m_rb700d->SetValue(1);
-    }
-    else if (mode == 5)
-    {
-        m_rb700e->SetValue(1);
-    }
-    else
-    {
-        // Anything else (such as RADE, which this build no longer has)
-        // falls back to 700D.
-        m_rb700d->SetValue(1);
-    }
-    
     pConfig->SetPath(wxT("/"));
     
-    m_togBtnAnalog->Disable();
     m_btnTogPTT->Disable();
-
-    // squelch settings
-    m_sliderSQ->SetValue((int)((g_SquelchLevel+5.0)*2.0));
-    wxString sqsnr_string = wxNumberFormatter::ToString(g_SquelchLevel, 1) + "dB";
-    m_textSQ->SetLabel(sqsnr_string);
-    m_ckboxSQ->SetValue(g_SquelchActive);
-
-    // SNR settings
-
-    m_ckboxSNR->SetValue(wxGetApp().appConfiguration.snrSlow);
-    setsnrBeta(wxGetApp().appConfiguration.snrSlow);
     
     // Show/hide frequency box based on CAT control status
     m_freqBox->Show(isFrequencyControlEnabled_());
@@ -1048,10 +643,6 @@ void MainFrame::loadConfiguration_()
     auto currentSizer = m_panel->GetSizer();
     m_panel->SetSizerAndFit(currentSizer, false);
     m_panel->Layout();
-    
-    
-    
-    statsBox->Show(false);
 }
 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=--=-=-=-=
@@ -1061,39 +652,17 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("Glissando
 
     // Create needed strings in advance so we don't need to continually 
     // reallocate memory every time through OnTimer() below.
-    SNR_FORMAT_STR("%ddB"),
-    MODE_FORMAT_STR("Mode: %s"),
-    NO_SNR_LABEL("--"),
     EMPTY_STR(""),
-    MODEM_LABEL("Modem"),
-    BITS_UNK_LABEL("Bits: unk"),
-    ERRS_UNK_LABEL("Errs: unk"),
-    BER_UNK_LABEL("BER: unk"),
-    FRQ_OFF_UNK_LABEL("FrqOff: unk"),
-    SYNC_UNK_LABEL("Sync: unk"),
-    VAR_UNK_LABEL("Var: unk"),
-    CLK_OFF_UNK_LABEL("ClkOff: unk"),
     MIC_SPKR_LEVEL_FORMAT_STR("%s%s"),
     DECIBEL_STR("dB"),
     CURRENT_TIME_FORMAT_STR("%s %s"),
     SNR_FORMAT_STR_NO_DB("%0.1f"),
-    CALLSIGN_FORMAT_RGX("(([A-Za-z0-9]+/)?[A-Za-z0-9]{1,3}[0-9][A-Za-z0-9]*[A-Za-z](/[A-Za-z0-9]+)?)"),
-    BITS_FMT("Bits: %d"),
-    ERRS_FMT("Errs: %d"),
-    BER_FMT("BER: %4.3f"),
-    RESYNC_FMT("Resyncs: %d"),
-    FRQ_OFF_FMT("FrqOff: %3.1f"),
-    SYNC_FMT("Sync: %3.2f"),
-    VAR_FMT("Var: %4.1f"),
-    CLK_OFF_FMT("ClkOff: %+-d")
+    CALLSIGN_FORMAT_RGX("(([A-Za-z0-9]+/)?[A-Za-z0-9]{1,3}[0-9][A-Za-z0-9]*[A-Za-z](/[A-Za-z0-9]+)?)")
 {
     SetThreadName("GUI");
 
     terminating_ = false;
-    realigned_ = false;
-    syncState_ = false;
     txChangeoverOccurring_ = false;
-    textMessagingChangeover_ = false;
 
     // Add config file name to title bar if provided at the command line.
     if (wxGetApp().customConfigFileName != "")
@@ -1111,12 +680,7 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("Glissando
     // Initialize panel pointers to null before creation since "page changed" 
     // events fire as we're adding these (and we compare against these pointers
     // inside the handler).
-    m_panelSpectrum = nullptr;
-    m_panelWaterfall = nullptr;
-    m_panelSpeechIn = nullptr;
-    m_panelSpeechOut = nullptr;
     m_panelDemodIn = nullptr;
-    m_panelSNR = nullptr;
 
     m_zoom              = 1.;
     suppressFreqModeUpdates_ = false;
@@ -1131,35 +695,11 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("Glissando
 
     tools->Append(m_menuItemToolsConfigDelete);
     
-    // Add Waterfall Plot window
-    m_panelWaterfall = new PlotWaterfall(m_auiNbookCtrl, g_avmag_waterfall, false, 0);
-    m_panelWaterfall->SetToolTip(_("Double click to tune, middle click to re-center"));
-    m_auiNbookCtrl->AddPage(m_panelWaterfall, _("Waterfall"), true, wxNullBitmap);
-
-    // Add Spectrum Plot window
-    m_panelSpectrum = new PlotSpectrum(m_auiNbookCtrl, g_avmag_spectrum,
-                                       MODEM_STATS_NSPEC*((float)MAX_F_HZ/MODEM_STATS_MAX_F_HZ));
-    m_panelSpectrum->SetToolTip(_("Double click to tune, middle click to re-center"));    
-    m_auiNbookCtrl->AddPage(m_panelSpectrum, _("Spectrum"), false, wxNullBitmap);
-
     // Add Demod Input window
     m_panelDemodIn = new PlotScalar(m_auiNbookCtrl, WAVEFORM_PLOT_TIME, 1.0/WAVEFORM_PLOT_FS, -1, 1, 1, 0.2, "%2.1f", 0);
-    m_auiNbookCtrl->AddPage(m_panelDemodIn, _("Frm Radio"), false, wxNullBitmap);
-
-    // Add Speech Input window
-    m_panelSpeechIn = new PlotScalar(m_auiNbookCtrl, WAVEFORM_PLOT_TIME, 1.0/WAVEFORM_PLOT_FS, -1, 1, 1, 0.2, "%2.1f", 0);
-    m_auiNbookCtrl->AddPage(m_panelSpeechIn, _("Frm Mic"), false, wxNullBitmap);
-
-    // Add Speech Output window
-    m_panelSpeechOut = new PlotScalar(m_auiNbookCtrl, WAVEFORM_PLOT_TIME, 1.0/WAVEFORM_PLOT_FS, -1, 1, 1, 0.2, "%2.1f", 0);
-    m_auiNbookCtrl->AddPage(m_panelSpeechOut, _("Frm Decoder"), false, wxNullBitmap);
-
-    // Add SNR window
-    m_panelSNR = new PlotScalar(m_auiNbookCtrl, SNR_PLOT_SECONDS, DT, NO_SNR_VAL, MAX_SNR_VAL, SNR_PLOT_SECONDS / SNR_PLOT_SECOND_SEGMENTS, 5, "%.0f", 0, "", true, NO_SNR_VAL, false);
-    m_auiNbookCtrl->AddPage(m_panelSNR, _("SNR"), false, wxNullBitmap);
+    m_auiNbookCtrl->AddPage(m_panelDemodIn, _("Frm Radio"), true, wxNullBitmap);
 
     m_togBtnOnOff->Connect(wxEVT_UPDATE_UI, wxUpdateUIEventHandler(MainFrame::OnTogBtnOnOffUI), NULL, this);
-    m_togBtnAnalog->Connect(wxEVT_UPDATE_UI, wxUpdateUIEventHandler(MainFrame::OnTogBtnAnalogClickUI), NULL, this);
     m_btnTogPTT->Bind(wxEVT_LEFT_DOWN, &MainFrame::OnTogBtnPTTMouseDown, this);
     m_btnTogPTT->Bind(wxEVT_LEFT_DCLICK, &MainFrame::OnTogBtnPTTMouseDown, this);
     m_btnTogPTT->Bind(wxEVT_LEAVE_WINDOW, &MainFrame::OnTogBtnPTTMouseLeave, this);
@@ -1168,12 +708,7 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("Glissando
     
 #ifdef _USE_TIMER
     Bind(wxEVT_TIMER, &MainFrame::OnTimer, this);       // ID_MY_WINDOW);
-    m_plotWaterfallTimer.SetOwner(this, ID_TIMER_WATERFALL);
-    m_plotSpectrumTimer.SetOwner(this, ID_TIMER_SPECTRUM);
-    m_plotSpeechInTimer.SetOwner(this, ID_TIMER_SPEECH_IN);
-    m_plotSpeechOutTimer.SetOwner(this, ID_TIMER_SPEECH_OUT);
     m_plotDemodInTimer.SetOwner(this, ID_TIMER_DEMOD_IN);
-    m_plotSNRTimer.SetOwner(this, ID_TIMER_SNR);
 
     m_plotTimer.SetOwner(this, ID_TIMER_UPDATE_OTHER);
     m_updFreqStatusTimer.SetOwner(this,ID_TIMER_UPD_FREQ);
@@ -1216,10 +751,6 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("Glissando
     Connect(wxEVT_IDLE, wxIdleEventHandler(MainFrame::OnIdle), NULL, this);
 #endif //_USE_ONIDLE
 
-    g_sfPlayFile.store(NULL, std::memory_order_release);
-    g_playFileToMicIn.store(false, std::memory_order_release);
-    g_loopPlayFileToMicIn.store(false, std::memory_order_relaxed);
-
     g_sfRecFile = NULL;
     g_recFileFromRadio = false;
 
@@ -1229,22 +760,8 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("Glissando
 
     g_sfRecFileFromModulator = NULL;
     g_recFileFromModulator = false;
-    
-    g_sfRecMicFile.store(nullptr, std::memory_order_release);
-    g_recFileFromMic.store(false, std::memory_order_relaxed);
-
-    // init click-tune states
-
-    g_RxFreqOffsetHz.store(0.0f, std::memory_order_relaxed);
-    m_panelWaterfall->setRxFreq(FDMDV_FCENTRE - g_RxFreqOffsetHz.load(std::memory_order_relaxed));
-    m_panelSpectrum->setRxFreq(FDMDV_FCENTRE - g_RxFreqOffsetHz.load(std::memory_order_relaxed));
-
-    g_TxFreqOffsetHz.store(0.0f, std::memory_order_relaxed);
 
     g_tx.store(false, std::memory_order_release);
-
-    g_test_frame_sync_state = 0;
-    g_resyncs = 0;
 
     optionsDlg = new OptionsDlg(NULL);
     m_schedule_restore = false;
@@ -1402,21 +919,9 @@ void MainFrame::exportConfiguration_(wxConfigBase* config)
 
 
 
-    wxGetApp().appConfiguration.squelchActive = g_SquelchActive;
-    wxGetApp().appConfiguration.squelchLevel = (int)(g_SquelchLevel*2.0);
-
     wxGetApp().appConfiguration.transmitLevel = g_txLevel;
     autoSaveCurrentBandLevels_(false);
 
-    int mode = FREEDV_MODE_700D;
-    if (m_rb1600->GetValue())
-        mode = 0;
-    if (m_rb700d->GetValue())
-        mode = 4;
-    if (m_rb700e->GetValue())
-        mode = 5;
-    
-    wxGetApp().appConfiguration.currentFreeDVMode = mode;
     wxGetApp().appConfiguration.save(config);
 }
 
@@ -1701,9 +1206,7 @@ void MainFrame::setTextMessagingPtt_(bool keyed)
         if (!m_btnTogPTT->GetValue())
         {
             m_btnTogPTT->SetValue(true);
-            textMessagingChangeover_ = true;
             togglePTT();
-            textMessagingChangeover_ = false;
         }
 
         return;
@@ -1713,9 +1216,7 @@ void MainFrame::setTextMessagingPtt_(bool keyed)
     {
         m_btnTogPTT->SetValue(false);
         endingTx.store(true, std::memory_order_release);
-        textMessagingChangeover_ = true;
         togglePTT();
-        textMessagingChangeover_ = false;
     }
 
     // Ownership is released only now: the transmit thread has to keep
@@ -1756,23 +1257,15 @@ MainFrame::~MainFrame()
     exportConfiguration_(pConfig);
 
     m_togBtnOnOff->Disconnect(wxEVT_UPDATE_UI, wxUpdateUIEventHandler(MainFrame::OnTogBtnOnOffUI), NULL, this);
-    m_togBtnAnalog->Disconnect(wxEVT_UPDATE_UI, wxUpdateUIEventHandler(MainFrame::OnTogBtnAnalogClickUI), NULL, this);
 
     {
         std::unique_lock<std::recursive_mutex> lk(stoppingMutex);
         if (m_RxRunning)
         {
             stopRxStream();
-            freedvInterface.stop();
         }  
     }
 
-    auto playFile = g_sfPlayFile.load(std::memory_order_acquire);
-    if (playFile != NULL)
-    {
-        sf_close(playFile);
-        g_sfPlayFile.store(NULL, std::memory_order_release);
-    }
     if (g_sfRecFile != NULL)
     {
         sf_close(g_sfRecFile);
@@ -1787,12 +1280,7 @@ MainFrame::~MainFrame()
     if(m_plotTimer.IsRunning())
     {
         m_plotTimer.Stop();
-        m_plotWaterfallTimer.Stop();
-        m_plotSpectrumTimer.Stop();
-        m_plotSpeechInTimer.Stop();
-        m_plotSpeechOutTimer.Stop();
         m_plotDemodInTimer.Stop();
-        m_plotSNRTimer.Stop();
         Unbind(wxEVT_TIMER, &MainFrame::OnTimer, this);
     }
 #endif //_USE_TIMER
@@ -1846,12 +1334,9 @@ int MainFrame::getIdealStationsHeardColumnLength_(int col)
 //----------------------------------------------------------------
 void MainFrame::OnTimer(wxTimerEvent &evt)
 {
-    short speechInPlotSamples[WAVEFORM_PLOT_BUF];
-    short speechOutPlotSamples[WAVEFORM_PLOT_BUF];
     short demodInPlotSamples[WAVEFORM_PLOT_BUF];
     bool txState = false;
     bool halfDuplexState = false;
-    int syncState = 0;
 
     auto& timer = evt.GetTimer();
     auto timerId = timer.GetId();
@@ -1860,14 +1345,11 @@ void MainFrame::OnTimer(wxTimerEvent &evt)
         return;
     }
     
-    // Most plots don't need TX/sync state.
-    if (timerId == ID_TIMER_UPDATE_OTHER || timerId == ID_TIMER_SNR || timerId == ID_TIMER_DEMOD_IN)
+    if (timerId == ID_TIMER_UPDATE_OTHER || timerId == ID_TIMER_DEMOD_IN)
     {
         txState = g_tx.load(std::memory_order_relaxed);
         halfDuplexState = g_half_duplex.load(std::memory_order_relaxed);
-        syncState_ = freedvInterface.getSync();
     }
-    syncState = syncState_;
 
     if (timerId == ID_TIMER_UPD_FREQ)
     {
@@ -1878,40 +1360,6 @@ void MainFrame::OnTimer(wxTimerEvent &evt)
             wxGetApp().rigFrequencyController->requestCurrentFrequencyMode();
         }
      }
-     else if (timerId == ID_TIMER_WATERFALL)
-     {
-          if (m_panelWaterfall->checkDT()) {
-              m_panelWaterfall->setRxFreq(FDMDV_FCENTRE - g_RxFreqOffsetHz.load(std::memory_order_relaxed));
-              m_panelWaterfall->m_newdata = true;
-              m_panelWaterfall->addOffset(freedvInterface.getCurrentRxModemOffset());
-              m_panelWaterfall->setSync(syncState ? true : false);
-              m_panelWaterfall->Refresh();
-          }
-      }
-      else if (timerId == ID_TIMER_SPECTRUM)
-      {
-          m_panelSpectrum->setRxFreq(FDMDV_FCENTRE - g_RxFreqOffsetHz.load(std::memory_order_relaxed));
-
-          m_panelSpectrum->addOffset(freedvInterface.getCurrentRxModemOffset());
-          m_panelSpectrum->setSync(syncState ? true : false);
-          m_panelSpectrum->m_newdata = true;
-          m_panelSpectrum->Refresh();
-      }
-      else if (timerId == ID_TIMER_SPEECH_IN)
-      {
-          if (g_plotSpeechInFifo.read(speechInPlotSamples, WAVEFORM_PLOT_BUF)) {
-              memset(speechInPlotSamples, 0, WAVEFORM_PLOT_BUF*sizeof(short));
-          }
-          m_panelSpeechIn->add_new_short_samples(speechInPlotSamples, WAVEFORM_PLOT_BUF, 32767);
-          m_panelSpeechIn->refreshData();
-      }
-      else if (timerId == ID_TIMER_SPEECH_OUT)
-      {
-          if (g_plotSpeechOutFifo.read(speechOutPlotSamples, WAVEFORM_PLOT_BUF))
-              memset(speechOutPlotSamples, 0, WAVEFORM_PLOT_BUF*sizeof(short));
-          m_panelSpeechOut->add_new_short_samples(speechOutPlotSamples, WAVEFORM_PLOT_BUF, 32767);
-          m_panelSpeechOut->refreshData();
-      }
       else if (timerId == ID_TIMER_DEMOD_IN)
       {
           if (g_plotDemodInFifo.read(demodInPlotSamples, WAVEFORM_PLOT_BUF)) {
@@ -1922,7 +1370,8 @@ void MainFrame::OnTimer(wxTimerEvent &evt)
       }
       else
       {
-         // Update average magnitudes
+         // Update average magnitudes. The Glissando console's waterfall
+         // draws g_avmag_waterfall (see glissandoSpectrum()).
          float rxSpectrum[MODEM_STATS_NSPEC];
          memset(rxSpectrum, 0, sizeof(float) * MODEM_STATS_NSPEC);
          bool txNotInFullDuplex = halfDuplexState && txState;
@@ -1935,7 +1384,6 @@ void MainFrame::OnTimer(wxTimerEvent &evt)
                  {
                      g_avmag_waterfall[index] = BETA * g_avmag_waterfall[index] + (1.0 - BETA) * rxSpectrum[index];
                  }
-                 memcpy(g_avmag_spectrum, g_avmag_waterfall, sizeof(g_avmag_waterfall));
               }
          }
          else
@@ -1947,136 +1395,7 @@ void MainFrame::OnTimer(wxTimerEvent &evt)
             // painted the waterfall solid instead of blanking it. Fill
             // with MIN_MAG_DB instead so it actually reads as quiet/black.
             std::fill_n(g_avmag_waterfall, MODEM_STATS_NSPEC, MIN_MAG_DB);
-            memcpy(g_avmag_spectrum, g_avmag_waterfall, sizeof(g_avmag_waterfall));
          }
-
-        // SNR text box and gauge ------------------------------------------------------------
-
-        // LP filter freedvInterface.getCurrentRxModemStats()->snr_est some more to stabilise the
-        // display. freedvInterface.getCurrentRxModemStats()->snr_est already has some low pass filtering
-        // but we need it fairly fast to activate squelch.  So we
-        // optionally perform some further filtering for the display
-        // version of SNR.  The "Slow" checkbox controls the amount of
-        // filtering.  The filtered snr also controls the squelch
-
-        float snr_limited;
-        // some APIs pass us invalid values, so lets trap it rather than bombing
-        float snrEstimate = freedvInterface.getSNREstimate();
-        if (!(isnan(snrEstimate) || isinf(snrEstimate)) && syncState) {
-            g_snr = m_snrBeta*g_snr + (1.0 - m_snrBeta)*snrEstimate;
-        }
-        snr_limited = g_snr;
-        if (snr_limited < -5.0) snr_limited = -5.0;
-        if (snr_limited > 40.0) snr_limited = 40.0;
-        wxString snrString = wxString::Format(SNR_FORMAT_STR, (int)(g_snr + 0.5));
-
-        if (syncState)
-        {
-            m_textSNR->SetLabel(snrString);
-            m_gaugeSNR->SetValue((int)(snr_limited+5));
-        }
-        else
-        {
-            m_textSNR->SetLabel(NO_SNR_LABEL);
-            m_gaugeSNR->SetValue(0);
-        }
-
-        if (timerId == ID_TIMER_SNR && (!halfDuplexState || !txState))
-        {
-            float snr = freedvInterface.getSync() ? g_snr : NO_SNR_VAL;
-            snr = std::min(snr, (float)MAX_SNR_VAL);
-            snr = std::max(snr, (float)NO_SNR_VAL);
-            m_panelSNR->add_new_sample(snr);
-            m_panelSNR->refreshData();
-        }
-        
-        // sync LED (Colours don't work on Windows) ------------------------
-
-        auto state = g_State.load(std::memory_order_acquire);
-        if (m_textSync->IsEnabled())
-        {
-            auto oldColor = m_textSync->GetForegroundColour();
-            wxColour newColor = state ? wxColour( 0, 255, 0 ) : wxColour( 255, 0, 0 ); // green if sync, red otherwise
-        
-            if (state) 
-            {
-                if (g_prev_State.load(std::memory_order_acquire) == 0) 
-                {
-                    g_resyncs++;
-                }
-            }
-        
-            if (oldColor != newColor)
-            {
-                m_textSync->SetForegroundColour(newColor);
-                m_textSync->SetLabel(MODEM_LABEL);
-                m_textSync->Refresh();
-            }
-        }
-        g_prev_State.store(state, std::memory_order_release);
-
-        // update stats on main page
-        wxString modeString = wxString::Format(MODE_FORMAT_STR, freedvInterface.getCurrentModeStr());
-        bool relayout = 
-            m_textCurrentDecodeMode->GetLabel() != modeString &&
-            !realigned_;
-        m_textCurrentDecodeMode->SetLabel(modeString);
-        if (relayout)
-        {
-            // XXX - force resize events to make mode string re-center itself.
-            wxSize minSize = GetSize();
-            auto w = minSize.GetWidth();
-            auto h = minSize.GetHeight();
-
-            CallAfter([=, this]()
-            {
-                SetSize(w, h);
-            });
-            CallAfter([=, this]()
-            {
-                SetSize(w + 1, h + 1);
-            });
-            CallAfter([=, this]()
-            {
-                SetSize(w, h);
-            });
-            
-            realigned_ = true;
-        }
-
-        wxString freqOffset = wxString::Format(FRQ_OFF_FMT, freedvInterface.getCurrentRxModemOffset());
-        m_textFreqOffset->SetLabel(freqOffset);
-
-        {
-            wxString bits = wxString::Format(BITS_FMT, freedvInterface.getTotalBits()); 
-            m_textBits->SetLabel(bits);
-
-            wxString errors = wxString::Format(ERRS_FMT, freedvInterface.getTotalBitErrors()); 
-            m_textErrors->SetLabel(errors);
-
-            float b = (float)freedvInterface.getTotalBitErrors()/(1E-6+freedvInterface.getTotalBits());
-            wxString ber = wxString::Format(BER_FMT, b); 
-            m_textBER->SetLabel(ber);
-
-            wxString resyncs = wxString::Format(RESYNC_FMT, g_resyncs); 
-            m_textResyncs->SetLabel(resyncs);
-
-            wxString syncMetric = wxString::Format(SYNC_FMT, freedvInterface.getCurrentRxModemStats()->sync_metric);
-            m_textSyncMetric->SetLabel(syncMetric);
-
-            // Codec 2 700D/E "auto EQ" equaliser variance
-            auto var = freedvInterface.getVariance();
-            wxString var_string = wxString::Format(VAR_FMT, var);
-            m_textCodec2Var->SetLabel(var_string);
-        }
-
-        if (state) {
-
-            {
-                wxString clockOffset = wxString::Format(CLK_OFF_FMT, (int)round(freedvInterface.getCurrentRxModemStats()->clock_offset*1E6) % 10000);
-                m_textClockOffset->SetLabel(clockOffset);
-            }
-        }
 
         /* FIFO and PortAudio under/overflow debug counters */
         optionsDlg->DisplayFifoPACounters();
@@ -2090,50 +1409,22 @@ void MainFrame::OnTimer(wxTimerEvent &evt)
         }
     }
     
-    if (timerId == ID_TIMER_SPEECH_IN ||
-        timerId == ID_TIMER_DEMOD_IN)
+    if (timerId == ID_TIMER_DEMOD_IN && !txState && m_RxRunning)
     {
-        // Level Gauge -----------------------------------------------------------------------
+        // Level Gauge: From Radio peaks -------------------------------------
+        int maxDemodIn = 0;
+        for(int i=0; i<WAVEFORM_PLOT_BUF; i++)
+            if (maxDemodIn < abs(demodInPlotSamples[i]))
+                maxDemodIn = abs(demodInPlotSamples[i]);
 
-        bool updated = false;
-        if (timerId == ID_TIMER_DEMOD_IN && !txState && m_RxRunning)
-        {
-            // receive mode - display From Radio peaks
-            int maxDemodIn = 0;
-            for(int i=0; i<WAVEFORM_PLOT_BUF; i++)
-                if (maxDemodIn < abs(demodInPlotSamples[i]))
-                    maxDemodIn = abs(demodInPlotSamples[i]);
+        // peak from last second
+        if (maxDemodIn > m_maxLevel)
+            m_maxLevel = maxDemodIn;
 
-            // peak from last second
-            if (maxDemodIn > m_maxLevel)
-                m_maxLevel = maxDemodIn;
-
-            updated = true;
-        }
-        else if (timerId == ID_TIMER_SPEECH_IN)
-        {
-            // transmit mode - display From Mic peaks
-
-            // peak from this DT sampling period
-            int maxSpeechIn = 0;
-            for(int i=0; i<WAVEFORM_PLOT_BUF; i++)
-                if (maxSpeechIn < abs(speechInPlotSamples[i]))
-                    maxSpeechIn = abs(speechInPlotSamples[i]);
-
-            // peak from last second
-            if (maxSpeechIn > m_maxLevel)
-                m_maxLevel = maxSpeechIn;
-
-           updated = true;
-        }
-
-        if (updated)
-        {
-            // Peak Reading meter: updates peaks immediately, then slowly decays
-            int maxScaled = (int)(100.0 * ((float)m_maxLevel/32767.0));
-            m_gaugeLevel->SetValue(maxScaled);
-            m_maxLevel *= LEVEL_BETA;
-        }
+        // Peak Reading meter: updates peaks immediately, then slowly decays
+        int maxScaled = (int)(100.0 * ((float)m_maxLevel/32767.0));
+        m_gaugeLevel->SetValue(maxScaled);
+        m_maxLevel *= LEVEL_BETA;
     }
 }
 #endif
@@ -2206,129 +1497,31 @@ void MainFrame::OnExit(wxCommandEvent&)
     }
 }
 
-void MainFrame::OnChangeTxMode( wxCommandEvent& event )
-{
-    auto eventObject = (wxRadioButton*)event.GetEventObject();
-    auto newMode = g_mode;
-    if (eventObject == m_rb1600 || (eventObject == nullptr && m_rb1600->GetValue())) 
-    {
-        newMode = FREEDV_MODE_1600;
-    }
-    else if (eventObject == m_rb700d || (eventObject == nullptr && m_rb700d->GetValue())) 
-    {
-        newMode = FREEDV_MODE_700D;
-    }
-    else if (eventObject == m_rb700e || (eventObject == nullptr && m_rb700e->GetValue())) 
-    {
-        newMode = FREEDV_MODE_700E;
-    }
-
-    if (newMode != g_mode)
-    {
-        g_mode = newMode; 
-        if (freedvInterface.isRunning())
-        {
-            // Need to change the TX interface live.
-            freedvInterface.changeTxMode(g_mode);
-        }
-    
-        // Report TX change to registered reporters
-        auto txStatus = g_tx.load(std::memory_order_acquire);
-        for (auto& obj : wxGetApp().m_reporters)
-        {
-            obj->transmit(freedvInterface.getCurrentTxModeStr(), txStatus);
-        }
-    }
-}
-
 void MainFrame::performFreeDVOn_()
 {
     log_debug("Start .....");
     isModemRunning.store(false, std::memory_order_release);
-    g_queueResync.store(false, std::memory_order_release);
     endingTx.store(false, std::memory_order_release);
     g_tx.store(false, std::memory_order_release);
-    
-    syncState_ = false;
 
     executeOnUiThreadAndWait_([&]() 
     {
-        // Blank out spectrum plots. Note: this display's dB scale runs 0
+        // Blank out the spectrum. Note: this display's dB scale runs 0
         // (loudest) to MIN_MAG_DB (quietest) -- memset()'ing to zero bytes
         // sets every bin to 0.0 dB, the *loudest* possible value, not
         // silence. Fill with MIN_MAG_DB instead so it actually reads as
         // quiet/black.
         std::fill_n(g_avmag_waterfall, MODEM_STATS_NSPEC, MIN_MAG_DB);
-        std::fill_n(g_avmag_spectrum, MODEM_STATS_NSPEC, MIN_MAG_DB);
 
-        // Reset plot FIFOs
+        // Reset plot FIFO
         g_plotDemodInFifo.reset();
-        g_plotSpeechOutFifo.reset();
-        g_plotSpeechInFifo.reset();
-
-        m_txtCtrlCallSign->SetValue(wxT(""));
-        m_lastReportedCallsignListView->DeleteAllItems();
-        restoreCallsignListFromCsv_();
-        m_cboLastReportedCallsigns->Enable(m_lastReportedCallsignListView->GetItemCount() > 0);
-        m_cboLastReportedCallsigns->SetText(wxT(""));
-        
     });
-    
-    memset(m_callsign, 0, MAX_CALLSIGN);
-    m_pcallsign = m_callsign;
-
-    freedvInterface.resetReliableText();
     
     //
     // Start Running -------------------------------------------------
     //
 
-
-    // modify some button states when running
-    executeOnUiThreadAndWait_([&]() 
-    {
-        m_textSync->Enable();
-        m_textCurrentDecodeMode->Enable();
-        
-        // determine what mode we are using
-        wxCommandEvent tmpEvent;
-        OnChangeTxMode(tmpEvent);
-
-        m_rb1600->Disable();
-        m_rb700d->Disable();
-        m_rb700e->Disable();
-        freedvInterface.addRxMode(g_mode);
-        
-        // Default voice keyer sample rate to 8K. The exact voice keyer
-        // sample rate will be determined when the .wav file is loaded.
-        g_sfTxFs.store(FS, std::memory_order_release);
-    
-        wxGetApp().m_prevMode = g_mode;
-        freedvInterface.start(g_mode, wxGetApp().appConfiguration.fifoSizeMs, true, false);
-
-        g_error_hist = new short[MODEM_STATS_NC_MAX*2];
-        g_error_histn = new short[MODEM_STATS_NC_MAX*2];
-        int i;
-        for(i=0; i<2*MODEM_STATS_NC_MAX; i++) {
-            g_error_hist[i] = 0;
-            g_error_histn[i] = 0;
-        }
-
-        log_debug("freedv_get_n_speech_samples(tx): %d", freedvInterface.getTxNumSpeechSamples());
-        log_debug("freedv_get_speech_sample_rate(tx): %d", freedvInterface.getTxSpeechSampleRate());
-    
-        // adjust spectrum and waterfall freq scaling base on mode
-        m_panelSpectrum->setFreqScale(MODEM_STATS_NSPEC*((float)MAX_F_HZ/(freedvInterface.getTxModemSampleRate()/2)));
-        m_panelWaterfall->setFs(freedvInterface.getTxModemSampleRate());
-    });
-
-    g_State.store(0, std::memory_order_release);
-    g_prev_State.store(0, std::memory_order_release);
-    g_snr = 0.0;
     g_half_duplex.store(wxGetApp().appConfiguration.halfDuplexMode, std::memory_order_release);
-
-    m_pcallsign = m_callsign;
-    memset(m_callsign, 0, sizeof(m_callsign));
 
     m_maxLevel = 0;
     executeOnUiThreadAndWait_([&]() 
@@ -2422,12 +1615,7 @@ void MainFrame::performFreeDVOn_()
 
         #ifdef _USE_TIMER
                     m_plotTimer.Start(_REFRESH_TIMER_PERIOD, wxTIMER_CONTINUOUS);
-                    m_plotWaterfallTimer.Start(_REFRESH_TIMER_PERIOD, wxTIMER_CONTINUOUS);
-                    m_plotSpectrumTimer.Start(_REFRESH_TIMER_PERIOD, wxTIMER_CONTINUOUS);
-                    m_plotSpeechInTimer.Start(_REFRESH_TIMER_PERIOD, wxTIMER_CONTINUOUS);
-                    m_plotSpeechOutTimer.Start(_REFRESH_TIMER_PERIOD, wxTIMER_CONTINUOUS);
                     m_plotDemodInTimer.Start(_REFRESH_TIMER_PERIOD, wxTIMER_CONTINUOUS);
-                    m_plotSNRTimer.Start(_REFRESH_TIMER_PERIOD, wxTIMER_CONTINUOUS);
 
                     m_updFreqStatusTimer.Start(1000); // every 1 second[UP]
         #endif // _USE_TIMER
@@ -2472,12 +1660,7 @@ void MainFrame::performFreeDVOff_()
         m_btnTogTune->Enable(false);
 
         m_plotTimer.Stop();
-        m_plotWaterfallTimer.Stop();
-        m_plotSpectrumTimer.Stop();
-        m_plotSpeechInTimer.Stop();
-        m_plotSpeechOutTimer.Stop();
         m_plotDemodInTimer.Stop();
-        m_plotSNRTimer.Stop();
         m_updFreqStatusTimer.Stop(); // [UP]
     });
 #endif // _USE_TIMER
@@ -2535,25 +1718,10 @@ void MainFrame::performFreeDVOff_()
     stopRxStream();
          
     wxGetApp().m_reporters.clear();
-    
-    // FreeDV clean up
-    delete[] g_error_hist;
-    delete[] g_error_histn;
-    freedvInterface.stop();
-    
 
     executeOnUiThreadAndWait_([&]() 
     {
-        m_textSync->Disable();
-        m_textCurrentDecodeMode->Disable();
-
-        m_togBtnAnalog->Disable();
         m_btnTogPTT->Disable();
-    
-        m_rb1600->Enable();
-        m_rb700d->Enable();
-        m_rb700e->Enable();
-        
     });
 }
 
@@ -2568,7 +1736,6 @@ void MainFrame::OnTogBtnOnOff(wxCommandEvent&)
     
     // Disable buttons while on/off is occurring
     m_togBtnOnOff->Enable(false);
-    m_togBtnAnalog->Enable(false);
     m_btnTogPTT->Enable(false);
         
     // we are attempting to start
@@ -2593,7 +1760,6 @@ void MainFrame::OnTogBtnOnOff(wxCommandEvent&)
                     m_RxRunning &&
                     (g_nSoundCards == 2);
                 
-                m_togBtnAnalog->Enable(m_RxRunning);
                 m_btnTogPTT->Enable(txEnabled);
                 optionsDlg->setSessionActive(m_RxRunning);
 
@@ -2643,7 +1809,6 @@ void MainFrame::OnTogBtnOnOff(wxCommandEvent&)
 
             // On/Off actions complete, re-enable button.
             executeOnUiThreadAndWait_([&]() {
-                m_togBtnAnalog->Enable(m_RxRunning);
                 m_btnTogPTT->Enable(m_RxRunning);
                 optionsDlg->setSessionActive(m_RxRunning);
                 m_togBtnOnOff->SetValue(m_RxRunning);
@@ -2771,12 +1936,15 @@ void MainFrame::startRxStream()
         g_rxUserdata->infifo1 = new GenericFIFO<short>(soundCard1InFifoSizeSamples);
         g_rxUserdata->tmpReadRxBuffer_ = std::make_unique<short[]>(soundCard1InFifoSizeSamples);
 
+        // The radio output FIFO holds at least 480 ms: three of the voice
+        // modem's 160 ms frames, which is what sized it before that modem
+        // went and what the chat transmitter's timing was tuned against.
+        constexpr int MIN_TX_OUT_FIFO_MS = 480;
         int soundCard1OutFifoSizeSamples = 0;
         if (g_nSoundCards == 2)
         {
-            soundCard1OutFifoSizeSamples = std::max(
-                3 * (freedvInterface.getTxNNomModemSamples() * wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.sampleRate) / freedvInterface.getTxModemSampleRate(),
-                m_fifoSize_ms*wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.sampleRate / 1000);
+            soundCard1OutFifoSizeSamples = std::max(MIN_TX_OUT_FIFO_MS, m_fifoSize_ms) *
+                wxGetApp().appConfiguration.audioConfiguration.soundCard1Out.sampleRate / 1000;
             g_rxUserdata->outfifo1 = new GenericFIFO<short>(soundCard1OutFifoSizeSamples);
             g_rxUserdata->tmpWriteTxBuffer_ = std::make_unique<short[]>(soundCard1OutFifoSizeSamples);
         }
@@ -2895,28 +2063,6 @@ void MainFrame::startRxStream()
         for (int i=0; i<4; i++) {
             g_AEstatus1[i] = g_AEstatus2[i] = 0;
         }
-
-        // These FIFOs interface between the 20ms tx/rxProcessing()
-        // loop and the demodulator, which requires a variable number
-        // of input samples to adjust for timing clock differences
-        // between remote tx and rx.  These FIFOs also help with the
-        // different processing block size of different FreeDV modes.
-
-        // TODO: might be able to tune these on a per waveform basis, or refactor
-        // to a neater design with less layers of FIFOs
-
-        int modem_samplerate, rxInFifoSizeSamples, rxOutFifoSizeSamples;
-        modem_samplerate = freedvInterface.getRxModemSampleRate();
-        rxInFifoSizeSamples = freedvInterface.getRxNumModemSamples();
-        rxOutFifoSizeSamples = freedvInterface.getRxNumSpeechSamples();
-
-        // add an extra 40ms to give a bit of headroom for processing loop adding samples
-        // which operates on 20ms buffers
-
-        rxInFifoSizeSamples += 0.04*modem_samplerate;
-        rxOutFifoSizeSamples += 0.04*modem_samplerate;
-
-        log_debug("rxInFifoSizeSamples: %d rxOutFifoSizeSamples: %d", rxInFifoSizeSamples, rxOutFifoSizeSamples);
 
         // optional tone in left channel to reliably trigger vox
 
@@ -3180,7 +2326,7 @@ void MainFrame::OnTxOutAudioData_(IAudioDevice& dev, void* data, size_t size, vo
             // Load once before the loop and store once after to avoid per-sample atomic
             // memory barriers, which can cause the audio callback to overrun its deadline.
             auto sineWaveSampleNumber = cbData->tuneSineWaveSampleNumber.load(std::memory_order_acquire);
-            const double phaseIncrement = 2.0 * M_PI * FDMDV_FCENTRE / sr;
+            const double phaseIncrement = 2.0 * M_PI * TUNE_TONE_FREQ / sr;
             for (unsigned long index = 0; index < size; index++)
             {
                 auto carrierSample = txLevel * sin(phaseIncrement * sineWaveSampleNumber);

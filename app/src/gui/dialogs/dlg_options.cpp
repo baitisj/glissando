@@ -23,7 +23,6 @@
 #include <wx/numformatter.h>
 #include "dlg_options.h"
 
-extern FreeDVInterface freedvInterface;
 
 // F13-F24 on Linux (and possibly other platforms) return values different
 // than how they're defined in wxWidgets. These constants are so we can
