@@ -105,6 +105,37 @@ the settings are under `HKEY_CURRENT_USER\Software\Glissando`. Nothing is
 imported from an existing FreeDV setup, so the first start runs Easy setup.
 Glissando's own options are in the `[Glissando]` section.
 
+### Preset frequencies
+
+`Presets` ships with one calling frequency per HF band, each inside the data
+segment (US 47 CFR 97.305 and the IARU Region 2 band plan) and just below the
+FT8, JS8 and PSK31 watering holes, so the whole signal stays clear of them. A
+solo frame sits 330 to 880 Hz above the dial; the duet voice reaches about
+2.6 kHz, and the melody offset adds up to 250 Hz either way. All are USB dials.
+
+| Band | Dial (MHz) | Why there |
+|---|---|---|
+| 160 m | 1.846 | Above FT8 (1.840) and JS8 (1.842), inside Region 2's 1.840-1.850 digital slot. |
+| 80 m | 3.570 | The old JT65 spot, now quiet; the duet still ends below FT8 at 3.573. |
+| 60 m | 5.361 | In the power-limited WRC-15 band (5.3515-5.3665, US General and up since 2026-02-13, 9.15 W ERP): above FT8 (5.357), with the duet still ending below the 5.366 weak-signal slot. |
+| 40 m | 7.067 | Often quiet in AG7EW's operating; below PSK31 (7.070) and FT8 (7.074), well away from Winlink and VarAC near 7.100. |
+| 30 m | 10.133 | Between JS8 (10.130) and FT8 (10.136). 30 m is narrow, so this is the tightest fit. |
+| 20 m | 14.067 | Often quiet in AG7EW's operating; below PSK31 (14.070), FT8 (14.074) and FT4 (14.080). |
+| 17 m | 18.097 | Just below FT8 (18.100), in Region 2's 18.095-18.105 digital slot. |
+| 15 m | 21.067 | The 7.067/14.067 pattern: below PSK31 (21.070) and FT8 (21.074). |
+| 12 m | 24.911 | Just below FT8 (24.915); inside the US data segment, though Region 2 marks it CW. |
+| 10 m | 28.067 | The same pattern, below PSK31 and FT8 (28.070-28.074) and far from the beacons at 28.200. |
+
+On 60 m keep to 9.15 W ERP (15 W EIRP outside the US); the app does not set
+power. The 20 Hz weak-signal slot at 5.366-5.3665 is too narrow for any
+Glissando melody, and the older 60 m channels want a data signal centred on
+the channel, which a 330-880 Hz melody is not without a hand-set offset. The
+list is edited
+in Preferences, Options. A saved list still equal to the voice frequencies
+older builds inherited from FreeDV (nearly all in phone segments, where chat
+refuses to transmit) is replaced with this one on start; an edited list is
+kept.
+
 ## How chat rides on Glissando
 
 A Glissando frame carries 77 bits. `modem/GlissandoLink.h` cuts each

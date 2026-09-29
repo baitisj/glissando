@@ -126,6 +126,15 @@ void testDataSegmentsArePermitted()
     CHECK(permitted(1296100000)); // 23 cm
 }
 
+// The Presets list the app ships (config/ReportingConfiguration.cpp) must all
+// be dials where chat may transmit.
+void testDefaultPresetsArePermitted()
+{
+    const uint64_t presets[] = {1846000,  3570000,  5361000,  7067000,  10133000,
+                                14067000, 18097000, 21067000, 24911000, 28067000};
+    for (uint64_t dialHz : presets) CHECK(permitted(dialHz));
+}
+
 // The dial is not where the signal is: the dial has to be the margin inside
 // a segment, at both ends, for the signal to be inside it.
 void testTheMarginInsideEachSegment()
@@ -179,6 +188,7 @@ int main()
     testPhoneSegmentsAreRefused();
     testOutsideTheAmateurBandsIsRefused();
     testDataSegmentsArePermitted();
+    testDefaultPresetsArePermitted();
     testTheMarginInsideEachSegment();
     testSixtyMetreChannels();
     testUnknownFrequencyIsRefused();

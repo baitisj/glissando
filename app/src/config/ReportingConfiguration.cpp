@@ -28,28 +28,61 @@
 #include "../defines.h"
 #include "ReportingConfiguration.h"
 
+namespace
+{
+
+// The list inherited from FreeDV: its voice calling frequencies, nearly all in
+// phone segments where the data segment check will not let chat transmit. A
+// saved list still equal to it was never edited, so it gets the new defaults.
+const uint64_t FREEDV_FREQUENCY_LIST_HZ[] = {
+    1870000, 3625000, 3643000, 3693000, 3697000, 3803000, 5403500, 5368500, 7177000,
+    7197000, 14236000, 14240000, 18118000, 21313000, 24933000, 28330000, 28720000, 10489640000ULL,
+};
+
+// A saved frequency, in MHz in US format whatever the locale, to Hz.
+uint64_t storedFrequencyHz(wxString const& val)
+{
+    wxStringTokenizer tok(val, ".");
+    wxString wholeNumber = tok.GetNextToken();
+    wxString fraction = "0";
+    if (tok.HasMoreTokens())
+    {
+        fraction = tok.GetNextToken();
+    }
+
+    if (fraction.Length() < 6)
+    {
+        fraction += wxString('0', 6 - fraction.Length());
+    }
+
+    long long hz = 0;
+    long long mhz = 0;
+    wholeNumber.ToLongLong(&mhz);
+    fraction.ToLongLong(&hz);
+    return mhz * 1000000 + hz;
+}
+
+}
+
 ReportingConfiguration::ReportingConfiguration()
     : reportingCallsign("/Reporting/Callsign", _(""))
     , reportingFrequency("/Reporting/Frequency", 0)
     , reportingFrequencyList("/Reporting/FrequencyList", {
-        _("1.8700"),
-        _("3.6250"),
-        _("3.6430"),
-        _("3.6930"),
-        _("3.6970"),
-        _("3.8030"),
-        _("5.4035"),
-        _("5.3685"),
-        _("7.1770"),
-        _("7.1970"),
-        _("14.2360"),
-        _("14.2400"),
-        _("18.1180"),
-        _("21.3130"),
-        _("24.9330"),
-        _("28.3300"),
-        _("28.7200"),
-        _("10489.6400"),
+        // Where Glissando calls: inside the data segments (US 47 CFR 97.305
+        // and the IARU Region 2 plan), just below the FT8/JS8/PSK31 crowd, so
+        // the whole signal -- 330 Hz to 2.9 kHz above the dial with the duet
+        // and a full melody offset -- stays clear of them. docs/APP.md has
+        // the reasons band by band.
+        _("1.8460"),
+        _("3.5700"),
+        _("5.3610"),
+        _("7.0670"),
+        _("10.1330"),
+        _("14.0670"),
+        _("18.0970"),
+        _("21.0670"),
+        _("24.9110"),
+        _("28.0670"),
     })
         
     , reportingFrequencyAsKhz("/Reporting/FrequencyAsKHz", false)
@@ -63,24 +96,7 @@ ReportingConfiguration::ReportingConfiguration()
             // Frequencies are unfortunately saved in US format (legacy behavior). We need 
             // to manually parse and convert to Hz, then output MHz values in the user's current
             // locale.
-            wxStringTokenizer tok(val, ".");
-            wxString wholeNumber = tok.GetNextToken();
-            wxString fraction = "0";
-            if (tok.HasMoreTokens())
-            {
-                fraction = tok.GetNextToken();
-            }
-
-            if (fraction.Length() < 6)
-            {
-                fraction += wxString('0', 6 - fraction.Length());
-            }
-
-            long long hz = 0;
-            long long mhz = 0;
-            wholeNumber.ToLongLong(&mhz);
-            fraction.ToLongLong(&hz);
-            uint64_t freq = mhz * 1000000 + hz;
+            uint64_t freq = storedFrequencyHz(val);
 
             if (reportingFrequencyAsKhz)
             {
@@ -132,6 +148,20 @@ void ReportingConfiguration::load(wxConfigBase* config)
     load_(config, reportingFrequencyAsKhz);
     
     load_(config, reportingFrequencyList);
+
+    std::vector<wxString> saved = reportingFrequencyList.getWithoutProcessing();
+    bool untouchedFreeDvList = saved.size() == sizeof(FREEDV_FREQUENCY_LIST_HZ) / sizeof(FREEDV_FREQUENCY_LIST_HZ[0]);
+    for (size_t i = 0; untouchedFreeDvList && i < saved.size(); i++)
+    {
+        // Saving truncates MHz times a million, so allow a few Hz of rounding.
+        uint64_t hz = storedFrequencyHz(saved[i]);
+        uint64_t freeDvHz = FREEDV_FREQUENCY_LIST_HZ[i];
+        untouchedFreeDvList = (hz > freeDvHz ? hz - freeDvHz : freeDvHz - hz) <= 5;
+    }
+    if (untouchedFreeDvList)
+    {
+        reportingFrequencyList.setWithoutProcessing(reportingFrequencyList.getDefaultVal());
+    }
 
     load_(config, csvLogFilePath);
 
