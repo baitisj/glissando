@@ -592,7 +592,7 @@ bool MainApp::OnCmdLineParsed(wxCmdLineParser& parser)
         snprintf(prefix, prefix_size, " [%u]", ++counter);
     });
         
-    log_info("FreeDV version %s starting", GetFreeDVVersion().c_str());
+    log_info("Glissando version %s starting", GetFreeDVVersion().c_str());
 
     if (!wxApp::OnCmdLineParsed(parser))
     {
@@ -831,21 +831,6 @@ bool MainApp::OnInit()
     
     golay23_init();
 
-#if defined(UNOFFICIAL_RELEASE)
-    // Terminate the application if the current date > expiration date
-    wxDateTime buildDate(wxInvalidDateTime); // silence UBSan error on some platforms
-    wxString::const_iterator iter;
-    buildDate.ParseDate(FREEDV_BUILD_DATE, &iter);
-    
-    auto expireDate = buildDate + EXPIRES_AFTER_TIMEFRAME;
-    auto currentDate = wxDateTime::Now();
-    
-    if (currentDate > expireDate)
-    {
-        wxMessageBox("This version of FreeDV has expired. Please download a new version from freedv.org.", "Application Expired");
-        return false;
-    }
-#endif // UNOFFICIAL_RELEASE
     
     m_rTopWindow = wxRect(0, 0, 0, 0);
 
@@ -1072,7 +1057,7 @@ void MainFrame::loadConfiguration_()
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=--=-=-=-=
 // Class MainFrame(wxFrame* pa->ent) : TopFrame(parent)
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=--=-=-=-=
-MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("FreeDV ") + wxString::FromUTF8(GetFreeDVVersion().c_str())),
+MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("Glissando ") + wxString::FromUTF8(GetFreeDVVersion().c_str())),
 
     // Create needed strings in advance so we don't need to continually 
     // reallocate memory every time through OnTimer() below.
@@ -1113,20 +1098,9 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("FreeDV ")
     // Add config file name to title bar if provided at the command line.
     if (wxGetApp().customConfigFileName != "")
     {
-        SetTitle(wxString::Format("%s (%s)", _("FreeDV ") + wxString::FromUTF8(GetFreeDVVersion().c_str()), wxGetApp().customConfigFileName));
+        SetTitle(wxString::Format("%s (%s)", _("Glissando ") + wxString::FromUTF8(GetFreeDVVersion().c_str()), wxGetApp().customConfigFileName));
     }
     
-#if defined(UNOFFICIAL_RELEASE)
-    wxDateTime buildDate(wxInvalidDateTime); // silence UBSan warning on some platforms
-    wxString::const_iterator iter;
-    buildDate.ParseDate(FREEDV_BUILD_DATE, &iter);
-    
-    auto expireDate = buildDate + EXPIRES_AFTER_TIMEFRAME;
-    auto currentTitle = GetTitle();
-    
-    currentTitle += wxString::Format(" [Expires %s]", expireDate.FormatDate());
-    SetTitle(currentTitle);
-#endif // defined(UNOFFICIAL_RELEASE)
     
     m_textMessagingDialog = nullptr;
     m_snoopDialog = nullptr;

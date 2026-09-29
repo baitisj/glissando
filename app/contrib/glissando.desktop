@@ -1,10 +1,10 @@
 [Desktop Entry]
 Version=1.0
-Name=FreeDV
+Name=Glissando
 Exec=glissando
 Icon=glissando
 Type=Application
 Terminal=false
 Categories=GTK;GNOME;AudioVideo;Audio;HamRadio;
-Comment=Digital Voice mode for HF Radio
-Keywords=Radio;HAM;HF;RF;codec2;voice;modem;
+Comment=Chirp text chat for HF amateur radio
+Keywords=Radio;HAM;HF;RF;chirp;chat;modem;

@@ -211,6 +211,14 @@ Press Engage in both consoles and send from either chat window.
 
 ## Packaging
 
-`app/appimage/make-appimage.sh` already carries the console, since it is
-part of the `glissando` binary. A Glissando-first AppImage needs a desktop
-entry that runs `glissando`, an icon, and a CI job to build it.
+`app/appimage/make-appimage.sh` builds a Release tree in
+`app/build-appimage` and packages it as
+`app/appimage/Glissando-<version>-x86_64.AppImage` with the Arachnia icon.
+The version comes from `app/CMakeLists.txt` (`PROJECT_VERSION`) plus the
+`FREEDV_VERSION_TAG` (`beta` by default) and the git hash, for example
+`0.1.0-beta-1a2b3c4`; it shows in the console's title and the log. Set
+`BUILD_DIR` to package a tree you have already built.
+
+The AppImage carries the libraries of the system it was built on, so build
+it on the oldest Linux you want it to run on (the beta 0.1 AppImage was
+built on Ubuntu 24.04 and needs glibc 2.39 or newer).

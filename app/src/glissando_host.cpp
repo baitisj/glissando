@@ -13,6 +13,7 @@
 #include <wx/numformatter.h>
 
 #include "main.h"
+#include "git_version.h"
 #include "gui/dialogs/dlg_snoop.h"
 #include "gui/dialogs/dlg_text_messaging.h"
 #include "pipeline/TextMessagingModem.h"
@@ -101,6 +102,7 @@ void MainFrame::openGlissandoConsole()
         if (position.x < 0 || position.y < 0) position.SetPosition(wxDefaultPosition);
 
         m_glissandoConsole = new GlissandoConsole(this, this, loadGlissandoSettings_(), position);
+        m_glissandoConsole->SetTitle(_("Glissando ") + wxString::FromUTF8(GetFreeDVVersion().c_str()));
         applyGlissandoToModem_(true);
         log_info("Glissando console opened; text chat now uses Glissando");
     }
