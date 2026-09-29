@@ -27,7 +27,6 @@
 #include "WxWidgetsConfigStore.h"
 #include "ConfigurationDataElement.h"
 #include "AudioConfiguration.h"
-#include "FilterConfiguration.h"
 #include "RigControlConfiguration.h"
 #include "ReportingConfiguration.h"
 
@@ -38,7 +37,6 @@ public:
     virtual ~FreeDVConfiguration() = default;
     
     AudioConfiguration audioConfiguration;
-    FilterConfiguration filterConfiguration;
     RigControlConfiguration rigControlConfiguration;
     ReportingConfiguration reportingConfiguration;
     
@@ -72,13 +70,8 @@ public:
     ConfigurationDataElement<int> pttKeyCode;
     ConfigurationDataElement<bool> pttMomentaryMode;
 
-    ConfigurationDataElement<wxString> voiceKeyerWaveFilePath;
-    ConfigurationDataElement<wxString> voiceKeyerWaveFile;
-    ConfigurationDataElement<int> voiceKeyerRxPause;
-    ConfigurationDataElement<int> voiceKeyerRepeats;
     
     ConfigurationDataElement<bool> halfDuplexMode;
-    ConfigurationDataElement<bool> multipleReceiveEnabled;
 
     // Text chat transmits only where US rules permit a data emission (47 CFR
     // 97.305), and not at all while the operating frequency is unknown. On by
@@ -109,41 +102,25 @@ public:
     ConfigurationDataElement<long> glissandoWindowTop;
     ConfigurationDataElement<long> glissandoWindowWidth;
     ConfigurationDataElement<long> glissandoWindowHeight;
-    ConfigurationDataElement<bool> multipleReceiveOnSingleThread;
     
-    ConfigurationDataElement<wxString> quickRecordRawPath;
-    ConfigurationDataElement<wxString> quickRecordDecodedPath;
     
-    ConfigurationDataElement<bool> freedv700Clip;
-    ConfigurationDataElement<bool> freedv700TxBPF;
     
-    ConfigurationDataElement<int> noiseSNR;
     
     ConfigurationDataElement<bool> debugConsoleEnabled; // note: Windows only
     
     ConfigurationDataElement<bool> snrSlow;
     
-    ConfigurationDataElement<bool> debugVerbose;
-    ConfigurationDataElement<bool> apiVerbose;
     
-    ConfigurationDataElement<int> waterfallColor;
-    ConfigurationDataElement<unsigned int> statsResetTimeSecs;
     
     ConfigurationDataElement<int> currentFreeDVMode;
     
-    ConfigurationDataElement<int> currentSpectrumAveraging;
     
-    ConfigurationDataElement<bool> experimentalFeatures;
-    ConfigurationDataElement<wxString> tabLayout;
 
-    ConfigurationDataElement<bool> monitorVoiceKeyerAudio;
-    ConfigurationDataElement<float> monitorVoiceKeyerAudioVol;
     ConfigurationDataElement<bool> monitorTxAudio;
     ConfigurationDataElement<float> monitorTxAudioVol;
 
     ConfigurationDataElement<int> txRxDelayMilliseconds;
 
-    ConfigurationDataElement<bool> showDecodeStats;
 
     ConfigurationDataElement<bool> autoStartOnLaunch;
 

@@ -228,49 +228,12 @@ void FreeDVInterface::stop()
     rxMode_.store(0, std::memory_order_release);
 }
 
-void FreeDVInterface::setRunTimeOptions(bool clip, bool bpf)
-{
-    for (auto& dv : dvObjects_)
-    {
-        freedv_set_clip(dv, clip);   // 700D/700E
-        freedv_set_tx_bpf(dv, bpf);  // 700D/700E
-    }
-}
-
-bool FreeDVInterface::usingTestFrames() const
-{
-    bool result = false;
-    for (auto& dv : dvObjects_)
-    {
-        result |= freedv_get_test_frames(dv);
-    }
-    return result;
-}
-
-void FreeDVInterface::resetTestFrameStats()
-{
-    for (auto& dv : dvObjects_)
-    {
-        freedv_set_test_frames(dv, 1);
-    }
-    resetBitStats();
-}
-
 void FreeDVInterface::resetBitStats()
 {
     for (auto& dv : dvObjects_)
     {
         freedv_set_total_bits(dv, 0);
         freedv_set_total_bit_errors(dv, 0);
-    }
-}
-
-void FreeDVInterface::setTestFrames(bool testFrames, bool combine)
-{
-    for (auto& dv : dvObjects_)
-    {
-        freedv_set_test_frames(dv, testFrames);
-        freedv_set_test_frames_diversity(dv, combine);
     }
 }
 
@@ -382,22 +345,6 @@ int FreeDVInterface::getSync() const
     return sync_.load(std::memory_order_acquire);
 }
 
-void FreeDVInterface::setEq(int val)
-{
-    for (auto& dv : dvObjects_)
-    {
-        freedv_set_eq(dv, val);
-    }
-}
-
-void FreeDVInterface::setCarrierAmplitude(int c, float amp)
-{
-    for (auto& dv : dvObjects_)
-    {
-        freedv_set_carrier_ampl(dv, c, amp);
-    }
-}
-
 void FreeDVInterface::setVerbose(bool val)
 {
     for (auto& dv : dvObjects_)
@@ -449,26 +396,6 @@ int FreeDVInterface::getTxNNomModemSamples() const FREEDV_NONBLOCKING
 {
     assert(currentTxMode_ != nullptr);
     return freedv_get_n_nom_modem_samples(currentTxMode_);   
-}
-
-void FreeDVInterface::setLpcPostFilter(int enable, int bassBoost, float beta, float gamma)
-{
-    for (auto& dv : dvObjects_)
-    {
-        struct CODEC2 *c2 = freedv_get_codec2(dv);
-        if (c2 != NULL) 
-        {
-            codec2_set_lpc_post_filter(c2, enable, bassBoost, beta, gamma);
-        }
-    }
-}
-
-void FreeDVInterface::setTextVaricodeNum(int num)
-{
-    for (auto& dv : dvObjects_)
-    {
-        freedv_set_varicode_code_num(dv, num);
-    }
 }
 
 int FreeDVInterface::getRxModemSampleRate() const
@@ -632,8 +559,6 @@ IPipelineStep* FreeDVInterface::createTransmitPipeline(
 IPipelineStep* FreeDVInterface::createReceivePipeline(
     int inputSampleRate, int outputSampleRate,
     realtime_fp<std::atomic<int>*()> const& getRxStateFn,
-    realtime_fp<int()> const& getChannelNoiseFn,
-    realtime_fp<int()> const& getChannelNoiseSnrFn,
     realtime_fp<float()> const& getFreqOffsetFn,
     realtime_fp<float*()> const& getSigPwrAvgFn,
     std::shared_ptr<IRealtimeHelper> realtimeHelper)
@@ -644,8 +569,6 @@ IPipelineStep* FreeDVInterface::createReceivePipeline(
     assert(state != nullptr);
 
     state->getRxStateFn = getRxStateFn;
-    state->getChannelNoiseFn = getChannelNoiseFn;
-    state->getChannelNoiseSnrFn = getChannelNoiseSnrFn;
     state->getFreqOffsetFn = getFreqOffsetFn;
     state->getSigPwrAvgFn = getSigPwrAvgFn;
    
@@ -696,7 +619,6 @@ int FreeDVInterface::preProcessRxFn_(ParallelStep* stepObj) FREEDV_NONBLOCKING
         
         FreeDVReceiveStep* castedStep = (FreeDVReceiveStep*)step;
         castedStep->setSigPwrAvg(*state->getSigPwrAvgFn());
-        castedStep->setChannelNoiseEnable(state->getChannelNoiseFn(), state->getChannelNoiseSnrFn());
         castedStep->setFreqOffset(state->getFreqOffsetFn());
     }
     

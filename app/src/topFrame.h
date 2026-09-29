@@ -115,8 +115,6 @@ class TopFrame : public wxFrame
         wxButton* m_btnTxLevelM;
         wxButton* m_btnTxLevelP;
         wxButton* m_btnTxLevelPP;
-        wxSlider* m_sliderMicSpkrLevel;
-        wxStaticText* m_txtMicSpkrLevelNum;
         
         wxSlider* m_sliderSQ;        
         wxCheckBox* m_ckboxSQ;
@@ -139,9 +137,7 @@ class TopFrame : public wxFrame
         wxButton      *m_BtnReSync;
         wxButton      *m_btnCenterRx;
         
-        wxToggleButton      *m_audioRecord;
         
-        wxButton*     m_logQSO;
 
         wxRadioButton *m_rb700d;
         wxRadioButton *m_rb700e;
@@ -172,8 +168,6 @@ class TopFrame : public wxFrame
         virtual void OnToolsTextMessagingUI( wxUpdateUIEvent& event ) { event.Skip(); }
         virtual void OnToolsAudio( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnToolsAudioUI( wxUpdateUIEvent& event ) { event.Skip(); }
-        virtual void OnToolsFilter( wxCommandEvent& event ) { event.Skip(); }
-        virtual void OnToolsFilterUI( wxUpdateUIEvent& event ) { event.Skip(); }
         virtual void OnToolsOptions( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnCenterRx( wxCommandEvent& event ) { event.Skip(); }
 
@@ -197,16 +191,12 @@ class TopFrame : public wxFrame
         virtual void OnTogBtnLoopTx( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnTogBtnOnOff( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnTogBtnAnalogClick( wxCommandEvent& event ) { event.Skip(); }
-        virtual void OnTogBtnVoiceKeyerClick( wxCommandEvent& event ) { event.Skip(); }
-        virtual void OnTogBtnVoiceKeyerRightClick( wxContextMenuEvent& event ) { event.Skip(); }
 
         virtual void OnTogBtnPTT( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnTogBtnPTTRightClick( wxContextMenuEvent& event ) { event.Skip(); }
 
         
-        virtual void OnTogBtnRecord( wxCommandEvent& event ) { event.Skip(); }
         
-        virtual void OnLogQSO(wxCommandEvent& event) { event.Skip(); }
 
         virtual void OnTogBtnAnalogClickUI(wxUpdateUIEvent& event) { event.Skip(); }
         virtual void OnTogBtnRxIDUI(wxUpdateUIEvent& event ) { event.Skip(); }
@@ -228,7 +218,6 @@ class TopFrame : public wxFrame
         virtual void OnTxLevelContextMenu( wxContextMenuEvent& event ) { event.Skip(); }
         virtual void OnTuneAttenContextMenu( wxContextMenuEvent& event ) { event.Skip(); }
 
-        virtual void OnChangeMicSpkrLevel( wxScrollEvent& event ) { event.Skip(); }
         
         virtual void OnChangeReportFrequency( wxCommandEvent& event ) { event.Skip(); }
         virtual void OnChangeReportFrequencyVerify( wxCommandEvent& event ) { event.Skip(); }
@@ -238,7 +227,6 @@ class TopFrame : public wxFrame
 
         virtual void OnSystemColorChanged(wxSysColourChangedEvent& event) { event.Skip(); }
                 
-        virtual void OnResetMicSpkrLevel(wxMouseEvent& event) { event.Skip(); }
         
         virtual void OnRightClickCallsignList(wxMouseEvent& event) { event.Skip(); }
 
@@ -248,12 +236,10 @@ class TopFrame : public wxFrame
         
         virtual void OnTogBtnTune(wxCommandEvent& event) { event.Skip(); }
 
-        void setVoiceKeyerButtonLabel_(wxString filename);
         
     public:
         wxToggleButton* m_togBtnOnOff;
         wxToggleButton* m_togBtnAnalog;
-        wxToggleButton* m_togBtnVoiceKeyer;
         wxToggleButton* m_btnTogPTT;
         wxToggleButton* m_btnTogTune;
         wxAuiNotebook* m_auiNbookCtrl;
@@ -261,7 +247,6 @@ class TopFrame : public wxFrame
         wxStaticBox*  m_freqBox;
         wxStaticBox*  squelchBox;
         wxStaticBox*  m_txLevelBox;
-        wxStaticBox* micSpeakerBox;
 
         TopFrame( wxWindow* parent, wxWindowID id = wxID_ANY, const wxString& title = _("FreeDV "), const wxPoint& pos = wxDefaultPosition, const wxSize& size = wxSize(561,300 ), long style = wxDEFAULT_FRAME_STYLE|wxRESIZE_BORDER );
 

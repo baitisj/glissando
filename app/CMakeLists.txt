@@ -397,10 +397,6 @@ configure_file ("${PROJECT_SOURCE_DIR}/cmake/config.h.in"
                 "${PROJECT_BINARY_DIR}/config.h" )
 include_directories(${PROJECT_BINARY_DIR})
 
-# Config file for bundled sox sources
-configure_file("${PROJECT_SOURCE_DIR}/cmake/soxconfig.h.in"
-               "${PROJECT_BINARY_DIR}/soxconfig.h")
-
 # Pthread Library
 # Actually not needed if compiling with c++11 or higher...
 find_package(Threads REQUIRED)

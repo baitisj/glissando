@@ -14,16 +14,6 @@ typedef struct paCallBackData
         , outfifo1(nullptr)
         , infifo2(nullptr)
         , outfifo2(nullptr)
-        , sbqMicInBass(nullptr)
-        , sbqMicInTreble(nullptr)
-        , sbqMicInMid(nullptr)
-        , sbqMicInVol(nullptr)
-        , sbqSpkOutBass(nullptr)
-        , sbqSpkOutTreble(nullptr)
-        , sbqSpkOutMid(nullptr)
-        , sbqSpkOutVol(nullptr)
-        , micInEQEnable(false)
-        , spkOutEQEnable(false)
         , leftChannelVoxTone(false)
         , voxTonePhase(0.0)
         , isTuning(false)
@@ -39,21 +29,6 @@ typedef struct paCallBackData
     // FIFOs attached to second sound card
     GenericFIFO<short>    *infifo2;
     GenericFIFO<short>    *outfifo2;
-
-    // EQ filter states
-    void* sbqMicInBass;
-    void* sbqMicInTreble;
-    void* sbqMicInMid;
-    void* sbqMicInVol;
-    void* sbqSpkOutBass;
-    void* sbqSpkOutTreble;
-    void* sbqSpkOutMid;
-    void* sbqSpkOutVol;
-    audio_spin_mutex micEqLock;
-    audio_spin_mutex spkEqLock;
-
-    std::atomic<bool> micInEQEnable;
-    std::atomic<bool> spkOutEQEnable;
 
     // optional loud tone on left channel to reliably trigger vox
     std::atomic<bool> leftChannelVoxTone;

@@ -479,7 +479,6 @@ void GlissandoConsole::showPreferences()
         {GlissandoSetup::Options, _("Options"), _("Callsign, frequency list, chat and other options.")},
         {GlissandoSetup::AudioDevices, _("Sound cards"), _("Which sound cards talk to the radio.")},
         {GlissandoSetup::RigControl, _("Rig control"), _("CAT and PTT: how the radio is keyed and tuned.")},
-        {GlissandoSetup::Filters, _("Audio filters"), _("Microphone and speaker filtering.")},
         {GlissandoSetup::EasySetup, _("Easy setup"), _("Sound cards, rig control and callsign on one page.")},
     };
 

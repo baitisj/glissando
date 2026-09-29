@@ -59,16 +59,10 @@ class OptionsDlg : public wxDialog
         void    OnClose(wxCloseEvent& event);
         void    OnInitDialog(wxInitDialogEvent& event);
  
-        void    OnTestFrame(wxScrollEvent& event);
-        void    OnChannelNoise(wxScrollEvent& event);
-        void    OnFreeDV700txClip(wxScrollEvent& event);
         void    OnDebugConsole(wxScrollEvent& event);
 
         void    OnFifoReset(wxCommandEvent& event);
         
-        void    OnReportingEnable(wxCommandEvent& event);
-        void    OnToneStateEnable(wxCommandEvent& event);
-        void    OnMultipleRxEnable(wxCommandEvent& event);
         void    OnEnableSpacebarForPTT(wxCommandEvent& event);
         void    OnSetPTTKey(wxCommandEvent& event);
         void    OnTOTTimerEnable(wxCommandEvent& event);
@@ -77,17 +71,12 @@ class OptionsDlg : public wxDialog
         void    enterPTTCaptureMode_();
         void    exitPTTCaptureMode_(bool accept, int keyCode = 0);
 
-        wxTextCtrl   *m_txtCtrlCallSign; // TODO: this should be renamed to tx_txtmsg, and rename all related incl persis strge
-
         wxCheckBox* m_ckHalfDuplex;
 
         wxNotebook  *m_notebook;
-        wxNotebookPage *m_reportingTab; // txt msg/PSK Reporter
+        wxNotebookPage *m_reportingTab; // Station: callsign, stations heard log
         wxNotebookPage *m_rigControlTab; // Rig Control
-        wxNotebookPage *m_displayTab; // Waterfall color, other display config
-        wxNotebookPage *m_keyerTab; // Voice Keyer
         wxNotebookPage *m_modemTab; // 700/OFDM/duplex
-        wxNotebookPage *m_simulationTab; // testing/interference
         wxNotebookPage *m_debugTab; // Debug
         
         /* Hamlib options */
@@ -106,62 +95,13 @@ class OptionsDlg : public wxDialog
         wxCheckBox    *m_ckboxTOTTimerEnabled;
         wxTextCtrl    *m_txtTOTTimerSecs;
         
-        /* Waterfall color */
-        wxRadioButton *m_waterfallColorScheme1; // Multicolored
-        wxRadioButton *m_waterfallColorScheme2; // Black & white
-        wxRadioButton *m_waterfallColorScheme3; // Blue tint?
-
-        /* Spectrum plot averaging */
-        wxComboBox*             m_cbxNumSpectrumAveraging;
-
-        /* Voice Keyer */
-
-        wxButton     *m_buttonChooseVoiceKeyerWaveFilePath;
-        wxTextCtrl   *m_txtCtrlVoiceKeyerWaveFilePath;
-        wxTextCtrl   *m_txtCtrlVoiceKeyerRxPause;
-        wxTextCtrl   *m_txtCtrlVoiceKeyerRepeats;
-
-        /* Quick Record */
-        wxButton     *m_buttonChooseQuickRecordRawPath;
-        wxTextCtrl   *m_txtCtrlQuickRecordRawPath;
-        wxButton     *m_buttonChooseQuickRecordDecodedPath;
-        wxTextCtrl   *m_txtCtrlQuickRecordDecodedPath;
-        
         /* test frames, other simulated channel impairments */
 
-        wxCheckBox   *m_ckboxTestFrame;
-        wxCheckBox   *m_ckboxChannelNoise;
-        wxTextCtrl   *m_txtNoiseSNR;
-        wxCheckBox   *m_ckboxAttnCarrierEn;
-        wxTextCtrl   *m_txtAttnCarrier;
 
-        wxCheckBox   *m_ckboxTone;
-        wxTextCtrl   *m_txtToneFreqHz;
-        wxTextCtrl   *m_txtToneAmplitude;
 
-        wxCheckBox   *m_ckboxFreeDV700txClip;
-        wxCheckBox   *m_ckboxFreeDV700txBPF;
         wxCheckBox   *m_ckboxAutoStartOnLaunch;
 
-        wxRadioButton *m_rb_textEncoding1;
-        wxRadioButton *m_rb_textEncoding2;
-
-        wxCheckBox    *m_ckboxReportingEnable;
         wxTextCtrl    *m_txt_callsign;
-        wxTextCtrl    *m_txt_grid_square;
-        
-        wxCheckBox    *m_ckboxManualFrequencyReporting;
-        
-        wxCheckBox    *m_ckboxPskReporterEnable;
-
-        wxCheckBox    *m_ckboxUDPReportingEnable;
-        wxTextCtrl    *m_udpHostname;
-        wxTextCtrl    *m_udpPort;
-
-        wxCheckBox    *m_ckboxUDPBroadcastEnable;
-        wxTextCtrl    *m_udpBroadcastAddress;
-        wxTextCtrl    *m_udpBroadcastPort;
-
         wxTextCtrl    *m_txtCtrlCsvLogFilePath;
         wxButton      *m_buttonChooseCsvLogFilePath;
         
@@ -170,13 +110,6 @@ class OptionsDlg : public wxDialog
         wxStaticText  *m_textPA1;
         wxStaticText  *m_textPA2;
         wxTextCtrl    *m_txtCtrlFifoSize;
-        wxCheckBox    *m_ckboxTxRxThreadPriority;
-        wxCheckBox    *m_ckboxTxRxDumpTiming;
-        wxCheckBox    *m_ckboxTxRxDumpFifoState;
-        wxCheckBox    *m_ckboxVerbose;
-        wxCheckBox    *m_ckboxFreeDVAPIVerbose;
-        wxCheckBox    *m_experimentalFeatures;
-        wxCheckBox    *m_showDecodeStats;
         
         wxButton*     m_sdbSizer5OK;
         wxButton*     m_sdbSizer5Cancel;
@@ -184,8 +117,6 @@ class OptionsDlg : public wxDialog
 
         wxCheckBox   *m_ckboxDebugConsole;
 
-        wxCheckBox*  m_ckboxMultipleRx;
-        wxCheckBox*  m_ckboxSingleRxThread;
         wxCheckBox*  m_ckboxTextChatUsDataSegmentsOnly;
         wxCheckBox*  m_ckboxGlissandoChords;
         wxCheckBox*  m_ckboxData2G;
@@ -194,9 +125,6 @@ class OptionsDlg : public wxDialog
         wxCheckBox*  m_ckboxData2GCommandPort;
         wxTextCtrl*  m_txtData2GCommandPort;
         void updateData2GControls_();
-        wxTextCtrl*  m_statsResetTime;
-        
-        wxCheckBox*  m_ckbox_use_utc_time;
         
         wxListBox*  m_freqList;
         wxStaticText* m_labelEnterFreq;
@@ -208,8 +136,6 @@ class OptionsDlg : public wxDialog
         
         unsigned int  event_in_serial, event_out_serial;
 
-        void OnChooseVoiceKeyerWaveFilePath(wxCommandEvent& event);
-        void OnChooseQuickRecordPath(wxCommandEvent& event);
         void OnChooseCsvLogFilePath(wxCommandEvent& event);
         
         void OnReportingFreqSelectionChange(wxCommandEvent& event);
@@ -221,10 +147,6 @@ class OptionsDlg : public wxDialog
         
      private:
          void updateReportingState();
-         void updateChannelNoiseState();
-         void updateAttnCarrierState();
-         void updateToneState();
-         void updateMultipleRxState();
          void updateRigControlState();
          
          bool sessionActive_;

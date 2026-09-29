@@ -390,7 +390,6 @@ bool MainFrame::glissandoSetupAvailable(GlissandoSetup setup)
     switch (setup)
     {
         case GlissandoSetup::Options:
-        case GlissandoSetup::Filters:
             return true;
         case GlissandoSetup::AudioDevices:
         case GlissandoSetup::RigControl:
@@ -410,7 +409,6 @@ void MainFrame::glissandoOpenSetup(GlissandoSetup setup)
         case GlissandoSetup::Options: OnToolsOptions(event); break;
         case GlissandoSetup::AudioDevices: OnToolsAudio(event); break;
         case GlissandoSetup::RigControl: OnToolsComCfg(event); break;
-        case GlissandoSetup::Filters: OnToolsFilter(event); break;
         case GlissandoSetup::EasySetup: OnToolsEasySetup(event); break;
     }
 }

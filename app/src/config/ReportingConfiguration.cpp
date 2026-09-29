@@ -29,28 +29,8 @@
 #include "ReportingConfiguration.h"
 
 ReportingConfiguration::ReportingConfiguration()
-    : reportingFreeTextString("/Data/CallSign", _(""))
-        
-    , reportingEnabled("/Reporting/Enable", false)
-    , reportingCallsign("/Reporting/Callsign", _(""))
-    , reportingGridSquare("/Reporting/GridSquare", _(""))
-        
+    : reportingCallsign("/Reporting/Callsign", _(""))
     , reportingFrequency("/Reporting/Frequency", 0)
-        
-    , manualFrequencyReporting("/Reporting/ManualFrequencyReporting", false)
-        
-    , pskReporterEnabled("/Reporting/PSKReporter/Enable", true)
-
-    , udpReportingEnabled("/Reporting/UDP/Enable", false)
-    , udpReportingHostname("/Reporting/UDP/Hostname", _("127.0.0.1"))
-    , udpReportingPort("/Reporting/UDP/Port", 2237)
-
-    , udpBroadcastEnabled("/Reporting/UDPBroadcast/Enable", false)
-    , udpBroadcastAddress("/Reporting/UDPBroadcast/Address", _("224.0.0.1"))
-    , udpBroadcastPort("/Reporting/UDPBroadcast/Port", 7177)
-
-    , useUTCForReporting("/CallsignList/UseUTCTime", false)
-
     , reportingFrequencyList("/Reporting/FrequencyList", {
         _("1.8700"),
         _("3.6250"),
@@ -145,40 +125,13 @@ ReportingConfiguration::ReportingConfiguration()
 
 void ReportingConfiguration::load(wxConfigBase* config)
 {
-    // Migration: Save old parameters so that they can be copied over to the new locations.
-    auto oldPskEnable = config->ReadBool(wxT("/PSKReporter/Enable"), false); 
-    auto oldPskCallsign = config->Read(wxT("/PSKReporter/Callsign"), wxT(""));
-    auto oldGridSquare = config->Read(wxT("/PSKReporter/GridSquare"), wxT(""));
-    auto oldFreqStr = config->Read(wxT("/PSKReporter/FrequencyHzStr"), wxT("0"));
-    reportingEnabled.setDefaultVal(oldPskEnable);
-    reportingCallsign.setDefaultVal(oldPskCallsign);
-    reportingGridSquare.setDefaultVal(oldGridSquare);
-    
-    load_(config, reportingFreeTextString);
- 
-    load_(config, reportingEnabled);
     load_(config, reportingCallsign);
-    load_(config, reportingGridSquare);
-    
-    load_(config, pskReporterEnabled);
 
-    load_(config, udpReportingEnabled);
-    load_(config, udpReportingHostname);
-    load_(config, udpReportingPort);
-
-    load_(config, udpBroadcastEnabled);
-    load_(config, udpBroadcastAddress);
-    load_(config, udpBroadcastPort);
-
-    load_(config, useUTCForReporting);
-    
     // Note: this needs to be loaded before the frequency list so that
     // we get the values formatted as kHz (if so configured).
     load_(config, reportingFrequencyAsKhz);
     
     load_(config, reportingFrequencyList);
-    
-    load_(config, manualFrequencyReporting);
 
     load_(config, csvLogFilePath);
 
@@ -212,34 +165,17 @@ void ReportingConfiguration::load(wxConfigBase* config)
     }
 
     // Special load handling for reporting below.
-    wxString freqStr = config->Read(reportingFrequency.getElementName(), oldFreqStr);
+    wxString freqStr = config->Read(reportingFrequency.getElementName(), wxT("0"));
     reportingFrequency.setWithoutProcessing(atoll(freqStr.ToUTF8()));
 }
 
 void ReportingConfiguration::save(wxConfigBase* config)
 {
-    save_(config, reportingFreeTextString);
  
-    save_(config, reportingEnabled);
     save_(config, reportingCallsign);
-    save_(config, reportingGridSquare);
-    
-    save_(config, pskReporterEnabled);
 
-    save_(config, udpReportingEnabled);
-    save_(config, udpReportingHostname);
-    save_(config, udpReportingPort);
-
-    save_(config, udpBroadcastEnabled);
-    save_(config, udpBroadcastAddress);
-    save_(config, udpBroadcastPort);
-
-    save_(config, useUTCForReporting);
-    
     save_(config, reportingFrequencyAsKhz);
     save_(config, reportingFrequencyList);
-    
-    save_(config, manualFrequencyReporting);
 
     save_(config, csvLogFilePath);
 

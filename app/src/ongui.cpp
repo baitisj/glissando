@@ -17,12 +17,10 @@
 
 #include "git_version.h"
 #include "gui/dialogs/dlg_easy_setup.h"
-#include "gui/dialogs/dlg_filter.h"
 #include "gui/dialogs/dlg_audiooptions.h"
 #include "gui/dialogs/dlg_options.h"
 #include "gui/dialogs/dlg_ptt.h"
 #include "gui/dialogs/monitor_volume_adj.h"
-#include "gui/dialogs/log_entry.h"
 
 #if defined(WIN32)
 #include "rig_control/omnirig/OmniRigController.h"
@@ -50,7 +48,6 @@ extern std::atomic<float> g_tuneLevelScale;
 extern wxConfigBase *pConfig;
 extern std::atomic<bool> endingTx;
 extern std::atomic<int> g_outfifo1_empty;
-extern std::atomic<bool> g_voice_keyer_tx;
 extern paCallBackData* g_rxUserdata;
 
 extern std::atomic<SNDFILE*>            g_sfRecFileFromModulator;
@@ -99,17 +96,6 @@ void MainFrame::OnToolsEasySetup(wxCommandEvent&)
         // Show/hide frequency box based on CAT control setup.
         m_freqBox->Show(isFrequencyControlEnabled_());
 
-        // Show/hide callsign combo box based on PSK Reporter Status
-        if (wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled)
-        {
-            m_cboLastReportedCallsigns->Show();
-            m_txtCtrlCallSign->Hide();
-        }
-        else
-        {
-            m_cboLastReportedCallsigns->Hide();
-            m_txtCtrlCallSign->Show();
-        }
 
         // Relayout window so that the changes can take effect.
         m_panel->Layout();
@@ -178,27 +164,6 @@ void MainFrame::OnToolsAudioUI(wxUpdateUIEvent& event)
 }
 
 //-------------------------------------------------------------------------
-// OnToolsFilter()
-//-------------------------------------------------------------------------
-void MainFrame::OnToolsFilter(wxCommandEvent& event)
-{
-    wxUnusedVar(event);
-    
-    if (m_filterDialog == nullptr)
-    {
-         m_filterDialog = new FilterDlg(NULL, m_RxRunning, &m_newMicInFilter, &m_newSpkOutFilter);
-    }
-    else
-    {
-        m_filterDialog->Iconize(false);
-        m_filterDialog->SetFocus();
-        m_filterDialog->Raise();
-    }
-    
-    m_filterDialog->Show();
-}
-
-//-------------------------------------------------------------------------
 // OnToolsOptions()
 //-------------------------------------------------------------------------
 void MainFrame::OnToolsOptions(wxCommandEvent& event)
@@ -219,7 +184,7 @@ void MainFrame::OnToolsOptions(wxCommandEvent& event)
         m_freqBox->Show(isFrequencyControlEnabled_());
         
         // Show/hide stats box
-        statsBox->Show(wxGetApp().appConfiguration.showDecodeStats);
+        statsBox->Show(false);
         
         // XXX - with really short windows, wxWidgets sometimes doesn't size
         // the components properly until the user resizes the window (even if only
@@ -242,27 +207,7 @@ void MainFrame::OnToolsOptions(wxCommandEvent& event)
             SetSize(w, h);
         });
 
-        // Show/hide callsign combo box based on reporting Status
-        if (wxGetApp().appConfiguration.reportingConfiguration.reportingEnabled)
-        {
-            m_cboLastReportedCallsigns->Show();
-            m_txtCtrlCallSign->Hide();
-        }
-        else
-        {
-            m_cboLastReportedCallsigns->Hide();
-            m_txtCtrlCallSign->Show();
-        }
         
-        // Update voice keyer file if different
-        wxFileName fullVKPath(wxGetApp().appConfiguration.voiceKeyerWaveFilePath, wxGetApp().appConfiguration.voiceKeyerWaveFile);
-        if (wxString::FromUTF8(vkFileName_.c_str()) != fullVKPath.GetFullPath())
-        {
-            // Clear filename to force reselection next time VK is triggered.
-            vkFileName_ = "";
-            wxGetApp().appConfiguration.voiceKeyerWaveFile = "";
-            setVoiceKeyerButtonLabel_("");
-        }
         
         // Adjust frequency labels on main window
         wxListItem colInfo;
@@ -907,28 +852,6 @@ void MainFrame::OnTuneAttenContextMenu( wxContextMenuEvent& )
 }
 
 //-------------------------------------------------------------------------
-// OnChangeMicSpkrLevel()
-//-------------------------------------------------------------------------
-void MainFrame::OnChangeMicSpkrLevel( wxScrollEvent& )
-{
-    auto sliderLevel = (double)m_sliderMicSpkrLevel->GetValue() / 10.0;
-    
-    if (g_tx.load(std::memory_order_acquire))
-    {
-        wxGetApp().appConfiguration.filterConfiguration.micInChannel.volInDB = sliderLevel;
-        m_newMicInFilter = true;
-    }
-    else
-    {
-        wxGetApp().appConfiguration.filterConfiguration.spkOutChannel.volInDB = sliderLevel;
-        m_newSpkOutFilter = true;
-    }
-    
-    wxString fmtString = wxString::Format(MIC_SPKR_LEVEL_FORMAT_STR, wxNumberFormatter::ToString((double)sliderLevel, 1), DECIBEL_STR);
-    m_txtMicSpkrLevelNum->SetLabel(fmtString);
-}
-
-//-------------------------------------------------------------------------
 // OnCheckSQClick()
 //-------------------------------------------------------------------------
 void MainFrame::OnCheckSQClick(wxCommandEvent&)
@@ -984,8 +907,7 @@ int MainApp::FilterEvent(wxEvent& event)
                 (mainWindowActive || totWarningActive) &&
                 wxGetApp().appConfiguration.enableSpaceBarForPTT && !frame->isReceiveOnly()) {
 
-                // space bar controls tx/rx if keyer not running
-                if (frame->vk_state == VK_IDLE) {
+                {
                     if (wxGetApp().appConfiguration.pttMomentaryMode) {
                         // Momentary mode: start TX only on the initial key press (not repeated events).
                         if (!g_tx.load(std::memory_order_acquire)) {
@@ -1003,8 +925,6 @@ int MainApp::FilterEvent(wxEvent& event)
                         frame->togglePTT();
                     }
                 }
-                else // space bar stops keyer
-                    frame->VoiceKeyerProcessEvent(VK_SPACE_BAR);
 
                 return Event_Processed; // absorb key so we don't toggle control with focus (e.g. Start)
 
@@ -1023,7 +943,7 @@ int MainApp::FilterEvent(wxEvent& event)
                 wxGetApp().appConfiguration.enableSpaceBarForPTT && !frame->isReceiveOnly() &&
                 wxGetApp().appConfiguration.pttMomentaryMode) {
 
-                if (frame->vk_state == VK_IDLE) {
+                {
                     if (g_tx.load(std::memory_order_acquire)) {
                         frame->m_btnTogPTT->SetValue(false);
                         frame->m_btnTogPTT->SetBackgroundColour(wxNullColour);
@@ -1106,15 +1026,7 @@ void MainFrame::OnTogBtnPTTMouseLeave(wxMouseEvent& event)
 //-------------------------------------------------------------------------
 void MainFrame::OnTogBtnPTT (wxCommandEvent&)
 {
-    if (vk_state == VK_TX)
-    {
-        // Disable TX via VK code to prevent state inconsistencies.
-        VoiceKeyerProcessEvent(VK_SPACE_BAR);
-    }
-    else 
-    {
-        togglePTT();
-    }
+    togglePTT();
 }
 
 void MainFrame::playTotBeep_()
@@ -1160,11 +1072,6 @@ void MainFrame::OnTOTTimer(wxTimerEvent&)
     m_totCurrentDurationMs = 0;
     stopTotBeep_();
 
-    if (vk_state == VK_TX)
-    {
-        VoiceKeyerProcessEvent(VK_SPACE_BAR);
-    }
-    else
     {
         m_btnTogPTT->SetValue(false);
         endingTx.store(true, std::memory_order_release);
@@ -1454,7 +1361,6 @@ void MainFrame::togglePTT(void) {
         // Re-enable buttons.
         m_togBtnOnOff->Enable(true);
         m_togBtnAnalog->Enable(true);
-        m_togBtnVoiceKeyer->Enable(true);
     }
     else
     {
@@ -1609,26 +1515,8 @@ void MainFrame::togglePTT(void) {
     m_cboReportFrequency->Enable(!newTx);
     m_btnTogTune->Enable(!newTx);
 
-    if (newTx)
-    {
-        micSpeakerBox->SetLabel("Mic &Level");
-
-        m_sliderMicSpkrLevel->SetValue(wxGetApp().appConfiguration.filterConfiguration.micInChannel.volInDB * 10);
-        wxString fmtString = wxString::Format(MIC_SPKR_LEVEL_FORMAT_STR, wxNumberFormatter::ToString((double)wxGetApp().appConfiguration.filterConfiguration.micInChannel.volInDB, 1), DECIBEL_STR);
-        m_txtMicSpkrLevelNum->SetLabel(fmtString);
-    }
-    else
-    {
-        micSpeakerBox->SetLabel("Speaker &Level");
-
-        m_sliderMicSpkrLevel->SetValue(wxGetApp().appConfiguration.filterConfiguration.spkOutChannel.volInDB * 10);
-        wxString fmtString = wxString::Format(MIC_SPKR_LEVEL_FORMAT_STR, wxNumberFormatter::ToString((double)wxGetApp().appConfiguration.filterConfiguration.spkOutChannel.volInDB, 1), DECIBEL_STR);
-        m_txtMicSpkrLevelNum->SetLabel(fmtString);
-    }
-
     CallAfter([&]() {
         txChangeoverOccurring_ = false;
-        m_sliderMicSpkrLevel->Refresh(); // Redraw doesn't happen immediately otherwise in some environments
     });
 
     if (newTx && m_momentaryKeyReleasedDuringChangeover_)
@@ -1661,7 +1549,6 @@ void MainFrame::OnTogBtnTune(wxCommandEvent&)
     }
 
     // Disable actual TX controls if needed
-    m_togBtnVoiceKeyer->Enable(!newTx);
     m_btnTogPTT->Enable(!newTx);
     m_cboReportFrequency->Enable(!newTx);
 
@@ -1732,76 +1619,6 @@ void MainFrame::OnCallSignReset(wxCommandEvent&)
     
     m_lastReportedCallsignListView->DeleteAllItems();
     m_cboLastReportedCallsigns->SetText(_(""));
-}
-
-void MainFrame::OnLogQSO(wxCommandEvent&)
-{
-    wxString dxCall;
-    wxString dxGrid;
-    wxString dxFreq;
-    wxString logTime;
-    wxString snrString;
-    wxDateTime logTimeObj = wxDateTime::Now();
-    double dxFreqDouble = 0;
-    uint64_t dxFreqHz = 0;
-    double snr = ILogger::UNKNOWN_SNR;
-    
-    auto selected = m_lastReportedCallsignListView->GetFirstSelected();
-    if (wxGetApp().lastSelectedLoggingRow == MainApp::MAIN_WINDOW && selected != -1)
-    {        
-        // Get callsign and RX frequency
-        dxCall = m_lastReportedCallsignListView->GetItemText(selected, 0);
-        dxFreq = m_lastReportedCallsignListView->GetItemText(selected, 1);
-        logTime = m_lastReportedCallsignListView->GetItemText(selected, 2);
-        snrString = m_lastReportedCallsignListView->GetItemText(selected, 3);
-        
-        wxNumberFormatter::FromString(dxFreq, &dxFreqDouble);
-        wxNumberFormatter::FromString(snrString, &snr);
-        
-        wxString::const_iterator end;
-        logTimeObj.ParseDateTime(logTime, &end);
-
-        if (wxGetApp().appConfiguration.reportingConfiguration.useUTCForReporting)
-        {
-            // String was stored in UTC; ParseDateTime assumes local — reinterpret as UTC.
-            logTimeObj.MakeFromTimezone(wxDateTime::UTC);
-        }
-        
-        if (wxGetApp().appConfiguration.reportingConfiguration.reportingFrequencyAsKhz)
-        {
-            dxFreqDouble *= 1000;
-        }
-        else
-        {
-            dxFreqDouble *= 1000000;
-        }
-        
-        dxFreqHz = (uint64_t)dxFreqDouble;
-        
-        log_info("Logging %s/%s at %" PRIu64 " Hz from main window drop-down list", (const char*)dxCall.ToUTF8(), (const char*)dxGrid.ToUTF8(), dxFreqHz);
-    }
-    else
-    {
-        dxFreq = m_cboReportFrequency->GetValue();
-        wxNumberFormatter::FromString(dxFreq, &dxFreqDouble);
-        
-        if (wxGetApp().appConfiguration.reportingConfiguration.reportingFrequencyAsKhz)
-        {
-            dxFreqDouble *= 1000;
-        }
-        else
-        {
-            dxFreqDouble *= 1000000;
-        }
-        
-        dxFreqHz = (uint64_t)dxFreqDouble;
-        
-        log_info("No rows selected, defaulting logging to %" PRIu64 " Hz", dxFreqHz);
-    }
-
-    // Show log contact dialog 
-    auto logDialog = new LogEntryDialog(this);
-    logDialog->ShowDialog(dxCall.ToUTF8(), dxGrid.ToUTF8(), logTimeObj, (int64_t)dxFreqHz, (int)snr);
 }
 
 // Force manual resync, just in case demod gets stuck on false sync
@@ -1878,8 +1695,6 @@ void MainFrame::resetStats_()
             g_error_hist[i] = 0;
             g_error_histn[i] = 0;
         }
-        // resets variance stats every time it is called
-        freedvInterface.setEq(wxGetApp().appConfiguration.filterConfiguration.enable700CEqualizer);
     }
 }
 
@@ -2094,25 +1909,6 @@ void MainFrame::updateReportingFreqList_()
     {
         m_freqBox->SetLabel(_("Radio Freq. (MHz)"));
     }
-}
-
-void MainFrame::OnResetMicSpkrLevel(wxMouseEvent&)
-{
-    auto sliderLevel = 0;
-    if (g_tx.load(std::memory_order_acquire))
-    {
-        wxGetApp().appConfiguration.filterConfiguration.micInChannel.volInDB = sliderLevel;
-        m_newMicInFilter = true;
-    }
-    else
-    {
-        wxGetApp().appConfiguration.filterConfiguration.spkOutChannel.volInDB = sliderLevel;
-        m_newSpkOutFilter = true;
-    }
-    
-    wxString fmtString = wxString::Format(MIC_SPKR_LEVEL_FORMAT_STR, wxNumberFormatter::ToString((double)sliderLevel, 1), DECIBEL_STR);
-    m_txtMicSpkrLevelNum->SetLabel(fmtString);
-    m_sliderMicSpkrLevel->SetValue(sliderLevel);
 }
 
 void MainFrame::OnToolsExportConfigUI(wxUpdateUIEvent& event)

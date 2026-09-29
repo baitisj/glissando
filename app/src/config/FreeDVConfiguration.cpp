@@ -64,13 +64,8 @@ FreeDVConfiguration::FreeDVConfiguration()
     , pttKeyCode("/Rig/PttKeyCode", WXK_SPACE)
     , pttMomentaryMode("/Rig/PttMomentaryMode", false)
 
-    , voiceKeyerWaveFilePath("/VoiceKeyer/WaveFilePath", _(""))
-    , voiceKeyerWaveFile("/VoiceKeyer/WaveFile", _("voicekeyer.wav"))
-    , voiceKeyerRxPause("/VoiceKeyer/RxPause", 10)
-    , voiceKeyerRepeats("/VoiceKeyer/Repeats", 5)
         
     , halfDuplexMode("/Rig/HalfDuplex", true)
-    , multipleReceiveEnabled("/Rig/MultipleRx", true)
     , textChatUsDataSegmentsOnly("/TextChat/UsDataSegmentsOnly", true)
     , data2gEnabled("/Data2G/Enabled", false)
     , data2gHost("/Data2G/Host", "127.0.0.1")
@@ -89,41 +84,25 @@ FreeDVConfiguration::FreeDVConfiguration()
     , glissandoWindowTop("/Glissando/WindowTop", -1)
     , glissandoWindowWidth("/Glissando/WindowWidth", 1040)
     , glissandoWindowHeight("/Glissando/WindowHeight", 720)
-    , multipleReceiveOnSingleThread("/Rig/SingleRxThread", true)
         
-    , quickRecordRawPath("/QuickRecord/SavePath", _(""))
-    , quickRecordDecodedPath("/QuickRecord/SaveDecodedPath", _(""))
         
-    , freedv700Clip("/FreeDV700/txClip", true)
-    , freedv700TxBPF("/FreeDV700/txBPF", true)
         
-    , noiseSNR("/Noise/noise_snr", 2)
         
     , debugConsoleEnabled("/Debug/console", false)
         
     , snrSlow("/Audio/snrSlow", false)
         
-    , debugVerbose("/Debug/verbose", false)
-    , apiVerbose("/Debug/APIverbose", false)
         
-    , waterfallColor("/Waterfall/Color", 0)
-    , statsResetTimeSecs("/Stats/ResetTime", 10)
         
     , currentFreeDVMode("/Audio/mode", FREEDV_MODE_700D)
         
-    , currentSpectrumAveraging("/Plot/Spectrum/CurrentAveraging", 0)
     
-    , experimentalFeatures("/ExperimentalFeatures", false)
-    , tabLayout("/MainFrame/TabLayout", _(""))
 
-    , monitorVoiceKeyerAudio("/Monitor/VoiceKeyerAudio", false)
-    , monitorVoiceKeyerAudioVol("/Monitor/VoiceKeyerAudioVol", 0)
     , monitorTxAudio("/Monitor/TransmitAudio", false)
     , monitorTxAudioVol("/Monitor/TransmitAudioVol", 0)
 
     , txRxDelayMilliseconds("/Audio/TxRxDelayMilliseconds", 0)
 
-    , showDecodeStats("/Debug/showDecodeStats", false)
     , autoStartOnLaunch("/Modem/autoStartOnLaunch", false)
 {
     // empty
@@ -132,7 +111,6 @@ FreeDVConfiguration::FreeDVConfiguration()
 void FreeDVConfiguration::load(wxConfigBase* config)
 {
     audioConfiguration.load(config);
-    filterConfiguration.load(config);
     rigControlConfiguration.load(config);
     reportingConfiguration.load(config);
     
@@ -164,49 +142,8 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     load_(config, pttKeyCode);
     load_(config, pttMomentaryMode);
 
-    load_(config, voiceKeyerWaveFilePath);
-    load_(config, voiceKeyerWaveFile);
-    
-    auto wxStandardPathObj = wxStandardPaths::Get();
-    auto documentsDir = wxStandardPathObj.GetDocumentsDir();
-    
-    if (voiceKeyerWaveFilePath == "")
-    {
-        // Migrate from previous versions where voiceKeyerWaveFilePath wasn't used.
-        wxString tmp = voiceKeyerWaveFile;
-        wxString path;
-        wxString name;
-        wxString ext;
-        
-        wxFileName::SplitPath(tmp, &path, &name, &ext);
-        if (ext != "")
-        {
-            name = name + "." + ext;
-        }
-        
-        if (path == "")
-        {
-            // Default path to the Documents folder if one isn't provided
-            // (i.e. in the case of the old VK filename default)
-            path = documentsDir;
-        }
-        
-        voiceKeyerWaveFilePath = path;
-        voiceKeyerWaveFile = name;
-    }
-    else
-    {
-        // Make sure path isn't in the filename
-        voiceKeyerWaveFile->Replace(voiceKeyerWaveFilePath, "");
-        voiceKeyerWaveFile->Replace("/", "");
-        voiceKeyerWaveFile->Replace("\\", "");
-    }
-
-    load_(config, voiceKeyerRxPause);
-    load_(config, voiceKeyerRepeats);
     
     load_(config, halfDuplexMode);
-    load_(config, multipleReceiveEnabled);
     load_(config, textChatUsDataSegmentsOnly);
     load_(config, data2gEnabled);
     load_(config, data2gHost);
@@ -225,43 +162,25 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     load_(config, glissandoWindowTop);
     load_(config, glissandoWindowWidth);
     load_(config, glissandoWindowHeight);
-    load_(config, multipleReceiveOnSingleThread);
     
-    load_(config, freedv700Clip);
-    load_(config, freedv700TxBPF);
     
-    load_(config, noiseSNR);
     
     load_(config, debugConsoleEnabled);
     
     load_(config, snrSlow);
     
-    load_(config, debugVerbose);
-    load_(config, apiVerbose);
     
-    load_(config, waterfallColor);
     
-    load_(config, statsResetTimeSecs);
     load_(config, currentFreeDVMode);
     
-    load_(config, currentSpectrumAveraging);
     
-    load_(config, monitorVoiceKeyerAudio);
     load_(config, monitorTxAudio);
-    load_(config, monitorVoiceKeyerAudioVol);
     load_(config, monitorTxAudioVol);
     
-    quickRecordRawPath.setDefaultVal(documentsDir);
-    quickRecordDecodedPath.setDefaultVal(documentsDir);
-    load_(config, quickRecordRawPath);
-    load_(config, quickRecordDecodedPath);
     
-    load_(config, experimentalFeatures);
-    load_(config, tabLayout);
 
     load_(config, txRxDelayMilliseconds);
 
-    load_(config, showDecodeStats);
     load_(config, autoStartOnLaunch);
 
     load_(config, txAttenByBand);
@@ -271,7 +190,6 @@ void FreeDVConfiguration::load(wxConfigBase* config)
 void FreeDVConfiguration::save(wxConfigBase* config)
 {
     audioConfiguration.save(config);
-    filterConfiguration.save(config);
     rigControlConfiguration.save(config);
     reportingConfiguration.save(config);
     
@@ -303,13 +221,8 @@ void FreeDVConfiguration::save(wxConfigBase* config)
     save_(config, pttKeyCode);
     save_(config, pttMomentaryMode);
 
-    save_(config, voiceKeyerWaveFilePath);
-    save_(config, voiceKeyerWaveFile);
-    save_(config, voiceKeyerRxPause);
-    save_(config, voiceKeyerRepeats);
     
     save_(config, halfDuplexMode);
-    save_(config, multipleReceiveEnabled);
     save_(config, textChatUsDataSegmentsOnly);
     save_(config, data2gEnabled);
     save_(config, data2gHost);
@@ -328,41 +241,25 @@ void FreeDVConfiguration::save(wxConfigBase* config)
     save_(config, glissandoWindowTop);
     save_(config, glissandoWindowWidth);
     save_(config, glissandoWindowHeight);
-    save_(config, multipleReceiveOnSingleThread);
     
-    save_(config, quickRecordRawPath);
-    save_(config, quickRecordDecodedPath);
     
-    save_(config, freedv700Clip);
-    save_(config, freedv700TxBPF);
     
-    save_(config, noiseSNR);
     
     save_(config, debugConsoleEnabled);
     
     save_(config, snrSlow);
     
-    save_(config, debugVerbose);
-    save_(config, apiVerbose);
     
-    save_(config, waterfallColor);
     
-    save_(config, statsResetTimeSecs);
     save_(config, currentFreeDVMode);
     
-    save_(config, currentSpectrumAveraging);
     
-    save_(config, experimentalFeatures);
-    save_(config, tabLayout);
 
-    save_(config, monitorVoiceKeyerAudio);
     save_(config, monitorTxAudio);
-    save_(config, monitorVoiceKeyerAudioVol);
     save_(config, monitorTxAudioVol);
 
     save_(config, txRxDelayMilliseconds);
 
-    save_(config, showDecodeStats);
     save_(config, autoStartOnLaunch);
 
     save_(config, txAttenByBand);

@@ -60,14 +60,10 @@ public:
     int getTxMode() const { return txMode_; }
     bool isRunning() const { return dvObjects_.size() > 0; }
     bool isModeActive(int mode) const { return std::find(enabledModes_.begin(), enabledModes_.end(), mode) != enabledModes_.end(); }
-    void setRunTimeOptions(bool clip, bool bpf);
     
     const char* getCurrentModeStr() const;
     const char* getCurrentTxModeStr() const;
-    bool usingTestFrames() const;
-    void resetTestFrameStats();
     void resetBitStats();
-    void setTestFrames(bool testFrames, bool combine);
     
     int getTotalBits();
     int getTotalBitErrors();
@@ -79,7 +75,6 @@ public:
     
     int getSync() const;
     void setSync(int val) FREEDV_NONBLOCKING;
-    void setEq(int val);
     void setVerbose(bool val);
     
     void setTextCallbackFn(void (*rxFunc)(void *, char), char (*txFunc)(void *));
@@ -96,13 +91,10 @@ public:
     int getRxNumSpeechSamples() const FREEDV_NONBLOCKING;
     int getRxSpeechSampleRate() const FREEDV_NONBLOCKING;
     
-    void setLpcPostFilter(int enable, int bassBoost, float beta, float gamma);
     
-    void setTextVaricodeNum(int num);
     
     void setSquelch(bool enable, float level) FREEDV_NONBLOCKING;
     
-    void setCarrierAmplitude(int c, float amp);
 
     float getCurrentRxModemOffset();
     
@@ -120,8 +112,6 @@ public:
     IPipelineStep* createReceivePipeline(
         int inputSampleRate, int outputSampleRate,
         realtime_fp<std::atomic<int>*()> const& getRxStateFn,
-        realtime_fp<int()> const& getChannelNoiseFn,
-        realtime_fp<int()> const& getChannelNoiseSnrFn,
         realtime_fp<float()> const& getFreqOffsetFn,
         realtime_fp<float*()> const& getSigPwrAvgFn,
         std::shared_ptr<IRealtimeHelper> realtimeHelper
@@ -133,8 +123,6 @@ private:
     struct ReceivePipelineState
     {
         realtime_fp<std::atomic<int>*()> getRxStateFn;
-        realtime_fp<int()> getChannelNoiseFn;
-        realtime_fp<int()> getChannelNoiseSnrFn;
         realtime_fp<float()> getFreqOffsetFn;
         realtime_fp<float*()> getSigPwrAvgFn;
         realtime_fp<int(ParallelStep*)> preProcessFn;

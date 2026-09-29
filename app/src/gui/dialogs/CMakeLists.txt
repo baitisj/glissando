@@ -1,13 +1,10 @@
 add_library(fdv_gui_dialogs STATIC
-    begin_recording.cpp
     dlg_audiooptions.cpp
     dlg_easy_setup.cpp
-    dlg_filter.cpp
     dlg_options.cpp
     dlg_ptt.cpp
     dlg_snoop.cpp
     dlg_text_messaging.cpp
-    log_entry.cpp
     monitor_volume_adj.cpp
     tot_warning.cpp)
 
