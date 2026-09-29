@@ -1,5 +1,4 @@
 add_library(fdv_audio_pipeline STATIC
-    AgcStep.cpp
     AudioPipeline.cpp
     EitherOrStep.cpp
     IPipelineStep.cpp
@@ -8,13 +7,11 @@ add_library(fdv_audio_pipeline STATIC
     MinimalRealTimeHelper.cpp
     MuteStep.cpp
     ResampleStep.cpp
-    RNNoiseStep.cpp
     TapStep.cpp
 )
 
 target_compile_options(fdv_audio_pipeline PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
-target_link_libraries(fdv_audio_pipeline PRIVATE ${LIBEBUR128} agc rnnoise fdv_os_wrapper samplerate fdv_util)
-target_link_libraries(fdv_audio_pipeline INTERFACE rnnoise)
+target_link_libraries(fdv_audio_pipeline PRIVATE fdv_os_wrapper samplerate fdv_util)
 target_include_directories(fdv_audio_pipeline PRIVATE ${CODEC2_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_BINARY_DIR}/..)
 target_include_directories(fdv_audio_pipeline PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -27,7 +24,6 @@ macro(DefineUnitTest utName)
     add_test(NAME pipeline_${utName} COMMAND ${CMAKE_CURRENT_BINARY_DIR}/${utName})
 endmacro()
 
-DefineUnitTest(AgcStepTest)
 DefineUnitTest(AudioPipelineTest)
 DefineUnitTest(EitherOrTest)
 DefineUnitTest(LevelAdjustTest)

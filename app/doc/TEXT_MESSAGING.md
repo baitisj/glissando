@@ -1,15 +1,11 @@
 # Text Chat
 
-This fork adds a keyboard chat mode to FreeDV, reachable from **Tools → Text
-Chat...**. It is inspired by FreeDATA's chat feature but does not share its
-protocol: two stations both need this build to talk to each other.
-
-The name matters: **Tools → Options → Reporting** has a separate "Txt Msg"
-field, which is upstream's low rate text sent alongside your voice inside the
-FreeDV signal. That is a different feature with different limits, and nothing
-here touches it. The source tree still calls this one text messaging
-(`src/text_messaging/`, `TextMessagingDialog`), only what the operator sees
-says chat.
+Glissando's keyboard chat lives in the chat window, which opens at launch
+(the console's **Transmission log** button brings it back if it was closed).
+It is inspired by FreeDATA's chat feature but does not share its protocol: two
+stations both need Glissando to talk to each other. The source tree calls it
+text messaging (`src/text_messaging/`, `TextMessagingDialog`); only what the
+operator sees says chat.
 
 ## What the window does
 
@@ -44,7 +40,7 @@ says chat.
 * The send button is disabled while a burst is on the air, so nothing is
   queued behind a keyed transmitter. Enter is held off in the same way; the
   text stays in the box until the transmitter is free.
-* Pressing **XMIT** in the main window while a chat burst is on the air ends
+* Pressing **Abort** on the console while a chat burst is on the air ends
   the burst at once; the rest of it is dropped rather than played into an
   unkeyed radio, and a message that was on its way is retried or marked
   failed like any other unanswered one.
@@ -71,10 +67,11 @@ says chat.
   unattended; incoming messages are still displayed.
 
 Enter sends; Shift+Enter starts a new line. Your callsign comes from the
-reporting callsign in **Tools → Options**.
+Station tab of **Preferences → Options**.
 
-Chat history and heard stations are kept in `text_messaging.db` in FreeDV's
-user data directory, and history older than 30 days is dropped at startup.
+Chat history and heard stations are kept in `text_messaging.db` in Glissando's
+user data directory (see `docs/APP.md`), and history older than 30 days is
+dropped at startup.
 
 Setting `FREEDV_TEXT_CHAT_UI_LOG` in the environment makes the window log what
 it is showing: when it was created and became able to receive updates, every
@@ -140,8 +137,7 @@ when we unkeyed, and miss the next burst to arrive.
 ## Where text chat may transmit
 
 Text chat is sent as data. US rules authorise emissions by band segment
-(47 CFR 97.305(c)), and the segments where FreeDV voice is usually worked
-permit phone but not data. So, by default, text chat transmits only inside a
+(47 CFR 97.305(c)), and the phone segments permit phone but not data. So, by default, text chat transmits only inside a
 US amateur segment where data is authorised:
 
 | Band | Data segment (MHz) |
@@ -163,16 +159,16 @@ US amateur segment where data is authorised:
 | 33 cm | 902 - 928 |
 | 23 cm | 1240 - 1300 |
 
-The frequency FreeDV knows is the dial, not where the signal sits, so the dial
+The frequency Glissando knows is the dial, not where the signal sits, so the dial
 has to be at least 3 kHz inside one of these segments. The 60 m channels,
 centred on 5.332, 5.348, 5.373 and 5.405 MHz, are narrower than that, so each
 is allowed only at its standard upper sideband dial frequency, 1.5 kHz below
 the centre, within 100 Hz. Everything else is refused: the phone segments,
 frequencies outside the amateur bands, 2200 m and 630 m (which need notice to
 the utilities council before any operation), and 219-220 MHz (fixed digital
-message forwarding only). Text chat also does not transmit while FreeDV does
-not know the operating frequency: enable rig control, or type the frequency
-into the main window. The segments are the emission rules; staying within the
+message forwarding only). Text chat also does not transmit while Glissando
+does not know the operating frequency: enable rig control, or set the
+frequency from the console. The segments are the emission rules; staying within the
 privileges of your licence class is still up to you.
 
 Where it may not transmit, the chat window says so above the status line, and
@@ -180,47 +176,39 @@ the send and Ping buttons are disabled. Messages, broadcasts and pings are
 refused; nothing is acknowledged or answered automatically; and anything
 waiting to go out is discarded and marked `NOT SENT`. Receiving carries on, and
 a message already sent can still be acknowledged. The restriction follows the
-frequency and lifts as soon as FreeDV is somewhere data is permitted. A
-frequency typed into the main window counts once it has been entered -- on
-Enter, on a choice from the list, or when the box loses focus -- not on each
+frequency and lifts as soon as the radio is somewhere data is permitted. A
+frequency typed on the console counts once it has been set, not on each
 keystroke, so typing one does not pass through the frequencies on the way and
 discard what was queued.
 
 Outside the US, uncheck **Transmit only where US rules permit data** in the
-Text Chat group on the Modem tab of **Tools → Options**, and check your own
+Text Chat group on the Modem tab of **Preferences → Options**, and check your own
 administration's rules.
 
 ## How it works on the air
 
-Text messaging does not travel inside RADE. It uses the codec2 raw data
-modes, sent as short bursts in their own keying of the transmitter:
+Chat traffic goes out as Glissando melodies; `docs/APP.md` ("How chat rides on
+Glissando") says how each burst is cut into Glissando frames and how long it
+takes on the air. The burst sizes themselves come from the codec2 data modes
+the chat protocol was first written for, and the protocol keeps them:
 
-| Traffic | Mode | Payload after the modem's CRC |
-| --- | --- | --- |
-| Ping, pong, acknowledgement | DATAC13 | 14 bytes |
-| Message text | DATAC4 | 54 bytes |
+| Traffic | Burst |
+| --- | --- |
+| Ping, pong, acknowledgement | 14 bytes (sized for DATAC13) |
+| Message text | 54 bytes (sized for DATAC4) |
 
-These are what codec2 actually hands us per modem frame, less the two byte CRC
-the raw data API appends. `TextMessagingModem` checks them against the modem
-when it opens and refuses to start if they have drifted, rather than
-truncating frames on the air; text messaging then reports itself unavailable
-and the Tools menu entry stays greyed out.
+A message longer than one burst is split into up to eight fragments, all sent
+in one keying; 312 characters is the limit. A long message holds the
+transmitter for a long time, so if you use the transmit time-out timer, see
+`docs/APP.md` for how keyings are split around it.
 
-Every frame is sent as a complete burst (preamble, frame, postamble) with a
-100 ms gap after it, so the receiving modem acquires each frame on its own
-rather than having to hold sync across a whole message. A message longer than
-one frame is split into up to eight fragments, all sent in one keying; 312
-characters is the limit. DATAC4 is slow on purpose, so a full length message
-holds the transmitter for roughly half a minute: if you use FreeDV's transmit
-time-out timer, set it longer than that or it will cut a long message off.
-
-A DATAC13 frame is only 14 bytes, so the two traffic classes do not share one
+A signalling burst is only 14 bytes, so the two traffic classes do not share one
 header layout. Both start with the same 12 bytes: frame type, destination
 callsign CRC-24, the origin callsign packed into six bytes (base 40, up to
 nine characters, so `VK3ABC/P` fits), and a message ID used to match
 acknowledgements. Text frames then add a fragment index and count; signalling
 frames are always a single fragment and spend those two bytes on payload
-instead, which is what lets a ping fit in DATAC13 at all. Both end with a
+instead, which is what lets a ping fit in 14 bytes at all. Both end with a
 payload length byte, which tells the decoder where the payload stops and the
 zero padding out to the modem frame size begins.
 
@@ -237,20 +225,19 @@ rest.
 That leaves a 13 byte header and one payload byte in a signalling frame --
 exactly enough for the SNR a pong reports, or the bit per fragment of a
 partial acknowledgement -- and a 15 byte header with 39 bytes of text in a
-DATAC4 frame. A partial acknowledgement is a frame type of its own rather than
+text burst. A partial acknowledgement is a frame type of its own rather than
 a payload on the plain one, so that a build that predates it ignores it
 instead of taking it for "delivered".
 
 The origin callsign CRC-24 is not sent. It is the CRC of the callsign already
-in the frame, and three bytes is a fifth of a DATAC13 frame. The modem's own
-CRC-16 protects each frame, so nothing is added for that.
+in the frame, and three bytes is a fifth of a signalling burst. A CRC-16
+protects each burst, so nothing is added for that.
 
-Receiving runs continuously: the DATAC13 and DATAC4 demodulators sit on a tap
-off the receive audio, on their own thread, and do not touch voice decoding.
+Receiving runs continuously: the Glissando receiver sits on a tap off the
+receive audio, on its own thread.
 
 ## Transmitting
 
-* Voice always wins. A queued message waits until you are not transmitting.
 * Only one transmission is outstanding at a time. An acknowledgement being
   sent jumps ahead of anything else queued, because the far end is waiting on
   a timer.
@@ -266,8 +253,8 @@ off the receive audio, on their own thread, and do not touch voice decoding.
   together across attempts: fragments one and three from the first attempt
   and fragment two from a retry make the whole message. A partial message is
   kept for two minutes after its last fragment was heard.
-* Sending needs a transmit sound device, which means the two sound card
-  configuration. Receiving works either way.
+* Sending needs the "Glissando to Radio" output set under Sound cards.
+  Receiving works without it.
 
 Automatic acknowledgements and pongs key the transmitter without you touching
 anything, which in most countries makes this an automatically controlled
