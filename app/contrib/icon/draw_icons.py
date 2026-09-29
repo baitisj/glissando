@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Draws the Glissando app icon, and the other designs it was picked from.
 
-Queen Arachnia in a riveted chrome porthole, as the Chaotica console would
-mount her: eight legs for the scale's eight notes, each ending in a note
-head, and the red hourglass in the console's one red (Chaotica::Colour::Alarm).
+The glissando sign in a riveted chrome porthole, as the Chaotica console
+would mount it: two notes joined by the wavy slide, the upper note's stem
+pointing down, and Queen Arachnia lowering herself from it on a thread, her
+hourglass in the console's one red (Chaotica::Colour::Alarm).
 
     python3 app/contrib/icon/draw_icons.py            # writes the icon set
-    python3 app/contrib/icon/draw_icons.py --options  # previews A to D here
+    python3 app/contrib/icon/draw_icons.py --options  # previews the others here
 
 Needs Pillow. The icon set is app/contrib/glissando{48,64,128,256}.png.
 """
@@ -213,8 +214,100 @@ def option_scope():
     d.polygon([(rx - 16, ry + 54), (rx + 16, ry + 54), (rx, ry + 110)], fill=(255, 150, 60))
     return compose(art, face)
 
+def staff(d, alpha=90):
+    for k in range(5):
+        y = 290 + k * 95
+        d.line([(140, y), (N - 140, y)], fill=(255, 255, 255, alpha), width=6)
+
+def notes(d, hx=730, hy=290, stem_end=520):
+    # low note, stem up on the right
+    notehead(d, 300, 700, 70, 50)
+    d.line([(364, 680), (364, 330)], fill=SILVER, width=16)
+    # high note, stem down on the left
+    notehead(d, hx, hy, 70, 50)
+    sx = hx - 64
+    d.line([(sx, hy + 12), (sx, stem_end)], fill=SILVER, width=16)
+    wavy(d, (385, 640), (hx - 90, hy + 60), 24, 4.5, 15, BONE)
+    return sx, stem_end
+
+def arachnia(d, cx, cy, s, legs='hang', rot=0.0):
+    """A small Arachnia, head down the thread (cy is her spinnerets' end)."""
+    def R(x, y):
+        a = math.radians(rot)
+        dx, dy = x - cx, y - cy
+        return (cx + dx * math.cos(a) - dy * math.sin(a), cy + dx * math.sin(a) + dy * math.cos(a))
+    body = []
+    for side in (-1, 1):
+        for i in range(4):
+            if legs == 'splay':
+                th = math.radians(-70 + i * 40)
+                knee = (cx + side * math.cos(th) * 95 * s, cy + 70 * s + math.sin(th) * 95 * s)
+                foot = (knee[0] + side * math.cos(th + 0.5) * 80 * s, knee[1] + math.sin(th + 0.5) * 80 * s)
+                hip = (cx + side * 22 * s, cy + 80 * s)
+            elif legs == 'grip':
+                th = math.radians(-60 + i * 30)
+                hip = (cx + side * 22 * s, cy + 50 * s + i * 14 * s)
+                knee = (hip[0] + side * 70 * s, hip[1] - 50 * s + i * 22 * s)
+                foot = (cx + side * 12 * s, hip[1] - 95 * s + i * 30 * s)
+            else:  # hang: legs splayed round her, bent at the knee
+                th = math.radians(-55 + i * 36)
+                hip = (cx + side * 20 * s, cy + 105 * s + i * 14 * s)
+                ka = th - math.radians(38)
+                knee = (hip[0] + side * math.cos(ka) * 85 * s, hip[1] + math.sin(ka) * 85 * s)
+                fa = th + math.radians(48)
+                foot = (knee[0] + side * math.cos(fa) * 95 * s, knee[1] + math.sin(fa) * 95 * s)
+            d.line([R(*hip), R(*knee)], fill=SILVER, width=max(3, int(12 * s)))
+            d.line([R(*knee), R(*foot)], fill=SILVER, width=max(3, int(9 * s)))
+    # abdomen up (toward the thread), head down
+    def ell(x0, y0, x1, y1, fill):
+        pts = []
+        for k in range(36):
+            t = 2 * math.pi * k / 36
+            pts.append(R((x0 + x1) / 2 + (x1 - x0) / 2 * math.cos(t), (y0 + y1) / 2 + (y1 - y0) / 2 * math.sin(t)))
+        d.polygon(pts, fill=fill)
+    ell(cx - 58 * s, cy, cx + 58 * s, cy + 130 * s, SILVER)             # abdomen
+    ell(cx - 38 * s, cy + 118 * s, cx + 38 * s, cy + 196 * s, SILVER)    # cephalothorax
+    hx, hy = cx, cy + 62 * s
+    d.polygon([R(hx - 24 * s, hy - 38 * s), R(hx + 24 * s, hy - 38 * s), R(hx, hy)], fill=RED)
+    d.polygon([R(hx - 24 * s, hy + 38 * s), R(hx + 24 * s, hy + 38 * s), R(hx, hy)], fill=RED)
+    for ex in (-13, 13):
+        ell(cx + ex * s - 7 * s, cy + 172 * s, cx + ex * s + 7 * s, cy + 186 * s, (20, 20, 20))
+
+def option_arachnia_glissando(kind='thread'):
+    """The glissando sign, the upper note's stem pointing down and Arachnia
+    coming off its end: on a thread (the icon), clinging, snapped or on a long
+    drop."""
+    base, face = medallion()
+    art = Image.new('RGBA', (N, N), (0, 0, 0, 0))
+    d = ImageDraw.Draw(art)
+    staff(d)
+    if kind == 'thread':
+        sx, sy = notes(d)
+        d.line([(sx, sy), (sx, sy + 120)], fill=(236, 232, 222, 230), width=5)
+        arachnia(d, sx, sy + 118, 0.95, 'hang')
+    elif kind == 'cling':
+        sx, sy = notes(d, stem_end=600)
+        arachnia(d, sx, sy - 70, 1.0, 'grip')
+    elif kind == 'fall':
+        sx, sy = notes(d)
+        # the snapped thread, and the queen tumbling
+        d.line([(sx, sy), (sx + 6, sy + 50)], fill=(236, 232, 222, 200), width=5)
+        for k in range(3):
+            y = sy + 70 + k * 26
+            d.line([(sx + 30 + k * 8, y), (sx + 30 + k * 8, y + 14)], fill=(236, 232, 222, 120 - 30 * k), width=4)
+        arachnia(d, sx + 60, sy + 110, 0.9, 'splay', rot=28)
+    elif kind == 'long':
+        # a shorter stem and a long silk drop: she lands on the bottom line of the staff
+        sx, sy = notes(d, stem_end=450)
+        d.line([(sx, sy), (sx, sy + 190)], fill=(236, 232, 222, 230), width=5)
+        arachnia(d, sx, sy + 188, 0.8, 'hang')
+    return compose(art, face)
+
+
 OPTIONS = [('A-crest', option_crest), ('B-notation', option_notation), ('C-web', option_web),
-           ('D-scope', option_scope)]
+           ('D-scope', option_scope)] + [
+    (f'B-{kind}', lambda kind=kind: option_arachnia_glissando(kind))
+    for kind in ('thread', 'cling', 'fall', 'long')]
 
 if __name__ == '__main__':
     if '--options' in sys.argv:
@@ -222,7 +315,7 @@ if __name__ == '__main__':
             draw().save(f'{name}.png')
         sys.exit(0)
     app = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
-    icon = option_crest()
+    icon = option_arachnia_glissando('thread')
     for size in (48, 64, 128, 256):
         icon.resize((size, size), Image.LANCZOS).save(
             os.path.join(app, 'contrib', f'glissando{size}x{size}.png'), optimize=True)
