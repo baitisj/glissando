@@ -33,52 +33,25 @@ add_subdirectory(rig_control)
 add_subdirectory(text_messaging)
 
 # WIN32 is needed for Windows GUI apps and is ignored for UNIX like systems.
-# In addition, there are some required OSX-specific code files for platform specific handling.
-if(APPLE)
-    set(RES_FILES freedv.icns)
-    set_source_files_properties(freedv.icns PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
-    add_executable(FreeDV MACOSX_BUNDLE ${FREEDV_SOURCES} ${RES_FILES})
-    set_target_properties(FreeDV PROPERTIES
-        BUNDLE True
-        MACOSX_BUNDLE_GUI_IDENTIFIER org.freedv.freedv
-        MACOSX_BUNDLE_BUNDLE_NAME FreeDV
-        MACOSX_BNUDLE_COPYRIGHT "Copyright (c) 2025 FreeDV"
-        MACOSX_BUNDLE_BUNDLE_VERSION "${FreeDV_VERSION}"
-        MACOSX_BUNDLE_BUNDLE_SHORT_VERSION_STRING "${FreeDV_VERSION}"
-        MACOSX_BUNDLE_BUNDLE_LONG_VERSION_STRING "${FreeDV_VERSION}"
-        MACOSX_BUNDLE_ICON_FILE "freedv"
-        MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/src/info.plist.in
-    )
-else()
-    add_executable(freedv WIN32 ${FREEDV_SOURCES} ${RES_FILES})
+add_executable(freedv WIN32 ${FREEDV_SOURCES})
 
-    # The target keeps FreeDV's name, so everything that builds on it still
-    # works; the program it makes is glissando (glissando.exe on Windows).
-    set_target_properties(freedv PROPERTIES OUTPUT_NAME glissando)
-endif(APPLE)
+# The target keeps FreeDV's name, so everything that builds on it still
+# works; the program it makes is glissando (glissando.exe on Windows).
+set_target_properties(freedv PROPERTIES OUTPUT_NAME glissando)
 
-if(APPLE)
-target_compile_options(FreeDV PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
-target_link_libraries(FreeDV fdv_audio fdv_audio_pipeline fdv_audio_pipeline_extra fdv_config fdv_gui_controls fdv_gui_dialogs fdv_gui_glissando fdv_gui_util fdv_os_wrapper fdv_rig_control fdv_reporting fdv_text_messaging fdv_util codec2 git_version)
-else(APPLE)
 target_compile_options(freedv PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
 target_link_libraries(freedv fdv_audio fdv_audio_pipeline fdv_audio_pipeline_extra fdv_config fdv_gui_controls fdv_gui_dialogs fdv_gui_glissando fdv_gui_util fdv_os_wrapper fdv_rig_control fdv_reporting fdv_text_messaging fdv_util codec2 git_version)
-endif(APPLE)
 
 # Add dependencies for other statically built libraries, if applicable.
 if(FREEDV_STATIC_DEPS)
-    if(APPLE)
-    add_dependencies(FreeDV ${FREEDV_STATIC_DEPS})
-    else(APPLE)
     add_dependencies(freedv ${FREEDV_STATIC_DEPS})
-    endif(APPLE)
     add_dependencies(fdv_audio ${FREEDV_STATIC_DEPS})
     add_dependencies(fdv_audio_pipeline_extra ${FREEDV_STATIC_DEPS})
 endif(FREEDV_STATIC_DEPS)
 
 # Link other dependencies
 if(APPLE)
-target_link_libraries(FreeDV ${FREEDV_LINK_LIBS} ${FREEDV_LINK_LIBS_OSX})
+target_link_libraries(freedv ${FREEDV_LINK_LIBS} ${FREEDV_LINK_LIBS_OSX})
 elseif(WIN32)
 target_link_libraries(freedv ${FREEDV_LINK_LIBS} ws2_32)
 else()
@@ -86,19 +59,11 @@ target_link_libraries(freedv ${FREEDV_LINK_LIBS})
 endif(APPLE)
 
 if(BOOTSTRAP_WXWIDGETS)
-    if(APPLE)
-        target_compile_definitions(FreeDV PRIVATE ${WXBUILD_BUILD_DEFS})
-        target_include_directories(FreeDV PRIVATE ${WXBUILD_INCLUDES})
-        
-        add_dependencies(FreeDV wx::core wx::base wx::aui wx::html wx::net wx::adv wx::propgrid wx::xrc)
-        target_link_libraries(FreeDV wx::core wx::base wx::aui wx::html wx::net wx::adv wx::propgrid)
-    else(APPLE)
-        target_compile_definitions(freedv PRIVATE ${WXBUILD_BUILD_DEFS})
-        target_include_directories(freedv PRIVATE ${WXBUILD_INCLUDES})
-        
-        add_dependencies(freedv wx::core wx::base wx::aui wx::html wx::net wx::adv wx::propgrid wx::xrc)
-        target_link_libraries(freedv wx::core wx::base wx::aui wx::html wx::net wx::adv wx::propgrid)
-    endif(APPLE)
+    target_compile_definitions(freedv PRIVATE ${WXBUILD_BUILD_DEFS})
+    target_include_directories(freedv PRIVATE ${WXBUILD_INCLUDES})
+    
+    add_dependencies(freedv wx::core wx::base wx::aui wx::html wx::net wx::adv wx::propgrid wx::xrc)
+    target_link_libraries(freedv wx::core wx::base wx::aui wx::html wx::net wx::adv wx::propgrid)
 endif(BOOTSTRAP_WXWIDGETS)
 
 # For older Xcode (< 9.0), bypass usage of @available.
@@ -187,94 +152,7 @@ endif(FREEDV_VERSION_TAG)
 # Insert source and generated header directories before other search directories.
 include_directories(BEFORE ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
 
-if(APPLE)
-install(TARGETS FreeDV
-    BUNDLE DESTINATION bin
-)
-else(APPLE)
 install(TARGETS freedv
     RUNTIME DESTINATION bin
 )
-endif(APPLE)
 
-# Custom commands to build OSX images.
-if(APPLE)
-    if(NOT MACOS_CODESIGN_IDENTITY)
-        set(MACOS_CODESIGN_IDENTITY -)
-    endif(NOT MACOS_CODESIGN_IDENTITY)
-
-    if (NOT USE_NATIVE_AUDIO)
-        set(PORTAUDIO_BUNDLE_ARG -s ${portaudio_BINARY_DIR})
-    endif(NOT USE_NATIVE_AUDIO)
-    
-    # Get folder containing lib*san so we don't need to enter it to macdylibbundler.
-    if(ENABLE_ASAN)
-        set(SANITIZER_LIB_NAME libclang_rt.asan_osx_dynamic.dylib)
-    elseif(ENABLE_RTSAN)
-        set(SANITIZER_LIB_NAME libclang_rt.rtsan_osx_dynamic.dylib)
-    elseif(ENABLE_TSAN)
-        set(SANITIZER_LIB_NAME libclang_rt.tsan_osx_dynamic.dylib)
-    elseif(ENABLE_UBSAN)
-        set(SANITIZER_LIB_NAME libclang_rt.ubsan_osx_dynamic.dylib)
-    else()
-        set(SANITIZER_LIB_NAME libclang_rt.asan_osx_dynamic.dylib)
-    endif()
-
-    # Get folder containing libasan so we don't need to enter it to macdylibbundler.
-    execute_process(
-        COMMAND ${CMAKE_C_COMPILER} -print-file-name=${SANITIZER_LIB_NAME}
-        OUTPUT_VARIABLE CLANG_SANITIZER_FILE
-        OUTPUT_STRIP_TRAILING_WHITESPACE)
-    
-    add_custom_command(
-        TARGET FreeDV
-        POST_BUILD
-        COMMAND rm -rf dist_tmp FreeDV.dmg || true
-        COMMAND DYLD_LIBRARY_PATH=${CODEC2_BUILD_DIR}/src:${portaudio_BINARY_DIR}:${DYLD_LIBRARY_PATH} ${CMAKE_SOURCE_DIR}/macdylibbundler/dylibbundler ARGS -od -b -x FreeDV.app/Contents/MacOS/FreeDV -d FreeDV.app/Contents/libs -p @loader_path/../libs/ -i /usr/lib -s ${CODEC2_BUILD_DIR}/src -s ${CMAKE_BINARY_DIR}/codec2_build/src ${PORTAUDIO_BUNDLE_ARG} -s `dirname ${CLANG_SANITIZER_FILE}` -ns
-        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/clean-duplicate-rpaths.sh FreeDV.app/
-        COMMAND cp ARGS ${CMAKE_CURRENT_SOURCE_DIR}/freedv.icns FreeDV.app/Contents/Resources
-        COMMAND rm ARGS -rf FreeDV.app/Contents/Frameworks
-        COMMAND mkdir ARGS FreeDV.app/Contents/Frameworks
-        
-        # Codesign binary so that it can execute
-        #COMMAND codesign --force --options runtime --timestamp --entitlements ${CMAKE_CURRENT_SOURCE_DIR}/entitlements.plist --sign ${MACOS_CODESIGN_IDENTITY} ${CMAKE_CURRENT_BINARY_DIR}/FreeDV.app `find ${CMAKE_CURRENT_BINARY_DIR}/FreeDV.app -name '*.so' -o -name '*.dylib'` ${CMAKE_CURRENT_BINARY_DIR}/FreeDV.app/Contents/MacOS/FreeDV 
-        COMMAND codesign --force --options runtime --timestamp --entitlements ${CMAKE_CURRENT_SOURCE_DIR}/entitlements.plist --sign ${MACOS_CODESIGN_IDENTITY} ${CMAKE_CURRENT_BINARY_DIR}/FreeDV.app `find ${CMAKE_CURRENT_BINARY_DIR}/FreeDV.app -name '*.so' -o -name '*.dylib'` ${CMAKE_CURRENT_BINARY_DIR}/FreeDV.app/Contents/MacOS/FreeDV 
-    )
-
-    if (MACOS_CODESIGN_KEYCHAIN_PROFILE)
-        add_custom_target(release
-            COMMAND ${CMAKE_SOURCE_DIR}/cmake/macos_build_dmg.sh ${CMAKE_CURRENT_BINARY_DIR}/FreeDV.app
-            COMMAND codesign --timestamp -i org.freedv.freedv --sign ${MACOS_CODESIGN_IDENTITY} FreeDV.dmg
-            COMMAND xcrun notarytool submit ./FreeDV.dmg --keychain-profile ${MACOS_CODESIGN_KEYCHAIN_PROFILE} --wait 
-            COMMAND xcrun stapler staple ./FreeDV.dmg
-            DEPENDS FreeDV)
-    else(MACOS_CODESIGN_KEYCHAIN_PROFILE)
-        add_custom_target(release
-            COMMAND ${CMAKE_SOURCE_DIR}/cmake/macos_build_dmg.sh ${CMAKE_CURRENT_BINARY_DIR}/FreeDV.app
-            DEPENDS FreeDV)
-    endif (MACOS_CODESIGN_KEYCHAIN_PROFILE)
-endif(APPLE)
-
-# Custom commands for signing Windows binaries
-if(SIGN_WINDOWS_BINARIES)
-    # Add custom command to sign freedv.exe.
-    if (PKCS11_SECONDARY_CERTIFICATE)
-        add_custom_command(
-            TARGET freedv 
-            POST_BUILD
-            COMMAND mv $<TARGET_FILE:freedv> $<TARGET_FILE:freedv>.tmp
-            COMMAND ${OSSLSIGNCODE_BIN} ARGS sign -pkcs11engine ${PKCS11_ENGINE} -pkcs11module ${PKCS11_MODULE} -pkcs11cert "${PKCS11_CERTIFICATE}" -key "${PKCS11_KEY}" -h ${SIGN_HASH} -ts ${TIMESTAMP_SERVER} -comm -ac ${INTERMEDIATE_CERT_FILE} -n "FreeDV - ${PROJECT_DESCRIPTION}" -i "https://freedv.org/" -in $<TARGET_FILE:freedv>.tmp -out $<TARGET_FILE:freedv>
-            COMMAND mv $<TARGET_FILE:freedv> $<TARGET_FILE:freedv>.tmp
-            COMMAND ${OSSLSIGNCODE_BIN} ARGS sign -nest -pkcs11engine ${PKCS11_ENGINE} -pkcs11module ${PKCS11_MODULE} -pkcs11cert "${PKCS11_SECONDARY_CERTIFICATE}" -key "${PKCS11_SECONDARY_KEY}" -h ${SIGN_HASH} -ts ${TIMESTAMP_SERVER} -comm -ac ${INTERMEDIATE_CERT_FILE} -n "FreeDV - ${PROJECT_DESCRIPTION}" -i "https://freedv.org/" -in $<TARGET_FILE:freedv>.tmp -out $<TARGET_FILE:freedv>
-            COMMAND rm $<TARGET_FILE:freedv>.tmp
-            VERBATIM)
-    else()
-        add_custom_command(
-            TARGET freedv 
-            POST_BUILD
-            COMMAND mv $<TARGET_FILE:freedv> $<TARGET_FILE:freedv>.tmp
-            COMMAND ${OSSLSIGNCODE_BIN} ARGS sign -pkcs11engine ${PKCS11_ENGINE} -pkcs11module ${PKCS11_MODULE} -pkcs11cert "${PKCS11_CERTIFICATE}" -key "${PKCS11_KEY}" -h ${SIGN_HASH} -ts ${TIMESTAMP_SERVER} -comm -ac ${INTERMEDIATE_CERT_FILE} -n "FreeDV - ${PROJECT_DESCRIPTION}" -i "https://freedv.org/" -in $<TARGET_FILE:freedv>.tmp -out $<TARGET_FILE:freedv>
-            COMMAND rm $<TARGET_FILE:freedv>.tmp
-            VERBATIM)
-    endif (PKCS11_SECONDARY_CERTIFICATE)
-endif(SIGN_WINDOWS_BINARIES)

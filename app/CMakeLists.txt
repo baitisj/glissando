@@ -138,8 +138,6 @@ set(BOOTSTRAP_WXWIDGETS FALSE CACHE BOOL
     "Download and build static wxWidgets instead of the system library.")
 set(USE_NATIVE_AUDIO TRUE CACHE BOOL
     "Use native audio code instead of PortAudio for audio I/O. Defaults to true.")
-set(SIGN_WINDOWS_BINARIES FALSE CACHE BOOL
-    "Enable signing of Windows binaries. See CODE_SIGNING.md for info.")
 set(ENABLE_ASAN FALSE CACHE BOOL
     "Instruments the build with AddressSanitizer for memory checks.")
 set(ENABLE_RTSAN FALSE CACHE BOOL
@@ -208,61 +206,6 @@ set(SANITIZERS_ENABLED TRUE)
 else(ENABLE_UBSAN OR ENABLE_TSAN OR ENABLE_ASAN OR ENABLE_RTSAN)
 set(SANITIZERS_ENABLED FALSE)
 endif(ENABLE_UBSAN OR ENABLE_TSAN OR ENABLE_ASAN OR ENABLE_RTSAN)
-
-if(SIGN_WINDOWS_BINARIES)
-    if(NOT WIN32 AND NOT MINGW)
-        message(FATAL_ERROR "Signing only makes sense for Windows builds.")
-    endif(NOT WIN32 AND NOT MINGW)
-
-    if(NOT DEFINED PKCS11_KEY_FILE OR NOT DEFINED PKCS11_CERTIFICATE_FILE OR NOT DEFINED INTERMEDIATE_CERT_FILE)
-        message(FATAL_ERROR "Must provide key and certificate files.")
-    endif(NOT DEFINED PKCS11_KEY_FILE OR NOT DEFINED PKCS11_CERTIFICATE_FILE OR NOT DEFINED INTERMEDIATE_CERT_FILE)
-
-    # Default PKCS#11 engine if not provided.
-    if(NOT DEFINED PKCS11_ENGINE)
-        # XXX -- assuming Ubuntu on amd64
-        set(PKCS11_ENGINE /usr/lib/x86_64-linux-gnu/engines-3/pkcs11.so)
-    endif(NOT DEFINED PKCS11_ENGINE)
-  
-    # Default PKCS#11 module if not provided.
-    if(NOT DEFINED PKCS11_MODULE)
-        # XXX -- we're assuming Ubuntu amd64 and SafeNet here.
-        set(PKCS11_MODULE /usr/lib/libeToken.so)
-    endif(NOT DEFINED PKCS11_MODULE)
-
-    # Default timestamping server
-    if(NOT DEFINED TIMESTAMP_SERVER)
-        set(TIMESTAMP_SERVER http://timestamp.digicert.com/)    
-    endif(NOT DEFINED TIMESTAMP_SERVER)
-
-    # Default hash algorithm
-    if(NOT DEFINED SIGN_HASH)
-        set(SIGN_HASH sha256)
-    endif(NOT DEFINED SIGN_HASH)
-
-    # Look for osslsigncode    
-    find_program(
-        OSSLSIGNCODE_BIN
-        osslsigncode
-        REQUIRED)
-
-    # Generate command to execute for signing binaries.
-    file(READ ${PKCS11_KEY_FILE} PKCS11_KEY_TMP)
-    file(READ ${PKCS11_CERTIFICATE_FILE} PKCS11_CERTIFICATE_TMP)
-    string(REPLACE "\n" "" PKCS11_KEY "${PKCS11_KEY_TMP}")
-    string(REPLACE "\n" "" PKCS11_CERTIFICATE "${PKCS11_CERTIFICATE_TMP}")
-
-    if (DEFINED PKCS11_SECONDARY_KEY_FILE)
-        file(READ ${PKCS11_SECONDARY_KEY_FILE} PKCS11_SECONDARY_KEY_TMP)
-        string(REPLACE "\n" "" PKCS11_SECONDARY_KEY "${PKCS11_SECONDARY_KEY_TMP}")
-    endif (DEFINED PKCS11_SECONDARY_KEY_FILE)
- 
-    if (DEFINED PKCS11_SECONDARY_CERTIFICATE_FILE)
-        file(READ ${PKCS11_SECONDARY_CERTIFICATE_FILE} PKCS11_SECONDARY_CERTIFICATE_TMP)
-        string(REPLACE "\n" "" PKCS11_SECONDARY_CERTIFICATE "${PKCS11_SECONDARY_CERTIFICATE_TMP}")
-    endif (DEFINED PKCS11_SECONDARY_CERTIFICATE_FILE)
- 
-endif(SIGN_WINDOWS_BINARIES)
 
 if(USE_STATIC_DEPS)
     set(USE_STATIC_PORTAUDIO TRUE FORCE)
@@ -346,13 +289,6 @@ if(MINGW)
     set(USE_STATIC_PORTAUDIO TRUE)
     # Setup HOST variables.
     include(cmake/MinGW.cmake)
-
-    # This sets up the exe icon for windows under mingw.
-    set(RES_FILES "${CMAKE_BINARY_DIR}/freedv.rc")
-    set(CMAKE_RC_COMPILER_INIT windres)
-    enable_language(RC)
-    set(CMAKE_RC_COMPILE_OBJECT
-        "<CMAKE_RC_COMPILER> --include-dir ${CMAKE_BINARY_DIR}/_deps/wxwidgets-src/include <FLAGS> -O coff <DEFINES> -i <SOURCE> -o <OBJECT>")
     include(InstallRequiredSystemLibraries)
 endif(MINGW)
 
@@ -630,7 +566,7 @@ add_subdirectory(contrib)
 
 message(STATUS "Build type will be: ${CMAKE_BUILD_TYPE}")
 
-# CPack configuration for Windows and Linux.
+# CPack configuration for Linux.
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "HF Digital Voice for Radio Amateurs")
 set(CPACK_PACKAGE_VENDOR "CMake")
 #set(CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/README")
@@ -659,94 +595,7 @@ if(FREEDV_VERSION_TAG)
     message(STATUS "package name = ${CPACK_PACKAGE_VERSION_PATCH}")
 endif()
 
-# Ensures that sample wav files are installed along with the application
-install(
-    DIRECTORY wav
-    DESTINATION share/freedv-gui
-    FILES_MATCHING PATTERN "*.wav")
-
-# Install documentation for the current version.
-install(
-    FILES USER_MANUAL.pdf USER_MANUAL.html USER_MANUAL.md
-    DESTINATION share/freedv-gui
-)    
-
-if(WIN32)
-    # Install pdb files.
-    install(
-        FILES ${CMAKE_CURRENT_BINARY_DIR}/src/glissando.pdb 
-        DESTINATION bin
-    )
-endif(WIN32)
-
-if(WIN32)
-    #
-    # Cpack NSIS configuration for Windows.
-    #
-
-    # Detect if we're doing a 32-bit or 64-bit windows build.
-    if(${CMAKE_SIZEOF_VOID_P} EQUAL 8)
-        set(CMAKE_CL_64 TRUE)
-        set(CPACK_NSIS_INSTALL_ROOT "$PROGRAMFILES64")
-    endif()
-    if(NOT ${CMAKE_BUILD_TYPE} STREQUAL "Debug")
-        set(CPACK_STRIP_FILES TRUE)
-    endif()
-    configure_file(cmake/GetDependencies.cmake.in cmake/GetDependencies.cmake
-        @ONLY
-    )
-    install(SCRIPT ${CMAKE_BINARY_DIR}/cmake/GetDependencies.cmake)
-
-    # There is a bug in NSI that does not handle full unix paths properly. Make
-    # sure there is at least one set of four (4) backlasshes.
-    #set(CPACK_PACKAGE_ICON "${CMake_SOURCE_DIR}/Utilities/Release\\\\InstallIcon.bmp")
-    set(CPACK_NSIS_INSTALLED_ICON_NAME "bin\\\\glissando.exe")
-    set(CPACK_NSIS_DISPLAY_NAME "${CPACK_PACKAGE_INSTALL_DIRECTORY}")
-    set(CPACK_NSIS_PACKAGE_NAME "FreeDV")
-    set(CPACK_PACKAGE_EXECUTABLES freedv;FreeDV)
-    set(CPACK_NSIS_URL_INFO_ABOUT "http://freedv.org")
-    set(CPACK_NSIS_MODIFY_PATH OFF)
-    set(CPACK_NSIS_MENU_LINKS
-        "http://freedv.org" "FreeDV Homepage")
-    set(CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS "${CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS}\r\nDeleteRegKey HKLM 'SOFTWARE\\\\CODEC2-Project\\\\FreeDV'")
-    set(CPACK_NSIS_MENU_LINKS "share/freedv-gui/USER_MANUAL.pdf" "FreeDV User Manual")
-
-    set(CPACK_WIN_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_VER_TWEAK}")
-
-    string(TIMESTAMP COPYRIGHT_YEAR "%Y")
-    set(CPACK_NSIS_DEFINES
-        "${CPACK_NSIS_DEFINES}
-VIProductVersion \\\"${CPACK_WIN_VERSION}\\\"
-VIFileVersion \\\"${CPACK_WIN_VERSION}\\\"
-VIAddVersionKey \\\"ProductName\\\" \\\"FreeDV\\\"
-VIAddVersionKey \\\"ProductVersion\\\" \\\"${CPACK_WIN_VERSION}\\\"
-VIAddVersionKey \\\"Company\\\" \\\"FreeDV\\\"
-VIAddVersionKey \\\"LegalCopyright\\\" \\\"Copyright (c) ${COPYRIGHT_YEAR} FreeDV\\\"
-VIAddVersionKey \\\"FileDescription\\\" \\\"FreeDV - ${PROJECT_DESCRIPTION}\\\"
-VIAddVersionKey \\\"FileVersion\\\" \\\"${CPACK_WIN_VERSION}\\\"
-VIAddVersionKey \\\"GitHash\\\" \\\"${GIT_HASH}\\\"
-    ")
-
-    # Ensures that we don't need to constantly update the rc file on every new release.
-    string(REPLACE "." "," VERSION_AS_RC ${CPACK_WIN_VERSION})
-    configure_file(${CMAKE_SOURCE_DIR}/contrib/freedv.rc.in ${CMAKE_BINARY_DIR}/freedv.rc)
-
-    if (FREEDV_USING_LLVM_MINGW)
-        set(CPACK_PACKAGE_FILE_NAME "FreeDV-${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}-windows-${CMAKE_SYSTEM_PROCESSOR}")
-    endif (FREEDV_USING_LLVM_MINGW)
-
-    if(SIGN_WINDOWS_BINARIES)
-        # Add finalize command for NSIS so the installer/uninstaller can be
-        # signed too.
-        set(CPACK_NSIS_FINALIZE_CMD "mv %1 %1.tmp; ${OSSLSIGNCODE_BIN} sign -pkcs11engine ${PKCS11_ENGINE} -pkcs11module ${PKCS11_MODULE} -pkcs11cert \\\"${PKCS11_CERTIFICATE}\\\" -key \\\"${PKCS11_KEY}\\\" -h ${SIGN_HASH} -comm -ts ${TIMESTAMP_SERVER} -ac ${INTERMEDIATE_CERT_FILE} -n \\\"FreeDV - ${PROJECT_DESCRIPTION}\\\" -i \\\"https://freedv.org/\\\" -in %1.tmp -out %1")
-        if (PKCS11_SECONDARY_CERTIFICATE)
-            set(CPACK_NSIS_FINALIZE_CMD "${CPACK_NSIS_FINALIZE_CMD}; mv %1 %1.tmp; ${OSSLSIGNCODE_BIN} sign -nest -pkcs11engine ${PKCS11_ENGINE} -pkcs11module ${PKCS11_MODULE} -pkcs11cert \\\"${PKCS11_SECONDARY_CERTIFICATE}\\\" -key \\\"${PKCS11_SECONDARY_KEY}\\\" -h ${SIGN_HASH} -comm -ts ${TIMESTAMP_SERVER} -ac ${INTERMEDIATE_CERT_FILE} -n \\\"FreeDV - ${PROJECT_DESCRIPTION}\\\" -i \\\"https://freedv.org/\\\" -in %1.tmp -out %1")
-        endif (PKCS11_SECONDARY_CERTIFICATE)
-        message(STATUS "Windows installer finalize command: ${CPACK_NSIS_FINALIZE_CMD}")
-    endif(SIGN_WINDOWS_BINARIES)
-
-    include(CPack)
-elseif(UNIX AND NOT APPLE)
+if(UNIX AND NOT APPLE)
     # Linux packaging
     SET(CPACK_GENERATOR "DEB")
     SET(CPACK_DEBIAN_PACKAGE_MAINTAINER "Mooneer Salem <mooneer@gmail.com>") #required
@@ -759,7 +608,7 @@ elseif(UNIX AND NOT APPLE)
     SET(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
     include(CPack)
 
-endif(WIN32)
+endif(UNIX AND NOT APPLE)
 
 if(UNITTEST)
 # The below tests are currently Linux/macOS-only. A PowerShell version of fullduplex_* 
