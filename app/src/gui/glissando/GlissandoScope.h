@@ -226,6 +226,7 @@ private:
     double sendStart_;              // where the last first voice started
     double lastTick_;
     double lastTransmitting_;
+    double lastQueued_;             // when addSent() was last handed a frame
 
     // Ships are printed a line per row of history, bottom line first, so
     // they scroll into view the right way up. The notes sung while one row

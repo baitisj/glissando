@@ -119,6 +119,7 @@ class OptionsDlg : public wxDialog
 
         wxCheckBox*  m_ckboxTextChatUsDataSegmentsOnly;
         wxCheckBox*  m_ckboxGlissandoChords;
+        wxCheckBox*  m_ckboxGlissandoTransmitShips;
         wxCheckBox*  m_ckboxData2G;
         wxTextCtrl*  m_txtData2GHost;
         wxTextCtrl*  m_txtData2GKissPort;

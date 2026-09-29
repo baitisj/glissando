@@ -80,6 +80,7 @@ FreeDVConfiguration::FreeDVConfiguration()
     , glissandoChords("/Glissando/Chords", true)
     , glissandoScanRateDeci("/Glissando/ScanRateDeci", 40)
     , glissandoScopeLens("/Glissando/ScopeLens", true)
+    , glissandoTransmitShips("/Glissando/TransmitShips", true)
     , glissandoWindowLeft("/Glissando/WindowLeft", -1)
     , glissandoWindowTop("/Glissando/WindowTop", -1)
     , glissandoWindowWidth("/Glissando/WindowWidth", 1040)
@@ -158,6 +159,7 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     load_(config, glissandoChords);
     load_(config, glissandoScanRateDeci);
     load_(config, glissandoScopeLens);
+    load_(config, glissandoTransmitShips);
     load_(config, glissandoWindowLeft);
     load_(config, glissandoWindowTop);
     load_(config, glissandoWindowWidth);
@@ -237,6 +239,7 @@ void FreeDVConfiguration::save(wxConfigBase* config)
     save_(config, glissandoChords);
     save_(config, glissandoScanRateDeci);
     save_(config, glissandoScopeLens);
+    save_(config, glissandoTransmitShips);
     save_(config, glissandoWindowLeft);
     save_(config, glissandoWindowTop);
     save_(config, glissandoWindowWidth);

@@ -98,6 +98,7 @@ public:
     ConfigurationDataElement<bool> glissandoChords;
     ConfigurationDataElement<int> glissandoScanRateDeci;
     ConfigurationDataElement<bool> glissandoScopeLens;
+    ConfigurationDataElement<bool> glissandoTransmitShips;  // rockets and invaders on the scope while sending
     ConfigurationDataElement<long> glissandoWindowLeft;
     ConfigurationDataElement<long> glissandoWindowTop;
     ConfigurationDataElement<long> glissandoWindowWidth;
