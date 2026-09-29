@@ -141,7 +141,7 @@ GlissandoScope::GlissandoScope(wxWindow* parent, wxWindowID id)
     SetBackgroundStyle(wxBG_STYLE_PAINT);
     SetMinSize(wxSize(420, 240));
     SetToolTip(_("Double click to put the scale's lowest note there. "
-                 "Mouse wheel nudges the tuning by 1 Hz, shift for 0.1 Hz."));
+                 "Mouse wheel nudges the tuning 0.1 Hz, 10 Hz with shift, 1 Hz with control."));
 
     Bind(wxEVT_PAINT, &GlissandoScope::OnPaint, this);
     Bind(wxEVT_SIZE, &GlissandoScope::OnSize, this);
@@ -506,12 +506,18 @@ void GlissandoScope::OnDoubleClick(wxMouseEvent& event)
 
 void GlissandoScope::OnWheel(wxMouseEvent& event)
 {
-    int clicks = event.GetWheelRotation() / std::max(1, event.GetWheelDelta());
+    // Smooth-scrolling wheels and touchpads send part clicks: save them up.
+    int delta = std::max(1, event.GetWheelDelta());
+    wheelRotation_ += event.GetWheelRotation();
+    int clicks = wheelRotation_ / delta;
+    wheelRotation_ -= clicks * delta;
     if (clicks == 0) return;
     wxCommandEvent tune(EVT_GLISSANDO_SCOPE_TUNE, GetId());
     tune.SetEventObject(this);
     tune.SetInt(0);
-    tune.SetExtraLong(clicks * (event.ShiftDown() ? 1 : 10));
+    // Tenths of a Hz: 0.1 Hz a click, 10 Hz with shift, 1 Hz with control,
+    // as the Melody offset dial.
+    tune.SetExtraLong(clicks * (event.ControlDown() ? 10 : event.ShiftDown() ? 100 : 1));
     ProcessWindowEvent(tune);
 }
 

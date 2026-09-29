@@ -255,6 +255,11 @@ void GlissandoConsole::buildControls()
     tuningDial_ = new Dial(tuningPlate, wxID_ANY, _("Melody offset"), -MAX_TUNING_HZ, MAX_TUNING_HZ,
                            0.1, settings_.tuningOffsetHz, wxSize(170, 150));
     tuningDial_->SetFormatter([](double v) { return wxString::Format("%+.1f Hz", v); });
+    tuningDial_->SetDefault(0.0);
+    tuningDial_->SetWheelSteps(0.1, 10.0, 1.0);
+    tuningDial_->SetToolTip(_("Mouse wheel: 0.1 Hz a click, 10 Hz with shift, 1 Hz with control. "
+                              "Drag up or down (shift for fine); dragging catches at 0 Hz, "
+                              "and a double click returns to it."));
     tuningPlate->GetContentSizer()->Add(tuningDial_, 0, wxALIGN_CENTER_HORIZONTAL);
     column->Add(tuningPlate, 0, wxEXPAND | wxBOTTOM, 6);
 
@@ -510,6 +515,7 @@ void GlissandoConsole::selectScale(Glissando::Scale scale)
 void GlissandoConsole::setTuning(double hz)
 {
     hz = std::round(std::min(MAX_TUNING_HZ, std::max(-MAX_TUNING_HZ, hz)) * 10.0) / 10.0;
+    if (hz == 0.0) hz = 0.0; // never "-0.0"
     settings_.tuningOffsetHz = hz;
     tuningDial_->SetValue(hz);
     applySettings(true);
