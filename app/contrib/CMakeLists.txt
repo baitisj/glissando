@@ -17,6 +17,6 @@ if(UNIX AND NOT APPLE)
 
     set(DESKTOP_INSTALL_DIR ${CMAKE_INSTALL_PREFIX}/share/applications
         CACHE PATH "Location to install desktop files.")
-    install(FILES freedv.desktop
+    install(FILES glissando.desktop
         DESTINATION ${DESKTOP_INSTALL_DIR})
 endif(UNIX AND NOT APPLE)

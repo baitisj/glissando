@@ -24,9 +24,9 @@ function(CheckGitRead git_hash)
 endfunction()
 
 function(CheckGitVersion)
-    # Get the latest abbreviated commit hash of the working branch
+    # Get the abbreviated commit hash (not describe, which prints tag names)
     execute_process(
-        COMMAND git describe --abbrev=4 --always HEAD
+        COMMAND git rev-parse --short=7 HEAD
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         OUTPUT_VARIABLE GIT_HASH
         OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -51,11 +51,11 @@ function(CheckGitVersion)
     endif ()
 
     if(FREEDV_VERSION_TAG)
-        set(FREEDV_VERSION "${FreeDV_VERSION}-${FREEDV_VERSION_TAG}-${GIT_HASH}")
+        set(FREEDV_VERSION "${Glissando_VERSION}-${FREEDV_VERSION_TAG}-${GIT_HASH}")
     else()
-        set(FREEDV_VERSION "${FreeDV_VERSION}")
+        set(FREEDV_VERSION "${Glissando_VERSION}")
     endif()
-    set(FREEDV_VERSION_CLEAN "${FreeDV_VERSION}")
+    set(FREEDV_VERSION_CLEAN "${Glissando_VERSION}")
     file(WRITE ${CMAKE_BINARY_DIR}/freedv-version.txt ${FREEDV_VERSION})
 
     # Only update the git_version.cpp if the hash has changed. This will
@@ -77,7 +77,7 @@ function(CheckGitSetup)
         -Dpre_configure_dir=${pre_configure_dir}
         -Dpost_configure_file=${post_configure_dir}
         -DGIT_HASH_CACHE=${GIT_HASH_CACHE}
-        -DFreeDV_VERSION=${FreeDV_VERSION}
+        -DGlissando_VERSION=${Glissando_VERSION}
         -DFREEDV_VERSION_TAG=${FREEDV_VERSION_TAG}
         -P ${CURRENT_LIST_DIR}/CheckGit.cmake
         BYPRODUCTS ${post_configure_file}

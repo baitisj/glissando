@@ -14,10 +14,10 @@ endif()
 
 set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum OS X deployment version")
 
-set(PROJECT_NAME FreeDV)
-set(PROJECT_VERSION 2.4.1)
-set(PROJECT_DESCRIPTION "HF Digital Voice for Radio Amateurs")
-set(PROJECT_HOMEPAGE_URL "https://freedv.org")
+set(PROJECT_NAME Glissando)
+set(PROJECT_VERSION 0.1.0)
+set(PROJECT_DESCRIPTION "Chirp text chat for HF amateur radio")
+set(PROJECT_HOMEPAGE_URL "https://github.com/baitisj/glissando")
 
 # Makes FreeDV overridden CMake platform available for ARM MinGW builds.
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
@@ -56,15 +56,10 @@ if(NOT DEFINED LINUX)
     endif((${LINUX_LOC} GREATER 0) OR (${LINUX_LOC} EQUAL 0))
 endif(NOT DEFINED LINUX)
 
-# Adds a tag to the end of the version string. Leave empty
-# for official release builds.
+# Adds a tag to the end of the version string (with the git hash).
+# Pass -DFREEDV_VERSION_TAG= (empty) for a bare version number.
 if(NOT DEFINED FREEDV_VERSION_TAG)
-set(FREEDV_VERSION_TAG "dev")
-
-# Uncomment the below definition to cause the build to expire
-# six months from the day it was built. This should be commented
-# for official releases.
-add_definitions(-DUNOFFICIAL_RELEASE)
+set(FREEDV_VERSION_TAG "beta")
 endif(NOT DEFINED FREEDV_VERSION_TAG)
 
 # Prevent in-source builds to protect automake/autoconf config.
@@ -567,24 +562,24 @@ add_subdirectory(contrib)
 message(STATUS "Build type will be: ${CMAKE_BUILD_TYPE}")
 
 # CPack configuration for Linux.
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "HF Digital Voice for Radio Amateurs")
-set(CPACK_PACKAGE_VENDOR "CMake")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${PROJECT_DESCRIPTION}")
+set(CPACK_PACKAGE_VENDOR "Glissando")
 #set(CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/README")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/COPYING")
-set(CPACK_PACKAGE_VERSION_MAJOR ${FreeDV_VERSION_MAJOR})
-set(CPACK_PACKAGE_VERSION_MINOR ${FreeDV_VERSION_MINOR})
+set(CPACK_PACKAGE_VERSION_MAJOR ${Glissando_VERSION_MAJOR})
+set(CPACK_PACKAGE_VERSION_MINOR ${Glissando_VERSION_MINOR})
 # CPack expects a patch level version so set it here and override if we
 # are actually setting one.
 set(CPACK_PACKAGE_VERSION_PATCH 0)
-if(FreeDV_VERSION_PATCH)
-    set(CPACK_PACKAGE_VERSION_PATCH ${FreeDV_VERSION_PATCH})
+if(Glissando_VERSION_PATCH)
+    set(CPACK_PACKAGE_VERSION_PATCH ${Glissando_VERSION_PATCH})
 endif()
-if(FreeDV_VERSION_TWEAK)
-    set(CPACK_PACKAGE_VERSION_PATCH "${CPACK_PACKAGE_VERSION_PATCH}.${FreeDV_VERSION_TWEAK}")
+if(Glissando_VERSION_TWEAK)
+    set(CPACK_PACKAGE_VERSION_PATCH "${CPACK_PACKAGE_VERSION_PATCH}.${Glissando_VERSION_TWEAK}")
     set(CPACK_VER_TWEAK "${CPACK_PACKAGE_VERSION_PATCH}")
-else(FreeDV_VERSION_TWEAK)
+else(Glissando_VERSION_TWEAK)
     set(CPACK_VER_TWEAK "${CPACK_PACKAGE_VERSION_PATCH}.0")
-endif(FreeDV_VERSION_TWEAK)
+endif(Glissando_VERSION_TWEAK)
     
 if(FREEDV_VERSION_TAG)
     if(GIT_HASH)
@@ -598,7 +593,7 @@ endif()
 if(UNIX AND NOT APPLE)
     # Linux packaging
     SET(CPACK_GENERATOR "DEB")
-    SET(CPACK_DEBIAN_PACKAGE_MAINTAINER "Mooneer Salem <mooneer@gmail.com>") #required
+    SET(CPACK_DEBIAN_PACKAGE_MAINTAINER "AG7EW <12502877+baitisj@users.noreply.github.com>") #required
     if(USE_NATIVE_AUDIO)
     SET(CPACK_DEBIAN_PACKAGE_DEPENDS "codec2 (>= 1.1.1), libspeexdsp1 (>= 1.2~rc1.2-1+b2), libwxgtk3.0-gtk3-0v5  (>= 3.0.4+dfsg-3), libpulse0 (>= 14.2-2), libhamlib2 (>= 3.3-10build1), libasound2 (>= 1.1.8-1), libao4 (>= 1.2.2+20180113-1), libgsm1 (>= 1.0.18-2), libsndfile1 (>= 1.0.28-6)")
     else(USE_NATIVE_AUDIO)

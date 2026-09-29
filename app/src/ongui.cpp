@@ -1981,14 +1981,7 @@ void MainFrame::OnToolsImportConfig(wxCommandEvent& event)
     wxFileName fn(path);
     wxGetApp().customConfigFileName = fn.GetFullName();
 
-    SetTitle(wxString::Format("%s (%s)", _("FreeDV ") + wxString::FromUTF8(GetFreeDVVersion().c_str()), wxGetApp().customConfigFileName));
-#if defined(UNOFFICIAL_RELEASE)
-    wxDateTime buildDate(wxInvalidDateTime);
-    wxString::const_iterator iter;
-    buildDate.ParseDate(FREEDV_BUILD_DATE, &iter);
-    auto expireDate = buildDate + EXPIRES_AFTER_TIMEFRAME;
-    SetTitle(GetTitle() + wxString::Format(" [Expires %s]", expireDate.FormatDate()));
-#endif // defined(UNOFFICIAL_RELEASE)
+    SetTitle(wxString::Format("%s (%s)", _("Glissando ") + wxString::FromUTF8(GetFreeDVVersion().c_str()), wxGetApp().customConfigFileName));
     setConfiguration_(importConfig);
 
     // Remember this file so it is automatically restored on the next startup.
@@ -2025,12 +2018,5 @@ void MainFrame::OnToolsLoadDefaultConfig(wxCommandEvent& event)
 
     // Clear any custom config file indicator from the title bar.
     wxGetApp().customConfigFileName = wxEmptyString;
-    SetTitle(_("FreeDV ") + wxString::FromUTF8(GetFreeDVVersion().c_str()));
-#if defined(UNOFFICIAL_RELEASE)
-    wxDateTime buildDate(wxInvalidDateTime);
-    wxString::const_iterator iter;
-    buildDate.ParseDate(FREEDV_BUILD_DATE, &iter);
-    auto expireDate = buildDate + EXPIRES_AFTER_TIMEFRAME;
-    SetTitle(GetTitle() + wxString::Format(" [Expires %s]", expireDate.FormatDate()));
-#endif // defined(UNOFFICIAL_RELEASE)
+    SetTitle(_("Glissando ") + wxString::FromUTF8(GetFreeDVVersion().c_str()));
 }

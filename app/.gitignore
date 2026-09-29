@@ -1,5 +1,7 @@
 /build/
 /build_linux/
+/build-appimage/
+appimage/linuxdeploy-plugin-gtk.sh
 /build_osx/
 /codec2/
 /hamlib/
@@ -15,3 +17,4 @@ a.out
 *.marks
 *.AppDir
 *.AppImage
+appimage/.cache/

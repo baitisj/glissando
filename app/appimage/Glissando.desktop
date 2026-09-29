@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Glissando
+Exec=glissando
+Icon=glissando
+Type=Application
+Terminal=false
+Categories=AudioVideo;Audio;HamRadio;
+Comment=Chirp text chat for HF amateur radio
