@@ -284,7 +284,11 @@ std::vector<GlissandoScopeFrame> MainFrame::glissandoHeardFrames()
 std::vector<GlissandoScopeSent> MainFrame::glissandoSentFrames()
 {
     std::vector<GlissandoScopeSent> frames;
-    for (const TextMessagingModem::GlissandoSent& sent : textMessagingModem().takeGlissandoSent())
+    // Taken either way, so the modem's queue does not fill while the ships
+    // are switched off.
+    std::vector<TextMessagingModem::GlissandoSent> sentFrames = textMessagingModem().takeGlissandoSent();
+    if (!wxGetApp().appConfiguration.glissandoTransmitShips) return frames;
+    for (const TextMessagingModem::GlissandoSent& sent : sentFrames)
     {
         GlissandoScopeSent frame;
         frame.symbolSeconds = Glissando::gearInfo(sent.gear).symbolSeconds;
@@ -350,10 +354,22 @@ std::vector<double> MainFrame::glissandoFrequencyPresets()
     return presets;
 }
 
-void MainFrame::glissandoShowChat()
+void MainFrame::glissandoShowChat(bool show)
 {
+    if (!show)
+    {
+        // Hidden, not destroyed, as its own close box does.
+        if (m_textMessagingDialog != nullptr) m_textMessagingDialog->Hide();
+        return;
+    }
+
     wxCommandEvent event;
     OnToolsTextMessaging(event);
+}
+
+bool MainFrame::glissandoChatShown()
+{
+    return m_textMessagingDialog != nullptr && m_textMessagingDialog->IsShown();
 }
 
 void MainFrame::glissandoShowSnoop(bool show)

@@ -133,6 +133,7 @@ GlissandoScope::GlissandoScope(wxWindow* parent, wxWindowID id)
     , sendStart_(0.0)
     , lastTick_(0.0)
     , lastTransmitting_(0.0)
+    , lastQueued_(0.0)
     , gatheringHeroes_(true)
     , printingHeroes_(true)
     , printingLine_(-1)
@@ -215,6 +216,7 @@ void GlissandoScope::addHeard(const GlissandoScopeFrame& frame)
 void GlissandoScope::addSent(const GlissandoScopeSent& frame)
 {
     if (frame.melody.empty()) return;
+    lastQueued_ = steadySeconds();
     // A second voice sings alongside the first; anything else follows on
     // from what is queued, or starts now.
     // An opening chord goes before the first frame, a closing one after the last.
@@ -240,8 +242,11 @@ void GlissandoScope::advanceSent(double now)
         sendClock_ += elapsed;
         lastTransmitting_ = now;
     }
-    else if (!sending_.empty() && now - lastTransmitting_ > SENT_STALE_SECONDS)
+    else if (!sending_.empty() && now - std::max(lastTransmitting_, lastQueued_) > SENT_STALE_SECONDS)
     {
+        // Measured from when we last transmitted or were handed a frame,
+        // whichever is later: frames are made before the transmitter keys,
+        // and one handed over after a long quiet spell is not stale.
         clearSent();
     }
 

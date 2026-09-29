@@ -846,7 +846,7 @@ bool MainApp::OnInit()
     g_parent = frame;
     frame->openGlissandoConsole();
     frame->CallAfter([]() {
-        wxGetApp().frame->glissandoShowChat();
+        wxGetApp().frame->glissandoShowChat(true);
         wxGetApp().frame->glissandoShowSnoop(true);
     });
 

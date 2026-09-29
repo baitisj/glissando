@@ -404,7 +404,8 @@ public:
     virtual void glissandoAbortTransmit() override;
     virtual void glissandoSetRigFrequency(double hz) override;
     virtual std::vector<double> glissandoFrequencyPresets() override;
-    virtual void glissandoShowChat() override;
+    virtual void glissandoShowChat(bool show) override;
+    virtual bool glissandoChatShown() override;
     virtual void glissandoShowSnoop(bool show) override;
     virtual bool glissandoSnoopShown() override;
     virtual bool glissandoSetupAvailable(GlissandoSetup setup) override;

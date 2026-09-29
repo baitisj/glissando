@@ -101,7 +101,9 @@ public:
     // The operator's list of favourite dial frequencies, in Hz.
     virtual std::vector<double> glissandoFrequencyPresets() = 0;
 
-    virtual void glissandoShowChat() = 0;
+    // The chat window: shows or hides it, and says whether it is showing.
+    virtual void glissandoShowChat(bool show) = 0;
+    virtual bool glissandoChatShown() = 0;
 
     // Every station's traffic, not only ours: shows or hides its window,
     // and says whether it is showing.

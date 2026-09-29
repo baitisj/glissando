@@ -344,8 +344,8 @@ void GlissandoConsole::buildControls()
     auto* switches = new wxBoxSizer(wxVERTICAL);
     engageButton_ = new Button(commandPlate, wxID_ANY, _("Engage"), true, wxSize(COLUMN, engageHeight));
     engageButton_->SetToolTip(_("Start or stop the audio."));
-    chatButton_ = new Button(commandPlate, wxID_ANY, _("Transmission log"), false, wxSize(COLUMN, ROW));
-    chatButton_->SetToolTip(_("Open the chat window."));
+    chatButton_ = new Button(commandPlate, wxID_ANY, _("Transmission log"), true, wxSize(COLUMN, ROW));
+    chatButton_->SetToolTip(_("Open or close the chat window."));
     preferencesButton_ = new Button(commandPlate, wxID_ANY, _("Preferences"), false, wxSize(COLUMN, ROW));
     preferencesButton_->SetToolTip(_("Options, sound cards, rig control and audio filters."));
     switches->AddSpacer(engageTop);
@@ -435,7 +435,10 @@ void GlissandoConsole::buildControls()
         }
         refreshTelemetry();
     });
-    chatButton_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { host_->glissandoShowChat(); });
+    chatButton_->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent&) {
+        host_->glissandoShowChat(chatButton_->IsChecked());
+        chatButton_->SetChecked(host_->glissandoChatShown());
+    });
     snoopButton_->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent&) {
         host_->glissandoShowSnoop(snoopButton_->IsChecked());
         snoopButton_->SetChecked(host_->glissandoSnoopShown());
@@ -637,7 +640,8 @@ void GlissandoConsole::refreshTelemetry()
     rigReadout_->SetText(t.rigFrequencyKnown ? wxString::Format("%.3f kHz", t.rigFrequencyHz / 1000.0)
                                              : wxString("---"));
 
-    // The snooping window can be closed from its own title bar.
+    // Both windows can be opened or closed from elsewhere too.
+    chatButton_->SetChecked(host_->glissandoChatShown());
     snoopButton_->SetChecked(host_->glissandoSnoopShown());
 }
 
