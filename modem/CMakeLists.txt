@@ -20,6 +20,7 @@ endif()
 
 add_library(glissando_modem STATIC
     GlissandoChord.cpp
+    GlissandoCw.cpp
     GlissandoDemod.cpp
     GlissandoFec.cpp
     GlissandoFft.cpp
@@ -48,4 +49,5 @@ if(UNITTEST)
     glissando_test(glissando_link_test test/GlissandoLinkTest.cpp)
     glissando_test(glissando_timing_test test/GlissandoTimingTest.cpp)
     glissando_test(glissando_chord_test test/GlissandoChordTest.cpp)
+    glissando_test(glissando_cw_test test/GlissandoCwTest.cpp)
 endif(UNITTEST)

@@ -75,6 +75,10 @@ FreeDVConfiguration::FreeDVConfiguration()
     , glissandoTuningDeciHz("/Glissando/TuningDeciHz", 0)
     , glissandoListenAllGears("/Glissando/ListenAllGears", true)
     , glissandoChords("/Glissando/Chords", true)
+    , glissandoTail("/Glissando/Tail", 2)
+    , glissandoCwText("/Glissando/CwText", "Glissando de <MYCALL>")
+    , glissandoCwWpm("/Glissando/CwWpm", 20)
+    , glissandoCwIdMinutes("/Glissando/CwIdMinutes", 10)
     , glissandoScanRateDeci("/Glissando/ScanRateDeci", 40)
     , glissandoScopeLens("/Glissando/ScopeLens", true)
     , glissandoTransmitShips("/Glissando/TransmitShips", true)
@@ -150,6 +154,14 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     load_(config, glissandoTuningDeciHz);
     load_(config, glissandoListenAllGears);
     load_(config, glissandoChords);
+    // Before the tail had its own setting, turning the chords off turned
+    // off the closing one too; keep such a station as quiet as it was.
+    bool tailSaved = config->HasEntry("/Glissando/Tail");
+    load_(config, glissandoTail);
+    if (!tailSaved && !glissandoChords) glissandoTail = 0;
+    load_(config, glissandoCwText);
+    load_(config, glissandoCwWpm);
+    load_(config, glissandoCwIdMinutes);
     load_(config, glissandoScanRateDeci);
     load_(config, glissandoScopeLens);
     load_(config, glissandoTransmitShips);
@@ -226,6 +238,10 @@ void FreeDVConfiguration::save(wxConfigBase* config)
     save_(config, glissandoTuningDeciHz);
     save_(config, glissandoListenAllGears);
     save_(config, glissandoChords);
+    save_(config, glissandoTail);
+    save_(config, glissandoCwText);
+    save_(config, glissandoCwWpm);
+    save_(config, glissandoCwIdMinutes);
     save_(config, glissandoScanRateDeci);
     save_(config, glissandoScopeLens);
     save_(config, glissandoTransmitShips);

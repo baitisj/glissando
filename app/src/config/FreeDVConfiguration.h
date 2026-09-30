@@ -92,7 +92,11 @@ public:
     ConfigurationDataElement<wxString> glissandoScale;
     ConfigurationDataElement<int> glissandoTuningDeciHz;
     ConfigurationDataElement<bool> glissandoListenAllGears;
-    ConfigurationDataElement<bool> glissandoChords;
+    ConfigurationDataElement<bool> glissandoChords;         // the opening chord
+    ConfigurationDataElement<int> glissandoTail;            // 0 off, 1 chord, 2 CW
+    ConfigurationDataElement<wxString> glissandoCwText;     // <MYCALL> is the Station callsign
+    ConfigurationDataElement<int> glissandoCwWpm;
+    ConfigurationDataElement<int> glissandoCwIdMinutes;     // 0: every keying
     ConfigurationDataElement<int> glissandoScanRateDeci;
     ConfigurationDataElement<bool> glissandoScopeLens;
     ConfigurationDataElement<bool> glissandoTransmitShips;  // rockets and invaders on the scope while sending

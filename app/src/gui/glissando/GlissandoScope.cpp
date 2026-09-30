@@ -256,12 +256,16 @@ void GlissandoScope::advanceSent(double now)
         while (sending.next < frame.melody.size() &&
                sending.offset + sending.next * frame.symbolSeconds <= sendClock_)
         {
-            int note = std::min(7, std::max(0, frame.melody[sending.next]));
-            double hz = frame.notesHz[note];
-            gatheringHeroes_ = frame.heroes;
-            if (std::find(gatheringHz_.begin(), gatheringHz_.end(), hz) == gatheringHz_.end())
+            // A CW tail's silences are -1: nothing sung.
+            if (frame.melody[sending.next] >= 0)
             {
-                gatheringHz_.push_back(hz);
+                int note = std::min(7, frame.melody[sending.next]);
+                double hz = frame.notesHz[note];
+                gatheringHeroes_ = frame.heroes;
+                if (std::find(gatheringHz_.begin(), gatheringHz_.end(), hz) == gatheringHz_.end())
+                {
+                    gatheringHz_.push_back(hz);
+                }
             }
             sending.next++;
         }

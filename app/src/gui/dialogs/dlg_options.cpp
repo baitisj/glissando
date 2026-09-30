@@ -21,6 +21,8 @@
 
 #include <wx/gbsizer.h>
 #include <wx/numformatter.h>
+#include "GlissandoCw.h"
+#include "pipeline/TextMessagingModem.h"
 #include "dlg_options.h"
 
 
@@ -305,12 +307,56 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     sbSizer_textChat->Add(m_ckboxTextChatUsDataSegmentsOnly, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
 
     m_ckboxGlissandoChords = new wxCheckBox(
-        sb_textChat, wxID_ANY, _("Open and close each Glissando transmission with a chord"),
+        sb_textChat, wxID_ANY, _("Open each Glissando transmission with a chord"),
         wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
     m_ckboxGlissandoChords->SetToolTip(
-        _("Opens with E4 and D5 together for 0.6 s, which other stations hear as the channel being "
-          "taken long before a frame decodes, and closes with every note of the scale for one bar."));
+        _("E4 and D5 together for 0.6 s, which other stations hear as the channel being "
+          "taken long before a frame decodes."));
     sbSizer_textChat->Add(m_ckboxGlissandoChords, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
+
+    // The tail: how each transmission ends (docs/CW_TAIL.md).
+    wxFlexGridSizer* tailSizer = new wxFlexGridSizer(2, 5, 5);
+    tailSizer->AddGrowableCol(1);
+
+    tailSizer->Add(new wxStaticText(sb_textChat, wxID_ANY, _("Tail:")), 0, wxALIGN_CENTER_VERTICAL);
+    wxString tailChoices[] = {_("Off"), _("Chord"), _("CW")};
+    m_choiceGlissandoTail = new wxChoice(sb_textChat, wxID_ANY, wxDefaultPosition, wxDefaultSize, 3, tailChoices);
+    m_choiceGlissandoTail->SetToolTip(
+        _("How each Glissando transmission ends. Chord: every note of the scale for one bar. "
+          "CW: the text below in Morse, each dit and dah sung on a note of the scale, so a listener "
+          "knows what to search for; it also identifies the station. The CW tail plays at most once "
+          "every so many minutes, and the chord ends the transmissions in between."));
+    tailSizer->Add(m_choiceGlissandoTail, 0, wxALIGN_LEFT);
+
+    tailSizer->Add(new wxStaticText(sb_textChat, wxID_ANY, _("CW text:")), 0, wxALIGN_CENTER_VERTICAL);
+    m_txtGlissandoCwText = new wxTextCtrl(sb_textChat, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(260, -1));
+    m_txtGlissandoCwText->SetToolTip(_("<MYCALL> is replaced by the callsign on the Station tab."));
+    tailSizer->Add(m_txtGlissandoCwText, 1, static_cast<int>(wxEXPAND));
+
+    tailSizer->Add(new wxStaticText(sb_textChat, wxID_ANY, _("CW speed:")), 0, wxALIGN_CENTER_VERTICAL);
+    wxBoxSizer* speedSizer = new wxBoxSizer(wxHORIZONTAL);
+    m_spinGlissandoCwWpm = new wxSpinCtrl(sb_textChat, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(80, -1),
+                                          wxSP_ARROW_KEYS, Glissando::CW_MIN_WPM, Glissando::CW_MAX_WPM,
+                                          Glissando::CW_DEFAULT_WPM);
+    m_spinGlissandoCwWpm->SetToolTip(
+        _("US rules (47 CFR 97.119) allow an automatic CW identification at up to 20 WPM."));
+    speedSizer->Add(m_spinGlissandoCwWpm, 0, wxALIGN_CENTER_VERTICAL);
+    speedSizer->Add(new wxStaticText(sb_textChat, wxID_ANY, _("WPM, at most once every")), 0,
+                    static_cast<int>(wxLEFT) | static_cast<int>(wxRIGHT) | wxALIGN_CENTER_VERTICAL, 5);
+    m_spinGlissandoCwIdMinutes = new wxSpinCtrl(sb_textChat, wxID_ANY, wxEmptyString, wxDefaultPosition,
+                                                wxSize(80, -1), wxSP_ARROW_KEYS, 0, 60, 10);
+    m_spinGlissandoCwIdMinutes->SetToolTip(
+        _("Ten minutes is the US station identification interval. 0 plays the CW tail on every transmission."));
+    speedSizer->Add(m_spinGlissandoCwIdMinutes, 0, wxALIGN_CENTER_VERTICAL);
+    speedSizer->Add(new wxStaticText(sb_textChat, wxID_ANY, _("minutes")), 0,
+                    static_cast<int>(wxLEFT) | wxALIGN_CENTER_VERTICAL, 5);
+    tailSizer->Add(speedSizer, 0, wxALIGN_LEFT);
+
+    tailSizer->AddSpacer(0);
+    m_textGlissandoCwTail = new wxStaticText(sb_textChat, wxID_ANY, wxEmptyString);
+    tailSizer->Add(m_textGlissandoCwTail, 0, wxALIGN_LEFT);
+
+    sbSizer_textChat->Add(tailSizer, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
 
     m_ckboxGlissandoTransmitShips = new wxCheckBox(
         sb_textChat, wxID_ANY, _("Draw rocket ships and invaders on the visi-scope while sending"),
@@ -353,6 +399,10 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     sbSizer_textChat->Add(data2gSizer, 0, wxALIGN_LEFT, 0);
 
     m_ckboxData2G->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent&) { updateData2GControls_(); });
+    m_choiceGlissandoTail->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { updateCwTailControls_(); });
+    m_txtGlissandoCwText->Bind(wxEVT_TEXT, [this](wxCommandEvent&) { updateCwTailControls_(); });
+    m_spinGlissandoCwWpm->Bind(wxEVT_SPINCTRL, [this](wxSpinEvent&) { updateCwTailControls_(); });
+    m_txt_callsign->Bind(wxEVT_TEXT, [this](wxCommandEvent& event) { updateCwTailControls_(); event.Skip(); });
     m_ckboxData2GCommandPort->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent&) { updateData2GControls_(); });
 
     sizerModem->Add(sbSizer_textChat, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
@@ -562,6 +612,10 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
 
         m_ckboxTextChatUsDataSegmentsOnly->SetValue(wxGetApp().appConfiguration.textChatUsDataSegmentsOnly);
         m_ckboxGlissandoChords->SetValue(wxGetApp().appConfiguration.glissandoChords);
+        m_choiceGlissandoTail->SetSelection(std::min(std::max(wxGetApp().appConfiguration.glissandoTail.get(), 0), 2));
+        m_txtGlissandoCwText->ChangeValue(wxGetApp().appConfiguration.glissandoCwText);
+        m_spinGlissandoCwWpm->SetValue(wxGetApp().appConfiguration.glissandoCwWpm);
+        m_spinGlissandoCwIdMinutes->SetValue(wxGetApp().appConfiguration.glissandoCwIdMinutes);
         m_ckboxGlissandoTransmitShips->SetValue(wxGetApp().appConfiguration.glissandoTransmitShips);
         m_ckboxData2G->SetValue(wxGetApp().appConfiguration.data2gEnabled);
         m_txtData2GHost->SetValue(wxGetApp().appConfiguration.data2gHost);
@@ -569,6 +623,7 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         m_ckboxData2GCommandPort->SetValue(wxGetApp().appConfiguration.data2gUseCommandPort);
         m_txtData2GCommandPort->SetValue(wxString::Format("%d", wxGetApp().appConfiguration.data2gCommandPort.get()));
         updateData2GControls_();
+        updateCwTailControls_();
         
 
 
@@ -638,6 +693,10 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         wxGetApp().appConfiguration.halfDuplexMode = m_ckHalfDuplex->GetValue();
         wxGetApp().appConfiguration.textChatUsDataSegmentsOnly = m_ckboxTextChatUsDataSegmentsOnly->GetValue();
         wxGetApp().appConfiguration.glissandoChords = m_ckboxGlissandoChords->GetValue();
+        wxGetApp().appConfiguration.glissandoTail = m_choiceGlissandoTail->GetSelection();
+        wxGetApp().appConfiguration.glissandoCwText = m_txtGlissandoCwText->GetValue();
+        wxGetApp().appConfiguration.glissandoCwWpm = m_spinGlissandoCwWpm->GetValue();
+        wxGetApp().appConfiguration.glissandoCwIdMinutes = m_spinGlissandoCwIdMinutes->GetValue();
         wxGetApp().appConfiguration.glissandoTransmitShips = m_ckboxGlissandoTransmitShips->GetValue();
         wxGetApp().appConfiguration.data2gEnabled = m_ckboxData2G->GetValue();
         wxString data2gHost = m_txtData2GHost->GetValue().Strip(wxString::both);
@@ -1040,4 +1099,44 @@ void OptionsDlg::updateData2GControls_()
     m_txtData2GKissPort->Enable(on);
     m_ckboxData2GCommandPort->Enable(on);
     m_txtData2GCommandPort->Enable(on && m_ckboxData2GCommandPort->GetValue());
+}
+
+//-------------------------------------------------------------------------
+// updateCwTailControls_(): the CW settings only matter with the CW tail
+// chosen; beneath them, what will be sent and for how long, or why the
+// chord will close the transmission instead.
+//-------------------------------------------------------------------------
+void OptionsDlg::updateCwTailControls_()
+{
+    bool cw = m_choiceGlissandoTail->GetSelection() == 2;
+    m_txtGlissandoCwText->Enable(cw);
+    m_spinGlissandoCwWpm->Enable(cw);
+    m_spinGlissandoCwIdMinutes->Enable(cw);
+    m_textGlissandoCwTail->Show(cw);
+    if (!cw) return;
+
+    std::string format = m_txtGlissandoCwText->GetValue().ToStdString();
+    std::string text = TextMessagingModem::cwTailText(format, m_txt_callsign->GetValue().ToStdString());
+    std::string sendable = Glissando::cwSendable(text);
+    int wpm = m_spinGlissandoCwWpm->GetValue();
+    wxString status;
+    if (text.empty() && !format.empty())
+    {
+        status = _("Set a callsign on the Station tab; until then the chord ends each transmission.");
+    }
+    else if (sendable.empty())
+    {
+        status = _("Nothing to send; the chord ends each transmission.");
+    }
+    else if (!Glissando::cwTailFits(text, wpm))
+    {
+        status = wxString::Format(_("%.1f s is too long (%.0f s at most); the chord ends each transmission."),
+                                  Glissando::cwTailSeconds(text, wpm), Glissando::CW_TAIL_MAX_SECONDS);
+    }
+    else
+    {
+        status = wxString::Format(_("Sends \"%s\", %.1f s."), wxString(sendable), Glissando::cwTailSeconds(text, wpm));
+    }
+    m_textGlissandoCwTail->SetLabel(status);
+    m_textGlissandoCwTail->GetParent()->Layout();
 }
