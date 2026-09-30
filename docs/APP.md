@@ -154,6 +154,15 @@ codec2 defaults are unchanged, and `AirTiming::forFrameSeconds()` sizes them
 to the tempo being sent. Carrier sense only sees a Glissando burst once its
 first frame decodes, so the waits for the far end are sized to whole bursts.
 
+A pong, acknowledgement or partial acknowledgement goes back in the tempo
+its station was last heard in, along with anything riding behind it in the
+same keying, so a station waiting on an answer waits for one in its own
+tempo. The waits also cover every tempo heard from anybody in the last 15
+minutes, for a station on a build that answers in its own tempo. Before
+this they covered every tempo the receiver listens for: at Presto an
+unanswered ping held the queue for about 2 minutes and gave up after 2.2;
+now it holds it for 39 s and gives up after 55 s.
+
 Air time for a short message (up to 12 characters of text behind the 15 byte
 header, three segments):
 about 20 s at Presto, 41 s at Allegro, 2.8 minutes at Adagio. A full 54 byte

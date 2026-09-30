@@ -1,4 +1,5 @@
 add_library(fdv_text_messaging STATIC
+    AnswerTempo.cpp
     Data2GLink.cpp
     Data2GTransport.cpp
     FrameAnnotation.cpp
@@ -55,6 +56,11 @@ if(UNITTEST)
     target_link_libraries(fdv_text_messaging_keying_plan_test fdv_text_messaging)
     target_compile_options(fdv_text_messaging_keying_plan_test PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
     add_test(NAME text_messaging_keying_plan COMMAND fdv_text_messaging_keying_plan_test)
+
+    add_executable(fdv_text_messaging_answer_tempo_test test/AnswerTempoTest.cpp)
+    target_link_libraries(fdv_text_messaging_answer_tempo_test fdv_text_messaging)
+    target_compile_options(fdv_text_messaging_answer_tempo_test PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
+    add_test(NAME text_messaging_answer_tempo COMMAND fdv_text_messaging_answer_tempo_test)
 
     add_executable(fdv_text_messaging_frame_annotation_test test/FrameAnnotationTest.cpp)
     target_link_libraries(fdv_text_messaging_frame_annotation_test fdv_text_messaging)

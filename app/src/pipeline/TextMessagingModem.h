@@ -43,6 +43,7 @@
 #include <mutex>
 #include <vector>
 
+#include "AnswerTempo.h"
 #include "FrameCodec.h"
 #include "TextMessagingTypes.h"
 #include "GlissandoLink.h"
@@ -234,6 +235,7 @@ private:
     Glissando::Reassembler reassembler_;
     std::vector<GlissandoHeard> glissandoHeard_;
     std::vector<GlissandoSent> glissandoSent_;
+    TextMessaging::StationTempos stationGears_; // the gear each station was last heard in
     std::unique_ptr<Glissando::StreamingReceiver> glissandoRx_;
     std::atomic<bool> glissandoOn_;
 
