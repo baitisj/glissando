@@ -118,6 +118,7 @@ TextMessagingModem::TextMessagingModem()
     , open_(false)
     , lastSyncMs_(0)
     , reassembler_(SIGNALLING_FRAME_BYTES, TEXT_FRAME_BYTES)
+    , stationGears_(GLISSANDO_REPORT_LIFETIME_MS)
     , glissandoRx_(new Glissando::StreamingReceiver())
     , glissandoOn_(false)
 {
@@ -305,7 +306,10 @@ bool TextMessagingModem::modulate(const std::vector<OutgoingBurst>& bursts,
         bool chords = false;
         {
             std::lock_guard<std::mutex> lock(glissandoMutex_);
-            settings.gear = transmitGearLocked();
+            // A reply goes back in the tempo its station was heard in, which
+            // is the tempo that station waits for it in; see AnswerTempo.h.
+            int answerGear = stationGears_.answerTempo(bursts, steadyMs());
+            settings.gear = answerGear != 0 ? answerGear : transmitGearLocked();
             settings.scale = glissando_.scale;
             settings.tuningOffsetHz = glissando_.tuningOffsetHz;
             chords = glissando_.chords;
@@ -585,17 +589,16 @@ AirTiming TextMessagingModem::airTiming() const
         gear = transmitGearLocked();
         chords = glissando_.chords;
 
-        // An answer can come in any tempo the receiver is listening for.
-        std::vector<int> listening;
-        if (glissando_.listenAllGears)
-        {
-            for (int g = Glissando::MIN_GEAR; g <= Glissando::MAX_GEAR; g++) listening.push_back(g);
-        }
-        else
-        {
-            listening = {glissando_.gear, gear};
-        }
-        for (int g : listening)
+        // An answer comes back in the tempo we asked in, since a station
+        // answers in the tempo it heard the asker in (see AnswerTempo.h).
+        // A station on an older build answers in its own tempo instead, so
+        // the waits also cover every tempo heard lately. They used to cover
+        // every tempo the receiver listens for, Adagio included, and at
+        // Presto an unanswered ping held the queue for 111 s and gave up
+        // after 120 s.
+        std::vector<int> answering = stationGears_.recentTempos(steadyMs());
+        answering.push_back(gear);
+        for (int g : answering)
         {
             slowestFrameSeconds = std::max(slowestFrameSeconds, Glissando::gearInfo(g).frameSeconds());
         }
@@ -724,6 +727,11 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
     {
         if (rxLogEnabled()) log_info("RX: Glissando burst is not a chat frame");
         return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(glissandoMutex_);
+        stationGears_.heard(frame.originCallsign, decode.gear, steadyMs());
     }
 
     FrameCallback callback;
