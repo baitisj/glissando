@@ -32,7 +32,7 @@ add_subdirectory(rig_control)
 add_subdirectory(text_messaging)
 
 # WIN32 is needed for Windows GUI apps and is ignored for UNIX like systems.
-add_executable(freedv WIN32 ${FREEDV_SOURCES})
+add_executable(freedv WIN32 ${FREEDV_SOURCES} ${RES_FILES})
 
 # The target keeps FreeDV's name, so everything that builds on it still
 # works; the program it makes is glissando (glissando.exe on Windows).

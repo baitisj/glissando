@@ -11,6 +11,10 @@
 #include <cmath>
 #include <cstring>
 
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -20,6 +24,7 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
+#endif
 
 namespace TextMessaging
 {
@@ -33,6 +38,65 @@ constexpr uint64_t FIRST_RETRY_MS = 2000;
 constexpr uint64_t MAX_RETRY_MS = 30000;
 constexpr int SEND_TIMEOUT_SECONDS = 2;
 
+// The few places where Winsock and POSIX sockets differ.
+#if defined(_WIN32)
+using ssize_t = long long;
+
+void startSockets()
+{
+    static const bool started = [] {
+        WSADATA data;
+        return WSAStartup(MAKEWORD(2, 2), &data) == 0;
+    }();
+    (void)started;
+}
+
+int socketError() { return WSAGetLastError(); }
+bool connectPending(int err) { return err == WSAEWOULDBLOCK || err == WSAEINPROGRESS; }
+bool interrupted(int err) { return err == WSAEINTR; }
+std::string socketErrorText(int err)
+{
+    if (err == WSAETIMEDOUT) return "Connection timed out";
+    if (err == WSAECONNREFUSED) return "Connection refused";
+    if (err == WSAECONNRESET) return "Connection reset by peer";
+    return "socket error " + std::to_string(err);
+}
+int pollSockets(pollfd* fds, unsigned long count, int timeoutMs) { return WSAPoll(fds, count, timeoutMs); }
+void closeSocket(int fd) { closesocket((SOCKET)fd); }
+void setBlocking(int fd, bool blocking)
+{
+    u_long nonBlocking = blocking ? 0 : 1;
+    ioctlsocket((SOCKET)fd, FIONBIO, &nonBlocking);
+}
+void setSendTimeout(int fd, int seconds)
+{
+    DWORD timeoutMs = (DWORD)seconds * 1000;
+    setsockopt((SOCKET)fd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeoutMs, sizeof(timeoutMs));
+}
+constexpr int SEND_FLAGS = 0;
+constexpr int TIMED_OUT = WSAETIMEDOUT;
+#else
+void startSockets() {}
+int socketError() { return errno; }
+bool connectPending(int err) { return err == EINPROGRESS; }
+bool interrupted(int err) { return err == EINTR; }
+std::string socketErrorText(int err) { return std::strerror(err); }
+int pollSockets(pollfd* fds, unsigned long count, int timeoutMs) { return ::poll(fds, (nfds_t)count, timeoutMs); }
+void closeSocket(int fd) { close(fd); }
+void setBlocking(int fd, bool blocking)
+{
+    int flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, blocking ? (flags & ~O_NONBLOCK) : (flags | O_NONBLOCK));
+}
+void setSendTimeout(int fd, int seconds)
+{
+    timeval timeout{seconds, 0};
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+}
+constexpr int SEND_FLAGS = MSG_NOSIGNAL;
+constexpr int TIMED_OUT = ETIMEDOUT;
+#endif
+
 uint64_t steadyMs()
 {
     return (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -45,6 +109,8 @@ uint64_t steadyMs()
 // reason in error.
 int connectTo(const std::string& host, int port, std::string& error)
 {
+    startSockets();
+
     addrinfo hints{};
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
@@ -60,41 +126,48 @@ int connectTo(const std::string& host, int port, std::string& error)
     int fd = -1;
     for (addrinfo* ai = found; ai != nullptr; ai = ai->ai_next)
     {
+#if defined(_WIN32)
+        SOCKET s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (s == INVALID_SOCKET) continue;
+        fd = (int)s;
+#else
         fd = socket(ai->ai_family, ai->ai_socktype | SOCK_CLOEXEC, ai->ai_protocol);
         if (fd < 0) continue;
+#endif
 
-        int flags = fcntl(fd, F_GETFL, 0);
-        fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-        rc = connect(fd, ai->ai_addr, ai->ai_addrlen);
-        if (rc < 0 && errno == EINPROGRESS)
+        setBlocking(fd, false);
+        rc = connect(fd, ai->ai_addr, (int)ai->ai_addrlen);
+        int err = rc < 0 ? socketError() : 0;
+        if (rc < 0 && connectPending(err))
         {
-            pollfd p{fd, POLLOUT, 0};
-            int polled = ::poll(&p, 1, CONNECT_TIMEOUT_MS);
+            pollfd p{};
+            p.fd = fd;
+            p.events = POLLOUT;
+            int polled = pollSockets(&p, 1, CONNECT_TIMEOUT_MS);
             if (polled == 1)
             {
                 int soError = 0;
                 socklen_t len = sizeof(soError);
-                getsockopt(fd, SOL_SOCKET, SO_ERROR, &soError, &len);
+                getsockopt(fd, SOL_SOCKET, SO_ERROR, (char*)&soError, &len);
                 rc = soError == 0 ? 0 : -1;
-                errno = soError;
+                err = soError;
             }
             else
             {
-                if (polled == 0) errno = ETIMEDOUT;
+                err = polled == 0 ? TIMED_OUT : socketError();
                 rc = -1;
             }
         }
         if (rc == 0)
         {
-            fcntl(fd, F_SETFL, flags);
-            timeval timeout{SEND_TIMEOUT_SECONDS, 0};
-            setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+            setBlocking(fd, true);
+            setSendTimeout(fd, SEND_TIMEOUT_SECONDS);
             int one = 1;
-            setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+            setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char*)&one, sizeof(one));
             break;
         }
-        error = host + ":" + service + ": " + std::strerror(errno);
-        close(fd);
+        error = host + ":" + service + ": " + socketErrorText(err);
+        closeSocket(fd);
         fd = -1;
     }
     freeaddrinfo(found);
@@ -105,8 +178,8 @@ bool sendAll(int fd, const uint8_t* data, size_t length)
 {
     while (length > 0)
     {
-        ssize_t sent = send(fd, data, length, MSG_NOSIGNAL);
-        if (sent < 0 && errno == EINTR) continue;
+        ssize_t sent = send(fd, (const char*)data, (int)length, SEND_FLAGS);
+        if (sent < 0 && interrupted(socketError())) continue;
         if (sent <= 0) return false;
         data += sent;
         length -= (size_t)sent;
@@ -328,12 +401,12 @@ void Data2GTransport::run(Settings settings)
         if (&link == &kiss)
         {
             std::lock_guard<std::mutex> lock(sendMutex_);
-            close(kissFd_);
+            closeSocket(kissFd_);
             kissFd_ = -1;
         }
         else
         {
-            close(link.fd);
+            closeSocket(link.fd);
         }
         link.fd = -1;
         link.retryAtMs = steadyMs() + FIRST_RETRY_MS;
@@ -432,7 +505,9 @@ void Data2GTransport::run(Settings settings)
         for (Link* link : {&kiss, &command})
         {
             if (link->fd < 0) continue;
-            fds[count] = pollfd{link->fd, POLLIN, 0};
+            fds[count] = pollfd{};
+            fds[count].fd = link->fd;
+            fds[count].events = POLLIN;
             links[count] = link;
             count++;
         }
@@ -443,18 +518,19 @@ void Data2GTransport::run(Settings settings)
             continue;
         }
 
-        int ready = ::poll(fds, (nfds_t)count, POLL_MS);
+        int ready = pollSockets(fds, (unsigned long)count, POLL_MS);
         if (ready <= 0) continue;
 
         for (int i = 0; i < count; i++)
         {
             if ((fds[i].revents & (POLLIN | POLLHUP | POLLERR)) == 0) continue;
             Link& link = *links[i];
-            ssize_t got = recv(link.fd, buffer, sizeof(buffer), 0);
+            ssize_t got = recv(link.fd, (char*)buffer, sizeof(buffer), 0);
             if (got <= 0)
             {
-                if (got < 0 && errno == EINTR) continue;
-                closeLink(link, got == 0 ? "closed by data2g-host" : std::strerror(errno));
+                int err = got < 0 ? socketError() : 0;
+                if (got < 0 && interrupted(err)) continue;
+                closeLink(link, got == 0 ? "closed by data2g-host" : socketErrorText(err));
                 continue;
             }
 

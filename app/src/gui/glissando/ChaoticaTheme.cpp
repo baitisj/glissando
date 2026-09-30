@@ -8,6 +8,8 @@
 #include <chrono>
 #include <cmath>
 
+#include <wx/fontenum.h>
+
 namespace Chaotica
 {
 
@@ -21,6 +23,22 @@ bool blinkLit()
     return (ms / 500) % 2 == 0;
 }
 
+namespace
+{
+
+// DejaVu Sans Condensed where the desktop has it. Otherwise the family
+// alone: a face that isn't installed can draw no text at all on Windows.
+wxFontInfo condensed(int points)
+{
+    static const bool haveDejaVu = wxFontEnumerator::IsValidFacename("DejaVu Sans Condensed");
+    wxFontInfo info(points);
+    info.Family(wxFONTFAMILY_SWISS);
+    if (haveDejaVu) info.FaceName("DejaVu Sans Condensed");
+    return info;
+}
+
+} // namespace
+
 wxFont font(FontRole role)
 {
     // Condensed grotesques and slab serifs are what the title cards of the
@@ -29,15 +47,15 @@ wxFont font(FontRole role)
     switch (role)
     {
         case FontRole::Marquee:
-            return wxFont(wxFontInfo(30).Family(wxFONTFAMILY_SWISS).Bold().FaceName("DejaVu Sans Condensed"));
+            return wxFont(condensed(30).Bold());
         case FontRole::Plate:
-            return wxFont(wxFontInfo(9).Family(wxFONTFAMILY_SWISS).Bold().FaceName("DejaVu Sans Condensed"));
+            return wxFont(condensed(9).Bold());
         case FontRole::Button:
-            return wxFont(wxFontInfo(9).Family(wxFONTFAMILY_SWISS).Bold().FaceName("DejaVu Sans Condensed"));
+            return wxFont(condensed(9).Bold());
         case FontRole::Readout:
             return wxFont(wxFontInfo(13).Family(wxFONTFAMILY_TELETYPE).Bold());
         case FontRole::Caption:
-            return wxFont(wxFontInfo(7).Family(wxFONTFAMILY_SWISS).FaceName("DejaVu Sans Condensed"));
+            return wxFont(condensed(7));
     }
     return *wxNORMAL_FONT;
 }

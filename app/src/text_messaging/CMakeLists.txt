@@ -14,6 +14,9 @@ add_library(fdv_text_messaging STATIC
 target_include_directories(fdv_text_messaging PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(fdv_text_messaging PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
 target_link_libraries(fdv_text_messaging PUBLIC sqlite3 Threads::Threads)
+if(WIN32)
+    target_link_libraries(fdv_text_messaging PUBLIC ws2_32)
+endif(WIN32)
 
 # GCC 14 at -O3 reports -Wfree-nonheap-object inside vector::_M_realloc_append
 # for kissEncode()'s reserve-then-push_back on a local vector (GCC PR 115016,

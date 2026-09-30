@@ -284,6 +284,12 @@ if(MINGW)
     set(USE_STATIC_PORTAUDIO TRUE)
     # Setup HOST variables.
     include(cmake/MinGW.cmake)
+
+    # Icon and manifest for glissando.exe (see contrib/glissando.rc).
+    set(RES_FILES "${CMAKE_SOURCE_DIR}/contrib/glissando.rc")
+    enable_language(RC)
+    set(CMAKE_RC_COMPILE_OBJECT
+        "<CMAKE_RC_COMPILER> --include-dir ${CMAKE_BINARY_DIR}/_deps/wxwidgets-src/include --include-dir ${CMAKE_SOURCE_DIR}/contrib <FLAGS> -O coff <DEFINES> -i <SOURCE> -o <OBJECT>")
     include(InstallRequiredSystemLibraries)
 endif(MINGW)
 
