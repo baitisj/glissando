@@ -73,6 +73,8 @@ public:
     // Called once per keying.
     using KeyingLimitFunction = std::function<int()>;
     void setKeyingLimitFunction(KeyingLimitFunction keyingLimitFunction);
+    void setCwidTextFunction(std::function<std::string()> cwidTextFunction);
+    void setCwidSpeedFunction(std::function<int()> cwidSpeedFunction);
 
     virtual bool transmit(const std::vector<TextMessaging::OutgoingBurst>& bursts) override;
     virtual bool isTransmitting() const override;
@@ -104,6 +106,8 @@ private:
     VoiceTransmitCheck voiceTransmitCheck_;
     VoiceTransmitCheck transmitAllowedCheck_;
     KeyingLimitFunction keyingLimitFunction_;
+    std::function<std::string()> cwidTextFunction_;
+    std::function<int()> cwidSpeedFunction_;
 
     mutable std::mutex mutex_;
     std::vector<short> samples_;    // the burst being sent, reused per burst

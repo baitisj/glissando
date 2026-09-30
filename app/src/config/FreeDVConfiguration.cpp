@@ -78,6 +78,8 @@ FreeDVConfiguration::FreeDVConfiguration()
     , glissandoScanRateDeci("/Glissando/ScanRateDeci", 40)
     , glissandoScopeLens("/Glissando/ScopeLens", true)
     , glissandoTransmitShips("/Glissando/TransmitShips", true)
+    , cwidText("/Glissando/CWID", "")
+    , cwidSpeedWpm("/Glissando/CWIDSpeedWpm", 15)
     , glissandoWindowLeft("/Glissando/WindowLeft", -1)
     , glissandoWindowTop("/Glissando/WindowTop", -1)
     , glissandoWindowWidth("/Glissando/WindowWidth", 1040)
@@ -123,6 +125,7 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     load_(config, audioConfigWindowHeight);
 
     load_(config, currentNotebookTab);
+    load_(config, cwidSpeedWpm);
     
     
     load_(config, fifoSizeMs);
@@ -153,6 +156,7 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     load_(config, glissandoScanRateDeci);
     load_(config, glissandoScopeLens);
     load_(config, glissandoTransmitShips);
+    load_(config, cwidText);
     load_(config, glissandoWindowLeft);
     load_(config, glissandoWindowTop);
     load_(config, glissandoWindowWidth);
@@ -229,6 +233,8 @@ void FreeDVConfiguration::save(wxConfigBase* config)
     save_(config, glissandoScanRateDeci);
     save_(config, glissandoScopeLens);
     save_(config, glissandoTransmitShips);
+    save_(config, cwidText);
+    save_(config, cwidSpeedWpm);
     save_(config, glissandoWindowLeft);
     save_(config, glissandoWindowTop);
     save_(config, glissandoWindowWidth);

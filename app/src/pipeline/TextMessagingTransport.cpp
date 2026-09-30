@@ -37,6 +37,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <cmath>
+#include <cctype>
 
 #include "TextMessagingModem.h"
 #include "TextMessagingTxQueue.h"
@@ -93,6 +95,32 @@ bool txLogEnabled()
     return enabled;
 }
 
+std::vector<short> makeCwid(const std::string& text, int speedWpm)
+{
+    static const std::pair<char, const char*> code[] = {
+        {'A', ".-"}, {'B', "-..."}, {'C', "-.-."}, {'D', "-.."}, {'E', "."}, {'F', "..-."}, {'G', "--."}, {'H', "...."}, {'I', ".."}, {'J', ".---"}, {'K', "-.-"}, {'L', ".-.."}, {'M', "--"}, {'N', "-."}, {'O', "---"}, {'P', ".--."}, {'Q', "--.-"}, {'R', ".-."}, {'S', "..."}, {'T', "-"}, {'U', "..-"}, {'V', "...-"}, {'W', ".--"}, {'X', "-..-"}, {'Y', "-.--"}, {'Z', "--.."},
+        {'0', "-----"}, {'1', ".----"}, {'2', "..---"}, {'3', "...--"}, {'4', "....-"}, {'5', "....."}, {'6', "-...."}, {'7', "--..."}, {'8', "---.."}, {'9', "----."}, {'/', "-..-."}, {'-', "-....-"}, {'.', ".-.-.-"}
+    };
+    auto findCode = [&](char c) -> const char* { for (auto& entry : code) if (entry.first == c) return entry.second; return nullptr; };
+    constexpr int rate = MODEM_SAMPLE_RATE, tone = 700;
+    const int unit = rate * 1200 / (1000 * std::clamp(speedWpm, 5, 60));
+    std::vector<short> out;
+    auto silence = [&](int units) { out.insert(out.end(), units * unit, 0); };
+    auto mark = [&](int units) { int n = units * unit; for (int i = 0; i < n; ++i) out.push_back((short)(7000.0 * std::sin(2.0 * 3.141592653589793 * tone * i / rate))); };
+    silence(6);
+    bool prior = false;
+    for (unsigned char raw : text) {
+        if (std::isspace(raw)) { if (prior) silence(4); prior = false; continue; }
+        const char* pattern = findCode((char)std::toupper(raw));
+        if (!pattern) continue;
+        if (prior) silence(2);
+        for (const char* p = pattern; *p; ++p) { mark(*p == '.' ? 1 : 3); if (p[1]) silence(1); }
+        prior = true;
+    }
+    silence(6);
+    return out;
+}
+
 } // namespace
 
 TextMessagingTransport::TextMessagingTransport(TextMessagingModem* modem)
@@ -138,6 +166,18 @@ void TextMessagingTransport::setKeyingLimitFunction(KeyingLimitFunction keyingLi
     keyingLimitFunction_ = std::move(keyingLimitFunction);
 }
 
+void TextMessagingTransport::setCwidTextFunction(std::function<std::string()> function)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    cwidTextFunction_ = std::move(function);
+}
+
+void TextMessagingTransport::setCwidSpeedFunction(std::function<int()> function)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    cwidSpeedFunction_ = std::move(function);
+}
+
 bool TextMessagingTransport::transmit(const std::vector<TextMessaging::OutgoingBurst>& bursts)
 {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -152,6 +192,17 @@ bool TextMessagingTransport::transmit(const std::vector<TextMessaging::OutgoingB
     if (transmitAllowedCheck_ != nullptr && !transmitAllowedCheck_()) return false;
 
     if (!modem_->modulate(bursts, samples_, &frameEnds_)) return false;
+
+    if (cwidTextFunction_)
+    {
+        const int speed = cwidSpeedFunction_ ? cwidSpeedFunction_() : 15;
+        auto id = makeCwid(cwidTextFunction_(), speed);
+        if (!id.empty())
+        {
+            samples_.insert(samples_.end(), id.begin(), id.end());
+            frameEnds_.push_back(samples_.size());
+        }
+    }
 
     // At a slow Glissando tempo one keying of a reply and a message can run
     // for many minutes, and the time-out timer would unkey the radio part

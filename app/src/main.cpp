@@ -964,6 +964,16 @@ void MainFrame::startTextMessaging_()
         // A chat keying runs the same time-out timer as voice does.
         return timeOutTimerSeconds() * 1000;
     });
+    m_textMessagingTransport->setCwidTextFunction([]() {
+        auto& config = wxGetApp().appConfiguration;
+        wxString callsign = config.reportingConfiguration.reportingCallsign;
+        wxString id = config.cwidText;
+        if (id.IsEmpty()) id = wxString("gliss de ") + callsign;
+        return id.ToStdString();
+    });
+    m_textMessagingTransport->setCwidSpeedFunction([]() {
+        return wxGetApp().appConfiguration.cwidSpeedWpm.get();
+    });
 
     textMessagingModem().setFrameCallback([this](const TextMessaging::Frame& frame, float snr) {
         // With Data2G carrying chat, what our own modem hears is not part of
@@ -2382,4 +2392,3 @@ void MainFrame::OnRxInAudioData_(IAudioDevice& dev, void* data, size_t size, voi
         g_infifo1_full.fetch_add(1, std::memory_order_relaxed);
     }
 }
-

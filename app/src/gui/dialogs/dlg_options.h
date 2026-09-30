@@ -102,6 +102,8 @@ class OptionsDlg : public wxDialog
         wxCheckBox   *m_ckboxAutoStartOnLaunch;
 
         wxTextCtrl    *m_txt_callsign;
+        wxTextCtrl    *m_txtCwid;
+        wxTextCtrl    *m_txtCwidSpeed;
         wxTextCtrl    *m_txtCtrlCsvLogFilePath;
         wxButton      *m_buttonChooseCsvLogFilePath;
         

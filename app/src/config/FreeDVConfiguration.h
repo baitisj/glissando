@@ -96,6 +96,9 @@ public:
     ConfigurationDataElement<int> glissandoScanRateDeci;
     ConfigurationDataElement<bool> glissandoScopeLens;
     ConfigurationDataElement<bool> glissandoTransmitShips;  // rockets and invaders on the scope while sending
+    // Empty means use the live callsign-derived default: "gliss de <callsign>".
+    ConfigurationDataElement<wxString> cwidText;
+    ConfigurationDataElement<int> cwidSpeedWpm;
     ConfigurationDataElement<long> glissandoWindowLeft;
     ConfigurationDataElement<long> glissandoWindowTop;
     ConfigurationDataElement<long> glissandoWindowWidth;

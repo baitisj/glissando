@@ -19,6 +19,7 @@
 //
 //==========================================================================
 
+#include <algorithm>
 #include <wx/gbsizer.h>
 #include <wx/numformatter.h>
 #include "dlg_options.h"
@@ -134,6 +135,22 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     m_txt_callsign->SetToolTip(_("The callsign text chat sends under."));
     sbSizerCallsign->Add(m_txt_callsign, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
     sbSizerStationRows->Add(sbSizerCallsign, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
+
+    wxBoxSizer* sbSizerCwid = new wxBoxSizer(wxHORIZONTAL);
+    wxStaticText* labelCwid = new wxStaticText(sbStation, wxID_ANY, _("CW ID:"), wxDefaultPosition, wxDefaultSize, 0);
+    sbSizerCwid->Add(labelCwid, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
+    m_txtCwid = new wxTextCtrl(sbStation, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(260, -1), 0);
+    m_txtCwid->SetToolTip(_("Morse ID appended to each Glissando transmission. Leave as shown to follow your callsign."));
+    sbSizerCwid->Add(m_txtCwid, 1, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
+    sbSizerStationRows->Add(sbSizerCwid, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
+
+    wxBoxSizer* sbSizerCwidSpeed = new wxBoxSizer(wxHORIZONTAL);
+    wxStaticText* labelCwidSpeed = new wxStaticText(sbStation, wxID_ANY, _("CW speed (WPM):"), wxDefaultPosition, wxDefaultSize, 0);
+    sbSizerCwidSpeed->Add(labelCwidSpeed, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
+    m_txtCwidSpeed = new wxTextCtrl(sbStation, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(70, -1), 0, wxTextValidator(wxFILTER_NUMERIC));
+    m_txtCwidSpeed->SetToolTip(_("Morse code speed, from 5 to 60 words per minute."));
+    sbSizerCwidSpeed->Add(m_txtCwidSpeed, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
+    sbSizerStationRows->Add(sbSizerCwidSpeed, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
 
     // CSV log file path
     wxBoxSizer* sbSizerCsvLog = new wxBoxSizer(wxHORIZONTAL);
@@ -584,6 +601,10 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
 #endif
         
         m_txt_callsign->SetValue(wxGetApp().appConfiguration.reportingConfiguration.reportingCallsign);
+        wxString callsign = wxGetApp().appConfiguration.reportingConfiguration.reportingCallsign;
+        wxString cwid = wxGetApp().appConfiguration.cwidText;
+        m_txtCwid->SetValue(cwid.IsEmpty() ? wxString("gliss de ") + callsign : cwid);
+        m_txtCwidSpeed->SetValue(wxString::Format("%d", wxGetApp().appConfiguration.cwidSpeedWpm.get()));
 
         // CSV log file path
         m_txtCtrlCsvLogFilePath->SetValue(wxGetApp().appConfiguration.reportingConfiguration.csvLogFilePath);
@@ -662,6 +683,12 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
 #endif
 
         wxGetApp().appConfiguration.reportingConfiguration.reportingCallsign = m_txt_callsign->GetValue();
+        wxString defaultCwid = wxString("gliss de ") + m_txt_callsign->GetValue();
+        wxString enteredCwid = m_txtCwid->GetValue().Strip(wxString::both);
+        wxGetApp().appConfiguration.cwidText = enteredCwid == defaultCwid ? wxString() : enteredCwid;
+        long cwidSpeed = 15;
+        m_txtCwidSpeed->GetValue().ToLong(&cwidSpeed);
+        wxGetApp().appConfiguration.cwidSpeedWpm = (int)std::clamp(cwidSpeed, 5L, 60L);
 
         // CSV log file path
         wxGetApp().appConfiguration.reportingConfiguration.csvLogFilePath = m_txtCtrlCsvLogFilePath->GetValue();
