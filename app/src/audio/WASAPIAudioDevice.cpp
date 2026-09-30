@@ -51,8 +51,10 @@ namespace {
 
     NtQueryTimerResolutionFn GetNtQueryTimerResolution_()
     {
+        // Going through void(*)() keeps GCC's -Wcast-function-type quiet.
         static NtQueryTimerResolutionFn fn = reinterpret_cast<NtQueryTimerResolutionFn>(
-            GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryTimerResolution"));
+            reinterpret_cast<void (*)()>(
+                GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryTimerResolution")));
         return fn;
     }
 }

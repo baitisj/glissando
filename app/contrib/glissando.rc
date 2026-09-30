@@ -1,0 +1,8 @@
+// Windows resources for glissando.exe: the Arachnia icon, plus wxWidgets'
+// manifest so the program gets modern common controls and is DPI aware.
+#define wxUSE_RC_MANIFEST 1
+#define wxUSE_DPI_AWARE_MANIFEST 2
+#include "wx/msw/wx.rc"
+
+// Named so it sorts ahead of wxICON_AAA: Explorer uses the first icon.
+glissando ICON "glissando.ico"

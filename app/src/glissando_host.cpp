@@ -11,6 +11,9 @@
 #include <cstring>
 
 #include <wx/numformatter.h>
+#if defined(__WXMSW__)
+#include <wx/msw/private.h>
+#endif // defined(__WXMSW__)
 
 #include "main.h"
 #include "git_version.h"
@@ -91,6 +94,17 @@ GlissandoConsoleSettings MainFrame::loadGlissandoSettings_() const
     return settings;
 }
 
+void MainFrame::applyGlissandoIcon(wxTopLevelWindow* window)
+{
+#if defined(__WXMSW__)
+    // The "glissando" icon in contrib/glissando.rc, at every size it has.
+    static const wxIconBundle icons(wxS("glissando"), wxGetInstance());
+    window->SetIcons(icons);
+#else
+    wxUnusedVar(window);
+#endif // defined(__WXMSW__)
+}
+
 void MainFrame::openGlissandoConsole()
 {
     if (m_glissandoConsole == nullptr)
@@ -101,6 +115,7 @@ void MainFrame::openGlissandoConsole()
         if (position.x < 0 || position.y < 0) position.SetPosition(wxDefaultPosition);
 
         m_glissandoConsole = new GlissandoConsole(this, this, loadGlissandoSettings_(), position);
+        applyGlissandoIcon(m_glissandoConsole);
         m_glissandoConsole->SetTitle(_("Glissando ") + wxString::FromUTF8(GetFreeDVVersion().c_str()));
         applyGlissandoToModem_(true);
         log_info("Glissando console opened; text chat now uses Glissando");
@@ -382,6 +397,7 @@ void MainFrame::glissandoShowSnoop(bool show)
     if (m_snoopDialog == nullptr)
     {
         m_snoopDialog = new SnoopDialog(this);
+        applyGlissandoIcon(m_snoopDialog);
 
         // Beside the chat window rather than on top of it.
         if (m_textMessagingDialog != nullptr && m_textMessagingDialog->IsShown())

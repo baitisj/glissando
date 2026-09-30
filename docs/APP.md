@@ -224,3 +224,18 @@ The version comes from `app/CMakeLists.txt` (`PROJECT_VERSION`) plus the
 The AppImage carries the libraries of the system it was built on, so build
 it on the oldest Linux you want it to run on (the beta 0.1 AppImage was
 built on Ubuntu 24.04 and needs glibc 2.39 or newer).
+
+### Windows
+
+A portable 64-bit Windows build cross-compiles on Ubuntu 24.04:
+
+    sudo apt-get install g++-mingw-w64-x86-64-posix libltdl-dev autoconf automake libtool
+    cmake -S app -B build-win -DCMAKE_TOOLCHAIN_FILE=$PWD/app/cmake/Toolchain-Ubuntu-mingw64.cmake \
+        -DCMAKE_BUILD_TYPE=Release -DUSE_NATIVE_AUDIO=1 -DBOOTSTRAP_WXWIDGETS=TRUE -DwxUSE_WEBVIEW=OFF
+    cmake --build build-win -j$(nproc)
+
+The build fetches and compiles wxWidgets, Hamlib and libsndfile. Put `build-win/src/glissando.exe`
+in a folder with the DLLs it names (`x86_64-w64-mingw32-objdump -p`):
+`libhamlib-4.dll` from `build-win/external/dist/bin`, and
+`libstdc++-6.dll`, `libgcc_s_seh-1.dll`, `libssp-0.dll` and
+`libwinpthread-1.dll` from the MinGW-w64 install. There is no installer.

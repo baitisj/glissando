@@ -27,7 +27,7 @@
 #include <future>
 #include "OmniRigController.h"
 
-#include "../../util/logging/ulog.h"
+#include "util/logging/ulog.h"
 
 using namespace std::chrono_literals;
 

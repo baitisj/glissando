@@ -360,6 +360,9 @@ public:
     // this frame stays hidden behind it. Opening it switches text chat to the
     // Glissando mode, and closing it quits.
     void openGlissandoConsole();
+    // Gives a window the Glissando icon (Windows; elsewhere the desktop
+    // entry supplies it).
+    static void applyGlissandoIcon(wxTopLevelWindow* window);
 
     // IGlissandoHost
     virtual GlissandoTelemetry glissandoTelemetry() override;
