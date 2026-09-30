@@ -3,3 +3,4 @@ __pycache__/
 prototype/sim_log.txt
 /build/
 /build-*/
+.claude/settings.local.json
