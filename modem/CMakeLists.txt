@@ -19,6 +19,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 endif()
 
 add_library(glissando_modem STATIC
+    GlissandoChord.cpp
     GlissandoDemod.cpp
     GlissandoFec.cpp
     GlissandoFft.cpp
@@ -46,4 +47,5 @@ if(UNITTEST)
     glissando_test(glissando_receiver_test test/GlissandoReceiverTest.cpp)
     glissando_test(glissando_link_test test/GlissandoLinkTest.cpp)
     glissando_test(glissando_timing_test test/GlissandoTimingTest.cpp)
+    glissando_test(glissando_chord_test test/GlissandoChordTest.cpp)
 endif(UNITTEST)

@@ -308,8 +308,8 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
         sb_textChat, wxID_ANY, _("Open and close each Glissando transmission with a chord"),
         wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
     m_ckboxGlissandoChords->SetToolTip(
-        _("Every note of the scale at once for one bar of the tempo, before and after the frames. "
-          "For the ear only: the receiver finds frames without it."));
+        _("Opens with E4 and D5 together for 0.6 s, which other stations hear as the channel being "
+          "taken long before a frame decodes, and closes with every note of the scale for one bar."));
     sbSizer_textChat->Add(m_ckboxGlissandoChords, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
 
     m_ckboxGlissandoTransmitShips = new wxCheckBox(

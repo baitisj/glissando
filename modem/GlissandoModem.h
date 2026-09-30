@@ -94,12 +94,12 @@ struct ModemSettings
 // tuningOffsetHz is zero.
 std::vector<float> modulate(const std::vector<Payload>& payloads, const ModemSettings& settings);
 
-// The chord that opens and closes a transmission: every note of every voice
-// of the scale sounding at once, tuning offset included, for one bar (four
+// The chord that closes a transmission: every note of every voice of the
+// scale sounding at once, tuning offset included, for one bar (four
 // symbols) of the gear, so its length tells the ear the tempo. Peak
-// amplitude 1 like a frame; it has no data and the receiver does not look
-// for it. With eight notes sharing the peak its power is about 7 dB below a
-// frame's.
+// amplitude 1 like a frame; it has no data. With eight notes sharing the
+// peak its power is about 7 dB below a frame's. The chord that opens a
+// transmission is openingChord() in GlissandoChord.h.
 double chordSeconds(int gear);
 std::vector<float> chord(const ModemSettings& settings);
 

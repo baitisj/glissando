@@ -46,6 +46,7 @@
 #include "AnswerTempo.h"
 #include "FrameCodec.h"
 #include "TextMessagingTypes.h"
+#include "GlissandoChord.h"
 #include "GlissandoLink.h"
 #include "GlissandoModem.h"
 #include "GlissandoReceiver.h"
@@ -237,6 +238,13 @@ private:
     std::vector<GlissandoSent> glissandoSent_;
     TextMessaging::StationTempos stationGears_; // the gear each station was last heard in
     std::unique_ptr<Glissando::StreamingReceiver> glissandoRx_;
+
+    // Hears the chord that opens a Glissando transmission, a frame and more
+    // before the receiver can decode any of it: carrier sense for the chat
+    // protocol. Pushed on the receive tap's thread and configured on the
+    // GUI's, hence its own lock; isSounding() needs none.
+    std::mutex chordMutex_;
+    Glissando::ChordListener chordListener_;
     std::atomic<bool> glissandoOn_;
 
     // The end of the frame that completed the last burst heard, as the

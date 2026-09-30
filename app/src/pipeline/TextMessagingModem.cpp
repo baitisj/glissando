@@ -326,10 +326,19 @@ bool TextMessagingModem::modulate(const std::vector<OutgoingBurst>& bursts,
         // The keying opens and closes with every note of the scale at once
         // (Tyler Carr's idea, PR #22). It carries nothing the receiver uses:
         // the frames are found by their motifs, as without it.
-        std::vector<float> chord;
-        if (chords && !payloads.empty()) chord = Glissando::chord(settings);
-        const double chordSeconds = chord.size() / (double)Glissando::SAMPLE_RATE_HZ;
-        for (float sample : chord) samplesOut.push_back((short)std::lround(sample * GLISSANDO_PEAK));
+        // The opening chord is E4 and D5 for 0.6 s at every tempo and in
+        // every scale, which listeners hear as the channel being taken (see
+        // GlissandoChord.h).
+        std::vector<float> opening;
+        std::vector<float> closing;
+        if (chords && !payloads.empty())
+        {
+            opening = Glissando::openingChord(settings);
+            closing = Glissando::chord(settings);
+        }
+        const double openingSeconds = opening.size() / (double)Glissando::SAMPLE_RATE_HZ;
+        const double closingSeconds = closing.size() / (double)Glissando::SAMPLE_RATE_HZ;
+        for (float sample : opening) samplesOut.push_back((short)std::lround(sample * GLISSANDO_PEAK));
 
         for (size_t first = 0; first + gear.voices <= payloads.size(); first += gear.voices)
         {
@@ -347,8 +356,8 @@ bool TextMessagingModem::modulate(const std::vector<OutgoingBurst>& bursts,
                     sent.notesHz = Glissando::scaleNotes(settings.scale, v);
                     for (double& hz : sent.notesHz) hz += settings.tuningOffsetHz;
                     sent.melody = Glissando::payloadMelody(voices[v]);
-                    if (first == 0) sent.leadSeconds = chordSeconds;
-                    if (first + gear.voices >= payloads.size()) sent.tailSeconds = chordSeconds;
+                    if (first == 0) sent.leadSeconds = openingSeconds;
+                    if (first + gear.voices >= payloads.size()) sent.tailSeconds = closingSeconds;
                     glissandoSent_.push_back(sent);
                 }
                 if (glissandoSent_.size() > GLISSANDO_SENT_LIMIT)
@@ -365,9 +374,9 @@ bool TextMessagingModem::modulate(const std::vector<OutgoingBurst>& bursts,
         }
 
         // The closing chord belongs to the last frame's keying.
-        if (!chord.empty() && samplesOut.size() > chord.size())
+        if (!closing.empty() && samplesOut.size() > opening.size())
         {
-            for (float sample : chord) samplesOut.push_back((short)std::lround(sample * GLISSANDO_PEAK));
+            for (float sample : closing) samplesOut.push_back((short)std::lround(sample * GLISSANDO_PEAK));
             if (frameEndsOut != nullptr && !frameEndsOut->empty()) frameEndsOut->back() = samplesOut.size();
         }
 
@@ -481,6 +490,8 @@ void TextMessagingModem::demodulate(const short* samples, int numSamples)
     {
         // The receiver copies and returns; the search runs on its own thread.
         glissandoRx_->push(samples, numSamples);
+        std::lock_guard<std::mutex> lock(chordMutex_);
+        chordListener_.push(samples, numSamples);
         return;
     }
 
@@ -498,6 +509,10 @@ void TextMessagingModem::resetReceivers()
         reassembler_.reset();
     }
     glissandoRx_->reset();
+    {
+        std::lock_guard<std::mutex> lock(chordMutex_);
+        chordListener_.reset();
+    }
 
     std::lock_guard<std::mutex> lock(rxMutex_);
     if (!open_) return;
@@ -520,6 +535,10 @@ bool TextMessagingModem::isReceiving() const
 
     if (glissandoOn_.load(std::memory_order_acquire))
     {
+        // An opening chord heard, and the notes of its scale still sounding:
+        // somebody has the channel, well before any frame of theirs decodes.
+        if (chordListener_.isSounding()) return true;
+
         // A burst whose last frame has been heard is over: the far end is
         // waiting for an answer, and holding the channel for another frame
         // and a half kept it waiting 68 s at Adagio before it could have one.
@@ -545,9 +564,11 @@ bool TextMessagingModem::isReceiving() const
 void TextMessagingModem::setGlissando(const GlissandoConfig& config)
 {
     bool wasOn = false;
+    bool tuningChanged = false;
     {
         std::lock_guard<std::mutex> lock(glissandoMutex_);
         wasOn = glissando_.enabled;
+        tuningChanged = config.tuningOffsetHz != glissando_.tuningOffsetHz;
         // A frame half heard in the old scale or tuning will not be
         // finished in the new one. Listening for every scale, our own scale
         // only changes what we send.
@@ -560,6 +581,11 @@ void TextMessagingModem::setGlissando(const GlissandoConfig& config)
         if (retuned || wasOn != config.enabled) reassembler_.reset();
     }
     if (wasOn != config.enabled) glissandoRx_->reset();
+    if (tuningChanged || wasOn != config.enabled)
+    {
+        std::lock_guard<std::mutex> lock(chordMutex_);
+        chordListener_.configure(config.tuningOffsetHz);
+    }
     glissandoOn_.store(config.enabled, std::memory_order_release);
 }
 
@@ -607,16 +633,18 @@ AirTiming TextMessagingModem::airTiming() const
     // The receiver searches every quarter frame, and a search takes a
     // moment on top of that.
     auto decodeLatency = [](double frameSeconds) { return frameSeconds / 4.0 + GLISSANDO_SEARCH_SECONDS; };
-    // Our own chords as set; the far end's, whether or not it plays them, as
-    // if it did, which only waits a little longer for an answer. A chord is
-    // one bar of four symbols.
+    // Our own chords as set: 0.6 s to open, a bar of four symbols to close.
+    // The far end's opening chord whether or not it plays one, which only
+    // waits a little longer for an answer, and as long as a bar at the
+    // slowest tempo, which is what a station on an older build opens with.
     auto chordFor = [](double frameSeconds) { return frameSeconds * 4.0 / Glissando::SYMBOLS_PER_FRAME; };
     return AirTiming::forFrameSeconds(info.frameSeconds(),
                                       Glissando::SEGMENT_DATA_BYTES * info.voices,
                                       decodeLatency(info.frameSeconds()), slowestFrameSeconds,
                                       decodeLatency(slowestFrameSeconds),
-                                      chords ? Glissando::chordSeconds(gear) : 0.0,
-                                      chordFor(slowestFrameSeconds));
+                                      chords ? Glissando::OPENING_CHORD_SECONDS : 0.0,
+                                      std::max(Glissando::OPENING_CHORD_SECONDS, chordFor(slowestFrameSeconds)),
+                                      chords ? Glissando::chordSeconds(gear) : 0.0);
 }
 
 double TextMessagingModem::glissandoMessageSeconds(size_t textBytes) const
@@ -644,7 +672,7 @@ double TextMessagingModem::glissandoMessageSeconds(size_t textBytes) const
     }
 
     return Glissando::framesForBursts(bursts, info.voices) * info.frameSeconds() +
-           (chords ? 2.0 * Glissando::chordSeconds(gear) : 0.0);
+           (chords ? Glissando::OPENING_CHORD_SECONDS + Glissando::chordSeconds(gear) : 0.0);
 }
 
 int TextMessagingModem::transmitGearLocked() const
