@@ -100,6 +100,7 @@ void MainFrame::OnToolsTextMessaging(wxCommandEvent&)
     if (m_textMessagingDialog == nullptr)
     {
         m_textMessagingDialog = new TextMessagingDialog(this);
+        applyGlissandoIcon(m_textMessagingDialog);
     }
 
     // Picks up history, the current callsign and anything heard while the

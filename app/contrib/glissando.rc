@@ -4,4 +4,5 @@
 #define wxUSE_DPI_AWARE_MANIFEST 2
 #include "wx/msw/wx.rc"
 
-id ICON "glissando.ico"
+// Named so it sorts ahead of wxICON_AAA: Explorer uses the first icon.
+glissando ICON "glissando.ico"
