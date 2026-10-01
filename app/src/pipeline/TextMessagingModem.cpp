@@ -340,14 +340,36 @@ bool TextMessagingModem::modulate(const std::vector<OutgoingBurst>& bursts,
         std::vector<float> opening;
         std::vector<float> closing;
         std::vector<int> tailMelody;
+        std::vector<int> tailHarmony;
         const double cwUnitSeconds = 1.2 / std::min(std::max(cwWpm, Glissando::CW_MIN_WPM), Glissando::CW_MAX_WPM);
         if (chords && !payloads.empty()) opening = Glissando::openingChord(settings);
         if (!payloads.empty() && cwTail)
         {
-            closing = Glissando::cwTail(cwText, cwWpm, settings);
+            const bool straight = tail == GlissandoConfig::Tail::CwStraight;
+            closing = Glissando::cwTail(cwText, cwWpm, settings,
+                                        straight ? Glissando::CwStyle::Straight : Glissando::CwStyle::Glorified);
+            // For the visi-scope: a straight tail is drawn on the scale's
+            // notes nearest E4 and D5, which every scale has.
+            auto nearest = [&settings](double hz) {
+                std::array<double, Glissando::NOTES> notes = Glissando::scaleNotes(settings.scale, 0);
+                int best = 0;
+                for (int i = 1; i < Glissando::NOTES; i++)
+                {
+                    if (std::fabs(notes[(size_t)i] - hz) < std::fabs(notes[(size_t)best] - hz)) best = i;
+                }
+                return best;
+            };
             for (const Glissando::CwElement& element : Glissando::cwTune(cwText, settings.scale))
             {
-                tailMelody.insert(tailMelody.end(), (size_t)element.units, element.note);
+                int low = element.note;
+                int high = -1;
+                if (straight && element.note >= 0)
+                {
+                    low = nearest(Glissando::CW_STRAIGHT_LOW_HZ);
+                    high = nearest(Glissando::CW_STRAIGHT_HIGH_HZ);
+                }
+                tailMelody.insert(tailMelody.end(), (size_t)element.units, low);
+                if (straight) tailHarmony.insert(tailHarmony.end(), (size_t)element.units, high);
             }
             std::lock_guard<std::mutex> lock(glissandoMutex_);
             lastCwTailMs_ = steadyMs();
@@ -384,6 +406,7 @@ bool TextMessagingModem::modulate(const std::vector<OutgoingBurst>& bursts,
                     if (first + gear.voices >= payloads.size() && v == gear.voices - 1 && !tailMelody.empty())
                     {
                         sent.tailMelody = tailMelody;
+                        sent.tailHarmony = tailHarmony;
                         sent.tailUnitSeconds = cwUnitSeconds;
                     }
                     glissandoSent_.push_back(sent);
@@ -711,7 +734,10 @@ double TextMessagingModem::glissandoMessageSeconds(size_t textBytes) const
 
 bool TextMessagingModem::cwTailDueLocked(uint64_t nowMs) const
 {
-    if (glissando_.tail != GlissandoConfig::Tail::Cw) return false;
+    if (glissando_.tail != GlissandoConfig::Tail::Cw && glissando_.tail != GlissandoConfig::Tail::CwStraight)
+    {
+        return false;
+    }
     if (Glissando::cwSendable(glissando_.cwText).empty()) return false;
     if (!Glissando::cwTailFits(glissando_.cwText, glissando_.cwWpm)) return false;
     return lastCwTailMs_ == 0 || nowMs - lastCwTailMs_ >= (uint64_t)std::max(glissando_.cwIdMinutes, 0) * 60000;

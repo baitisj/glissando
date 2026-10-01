@@ -21,11 +21,12 @@ ear hears the tempo from it:
 
 The chords go at the ends of a keying, not around each frame. Both are on
 by default, and set in Preferences, Options, Modem, under Text Chat: a
-switch for the opening chord, and a Tail choice of Off, Chord or CW for the
-end. With CW, the station's call is sung in Morse at most once every ten
-minutes and the closing chord ends the keyings in between (see
-[CW_TAIL.md](CW_TAIL.md)). The chat's timers, the Send button's on-air time
-and the split before the 180 s time-out all count the chords and the tail.
+switch for the opening chord, and a Tail choice of Off, Chord or CW
+(glorified, or straight on E4+D5) for the end. With CW, the station's call
+is sent in Morse at most once every ten minutes and the closing chord ends
+the keyings in between (see [CW_TAIL.md](CW_TAIL.md)). The chat's timers,
+the Send button's on-air time and the split before the 180 s time-out all
+count the chords and the tail.
 
 ## The opening chord as carrier sense
 

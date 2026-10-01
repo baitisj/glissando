@@ -32,6 +32,15 @@ follow in a tune:
 The same text in the same scale always gives the same tune. In the Presto
 duet the tail is sung by the low voice alone.
 
+## Straight CW
+
+The Tail choice also offers **CW, straight on E4+D5**. It sends the same
+text at the same speed and interval, but as plain Morse: every dit and dah
+is E4 and D5 sounding together, the two notes of the opening chord, which
+are in every scale. It is easier to copy by ear, and a CW decoder tuned to
+either note can read it. The two notes share the transmitter's peak power,
+so each is 6 dB below a glorified note.
+
 ## Settings
 
 In Preferences, Options, Modem, under Text Chat:
@@ -39,7 +48,7 @@ In Preferences, Options, Modem, under Text Chat:
 | Setting | Default | |
 |---|---|---|
 | Open each Glissando transmission with a chord | on | E4 and D5 for 0.6 s; see [CHORDS.md](CHORDS.md) |
-| Tail | CW | Off, Chord (every note of the scale for one bar) or CW |
+| Tail | CW, glorified | Off, Chord (every note of the scale for one bar), CW glorified, or CW straight on E4+D5 |
 | CW text | `Glissando de <MYCALL>` | `<MYCALL>` becomes the callsign on the Station tab |
 | CW speed | 20 WPM | 10 to 40 |
 | At most once every | 10 minutes | 0 plays it on every transmission |

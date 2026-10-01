@@ -186,6 +186,54 @@ void testAudio()
     CHECK(cwTail("###", 20, settings).empty());
 }
 
+void testStraight()
+{
+    // The same rhythm as the glorified tail, on E4 and D5 together and
+    // nothing else, in every scale and at the tuning offset.
+    for (Scale scale : SCALES)
+    {
+        ModemSettings settings;
+        settings.scale = scale;
+        settings.tuningOffsetHz = -7.0;
+        const std::string text = "Glissando de AG7EW";
+        std::vector<float> straight = cwTail(text, 20, settings, CwStyle::Straight);
+        std::vector<float> glorified = cwTail(text, 20, settings);
+        CHECK(straight.size() == glorified.size());
+
+        float peak = 0.0f;
+        for (float v : straight) peak = std::max(peak, std::fabs(v));
+        CHECK(peak <= 1.0f && peak > 0.99f);
+
+        std::array<double, NOTES> hz = scaleNotes(scale, 0);
+        const double low = CW_STRAIGHT_LOW_HZ + settings.tuningOffsetHz;
+        const double high = CW_STRAIGHT_HIGH_HZ + settings.tuningOffsetHz;
+        const double unit = 1.2 / 20 * RATE;
+        int at = 0;
+        for (const CwElement& element : cwTune(text, scale))
+        {
+            size_t from = (size_t)std::lround(at * unit);
+            at += element.units;
+            size_t to = (size_t)std::lround(at * unit);
+            if (element.note < 0)
+            {
+                float loudest = 0.0f;
+                for (size_t n = from; n < to; n++) loudest = std::max(loudest, std::fabs(straight[n]));
+                CHECK(loudest == 0.0f);
+                continue;
+            }
+            double lowPower = power(straight, from, to, low);
+            double highPower = power(straight, from, to, high);
+            CHECK(lowPower > 0.5 * highPower && highPower > 0.5 * lowPower);
+            for (double note : hz)
+            {
+                note += settings.tuningOffsetHz;
+                if (std::fabs(note - low) < 1.0 || std::fabs(note - high) < 1.0) continue;
+                CHECK(power(straight, from, to, note) < 0.05 * lowPower);
+            }
+        }
+    }
+}
+
 void testNeverAFrame()
 {
     // Clean and noisy, the tail on its own never decodes, at any tempo and
@@ -196,20 +244,24 @@ void testNeverAFrame()
     {
         ModemSettings settings;
         settings.scale = scale;
-        std::vector<float> tail = cwTail("Glissando de AG7EW", 25, settings);
-        for (int gear : {3, 4, 5})
+        for (CwStyle style : {CwStyle::Glorified, CwStyle::Straight})
         {
-            ModemSettings rx;
-            rx.gear = gear;
-            rx.anyScale = true;
-            size_t frame = (size_t)gearInfo(gear).frameSamples();
-            for (double snrDb : {100.0, 0.0})
+            std::vector<float> tail = cwTail("Glissando de AG7EW", 25, settings, style);
+            for (int gear : {3, 4, 5})
             {
-                std::vector<float> audio = pad(tail, RATE, frame);
-                if (snrDb < 100.0) addNoise(audio, snrDb, meanSquare(tail), rng);
-                for (const Decode& d : receive(audio.data(), audio.size(), rx, 0, (long long)(audio.size() - frame)))
+                ModemSettings rx;
+                rx.gear = gear;
+                rx.anyScale = true;
+                size_t frame = (size_t)gearInfo(gear).frameSamples();
+                for (double snrDb : {100.0, 0.0})
                 {
-                    if (d.ok) decodes++;
+                    std::vector<float> audio = pad(tail, RATE, frame);
+                    if (snrDb < 100.0) addNoise(audio, snrDb, meanSquare(tail), rng);
+                    for (const Decode& d :
+                         receive(audio.data(), audio.size(), rx, 0, (long long)(audio.size() - frame)))
+                    {
+                        if (d.ok) decodes++;
+                    }
                 }
             }
         }
@@ -225,6 +277,7 @@ int main()
     testTiming();
     testTune();
     testAudio();
+    testStraight();
     testNeverAFrame();
     if (failures == 0) printf("PASS\n");
     return failures == 0 ? 0 : 1;

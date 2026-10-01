@@ -1,7 +1,7 @@
 //=========================================================================
 // Name:            GlissandoCw.cpp
 // Purpose:         The CW Glorifier: Morse code sung on the notes of a
-//                  scale.
+//                  scale, or keyed straight on E4 and D5.
 //=========================================================================
 
 #include "GlissandoCw.h"
@@ -205,7 +205,7 @@ bool cwTailFits(const std::string& text, int wpm)
     return cwTailSeconds(text, wpm) <= CW_TAIL_MAX_SECONDS;
 }
 
-std::vector<float> cwTail(const std::string& text, int wpm, const ModemSettings& settings)
+std::vector<float> cwTail(const std::string& text, int wpm, const ModemSettings& settings, CwStyle style)
 {
     wpm = std::min(std::max(wpm, CW_MIN_WPM), CW_MAX_WPM);
     const std::vector<CwElement> tune = cwTune(text, settings.scale);
@@ -214,6 +214,8 @@ std::vector<float> cwTail(const std::string& text, int wpm, const ModemSettings&
 
     std::array<double, NOTES> hz = scaleNotes(settings.scale, 0);
     for (double& note : hz) note += settings.tuningOffsetHz;
+    const double straightLow = CW_STRAIGHT_LOW_HZ + settings.tuningOffsetHz;
+    const double straightHigh = CW_STRAIGHT_HIGH_HZ + settings.tuningOffsetHz;
 
     const double unitSamples = PARIS_SECONDS / wpm * SAMPLE_RATE_HZ;
     const int glide = (int)std::lround(GLIDE_SECONDS * SAMPLE_RATE_HZ);
@@ -224,6 +226,7 @@ std::vector<float> cwTail(const std::string& text, int wpm, const ModemSettings&
     int units = 0;
     int previous = -1;
     double phase = 0.0;
+    std::vector<double> sum;
     for (const CwElement& element : tune)
     {
         const size_t start = (size_t)std::lround(units * unitSamples);
@@ -232,7 +235,7 @@ std::vector<float> cwTail(const std::string& text, int wpm, const ModemSettings&
         const int length = (int)(end - start);
         if (element.note < 0)
         {
-            audio.resize(end, 0.0f);
+            sum.resize(end, 0.0);
             continue;
         }
 
@@ -240,6 +243,22 @@ std::vector<float> cwTail(const std::string& text, int wpm, const ModemSettings&
         const double from = previous >= 0 ? hz[(size_t)previous] : to;
         for (int n = 0; n < length; n++)
         {
+            double w = 1.0;
+            if (n < ramp)
+                w = 0.5 - 0.5 * std::cos(PI * n / ramp);
+            else if (n >= length - ramp)
+                w = 0.5 - 0.5 * std::cos(PI * (length - 1 - n) / ramp);
+
+            if (style == CwStyle::Straight)
+            {
+                // Both notes from the same clock, a quarter turn apart (the
+                // opening chord's phases), so they never peak together.
+                const double t = (double)(start + n) / SAMPLE_RATE_HZ;
+                sum.push_back(w * (std::sin(2.0 * PI * straightLow * t) +
+                                   std::sin(2.0 * PI * straightHigh * t + PI / 2.0)));
+                continue;
+            }
+
             // A glide in from the last note, linear in log frequency with a
             // raised cosine ease like a frame's, then the note held.
             double f = to;
@@ -249,15 +268,15 @@ std::vector<float> cwTail(const std::string& text, int wpm, const ModemSettings&
                 f = from * std::pow(to / from, ease);
             }
             phase += 2.0 * PI * f / SAMPLE_RATE_HZ;
-            double w = 1.0;
-            if (n < ramp)
-                w = 0.5 - 0.5 * std::cos(PI * n / ramp);
-            else if (n >= length - ramp)
-                w = 0.5 - 0.5 * std::cos(PI * (length - 1 - n) / ramp);
-            audio.push_back((float)(w * std::sin(phase)));
+            sum.push_back(w * std::sin(phase));
         }
         previous = element.note;
     }
+
+    double peak = 0.0;
+    for (double v : sum) peak = std::max(peak, std::fabs(v));
+    audio.resize(sum.size());
+    for (size_t n = 0; n < sum.size(); n++) audio[n] = (float)(peak > 0.0 ? sum[n] / peak : 0.0);
     return audio;
 }
 

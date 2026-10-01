@@ -133,8 +133,8 @@ public:
         bool chords = true;             // open each keying with the E4+D5 chord
 
         // How each keying ends: nothing, a bar of every note of the scale,
-        // or the CW Glorifier singing cwText (callsign already filled in)
-        // at cwWpm. The CW tail plays at most once every cwIdMinutes (every
+        // or cwText (callsign already filled in) in Morse at cwWpm, either
+        // sung by the CW Glorifier or keyed straight on E4 and D5. The CW tail plays at most once every cwIdMinutes (every
         // keying at 0), the chord in between; it doubles as the station ID.
         // With no text, or a tail too long to fit (see GlissandoCw.h), the
         // chord closes the keying instead.
@@ -142,7 +142,8 @@ public:
         {
             Off,
             Chord,
-            Cw,
+            Cw,             // glorified
+            CwStraight,
         };
         Tail tail = Tail::Cw;
         std::string cwText;
@@ -204,7 +205,9 @@ public:
 
         // A CW tail sung after this frame instead of the chord: one note
         // index per Morse unit (-1 for silence), each tailUnitSeconds long.
+        // A straight tail's second note is in tailHarmony, empty otherwise.
         std::vector<int> tailMelody;
+        std::vector<int> tailHarmony;
         double tailUnitSeconds = 0.0;
     };
 
