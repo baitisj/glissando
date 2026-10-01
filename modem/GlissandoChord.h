@@ -84,10 +84,44 @@ public:
     // time-out timer, so the channel stays taken across it.
     static constexpr double HOLD_SECONDS = 2.5;
 
+    // A chord's notes must have been this far below it just before it, as
+    // a fraction of its weaker note: a chord starts, it is not something
+    // that was already there.
+    static constexpr double ONSET_RATIO = 0.5;
+
+    // And each note must stand this far over the bins a few hertz either
+    // side: a steady tone, not one wandering through.
+    static constexpr double PURITY = 4.0;
+    static constexpr double PURITY_FROM_HZ = 4.0;
+    static constexpr double PURITY_TO_HZ = 10.0;
+
+    // And sound in both halves of the window, each with at least this share
+    // of what a tone held for the whole of it would have there.
+    static constexpr double STEADY_SHARE = 0.2;
+
+    // While the melody is followed, its scale's notes must stand this far
+    // over what they usually were before the chord (the 90th percentile of
+    // the last BEFORE_SECONDS), so signals that were already on the channel
+    // cannot keep it busy.
+    static constexpr double OVER_BEFORE = 1.5;
+    static constexpr double BEFORE_SECONDS = 15.0;
+    static constexpr double BEFORE_PERCENTILE = 0.9;
+
+    // The longest a chord holds the channel on its own: until the first
+    // frame of an Adagio melody after it has decoded, when the receiver
+    // takes over. A chord the band made up costs no more than this.
+    static constexpr double MAX_TRACK_SECONDS = 75.0;
+
 private:
     void analyse();
     double noiseLevel();
-    double combPower(const std::array<double, NOTES>& notes, double offsetHz) const;
+    void remember(bool silence);
+    void rememberCombs(bool silence);
+    double usualComb(size_t scale, int step);
+    double purity(size_t bin) const;
+    bool steady(size_t bin) const;
+    static double combPower(const std::vector<double>& power, const std::array<double, NOTES>& notes,
+                            double offsetHz);
 
     Fft fft_;
     std::vector<float> window_;     // the last WINDOW samples, oldest first
@@ -105,6 +139,23 @@ private:
     long long chordsHeard_ = 0;
     bool tracking_ = false;
     std::array<double, SCALE_COUNT> scaleEnergy_{}; // each scale's notes since the chord
+    std::array<double, SCALE_COUNT> before_{};      // and their usual comb before it
+    long long chordStartSample_ = 0;                // of the chord that started tracking
+
+    // The last few windows' power per bin over their noise, oldest at
+    // historyNext_: the one a full window before the current one is what
+    // was on the channel just before a chord heard in it.
+    std::vector<std::vector<double>> history_;
+    size_t historyNext_ = 0;
+    size_t historyCount_ = 0;
+    std::vector<double> normalized_;
+
+    // Each scale's comb at each tuning step, per window, for BEFORE_SECONDS.
+    int steps_ = 0;                 // either side of the tuning offset
+    std::vector<float> combs_;      // [window][scale][step]
+    size_t combsNext_ = 0;
+    size_t combsCount_ = 0;
+    std::vector<float> sorted_;
     long long lastSoundedSample_ = 0;
     std::atomic<bool> sounding_{false};
 };

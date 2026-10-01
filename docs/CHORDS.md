@@ -40,6 +40,44 @@ busy for as long as the notes of the scale being sung (at the chord's
 tuning) keep sounding, and for 2.5 s after they stop, which bridges the 2 s
 pause a long keying takes before the transmit time-out.
 
+Other signals on the band must not look like a chord, or the chat queue
+freezes. The first version of the listener took any moment when both notes
+stood out as a chord, and any energy on the scale's notes as the melody.
+On a band with FT8 or a voice in the passband it heard a "chord" ten times
+a second and kept the channel busy for the whole 20 minutes it was tested,
+so queued messages sat waiting up to the protocol's 7 minute limit on a
+busy spell. Now:
+
+- **Both notes must start together.** Neither may have been there, at half
+  the chord's strength or more, in the 0.6 s before it.
+- **Both must be steady tones.** Each must stand four times over the bins
+  4 to 10 Hz either side of it, and sound in both halves of the 0.6 s. The
+  tones of FT8, or a voice, wander across those bins; the chord does not.
+- **They must be within 10 dB of each other** (was 15 dB).
+- **The melody must stand out from what was already there.** After a
+  chord, its scale's notes must reach 1.5 times their 90th percentile over
+  the 15 s before it, as well as the fixed threshold.
+- **No chord holds the channel more than 75 s.** That is long enough for
+  the first frame of an Adagio melody to decode, after which the frame
+  receiver holds the channel.
+
+Measured over 20 minutes of a busy band (a dozen FT8 signals at −8 to
++12 dB and a voice two seconds in three):
+
+| | Before | After |
+|---|---|---|
+| Busy band: channel busy | 100 % of the time, all 20 min at once | 6 %, at most 7.9 s at once |
+| FT8 parked across E4 and D5: channel busy | 100 %, all 20 min at once | 36 %, at most 12.8 s at once |
+| A transmission among the FT8 signals at −8 dB: chord heard | 8 of 8 | 6 of 8 |
+| ... busy through its melody | 100 % | 41 % |
+
+The two chords missed among the FT8 signals had one of them already
+sitting on E4 or D5. Where the melody does not stand out from the band,
+the channel shows busy once its first frame decodes, as for a station that
+played no chord. On a quiet band nothing changed: the sensitivity test
+hears one chord fewer in 20 at −14 dB at Presto and the same number
+elsewhere, and noise alone still makes no chord in 20 minutes.
+
 Which chord to send was measured, not guessed: 0.6 s chords of each shape
 buried in noise, with the threshold set for about one false chord an hour
 on noise alone. SNR is a frame's power in 2500 Hz, as for decoding.
@@ -77,10 +115,10 @@ What it can't do:
 - **Weak stations.** A frame decodes down to −17.4 dB at Presto and
   −26.5 dB at Adagio. Below about −14 dB the chord goes unheard, and the
   channel shows busy only once a frame decodes, as before.
-- **Older builds.** Stations on the 0.1 beta don't open with E4 and D5. A
-  strong Presto melody sings both notes within 0.6 s often enough to be
-  heard anyway; slower tempos from older builds are only sensed once a
-  frame decodes.
+- **Older builds, and melodies joined part way through.** Stations on the
+  0.1 beta open with every note of their scale, which holds E4 and D5
+  steady and is heard. A melody is not a chord, however strong, so a
+  station whose chord was missed is sensed once a frame decodes.
 - **A carrier on one of the notes** is not a chord: the listener wants both
   notes at similar strength. It could still hold the channel a little
   longer after a real chord, capped like any busy spell.
