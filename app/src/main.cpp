@@ -1110,6 +1110,18 @@ bool MainFrame::chatWaitsForEngage()
     return m_textMessagingTransport != nullptr && !data2gChatActive_.load() && !m_RxRunning;
 }
 
+void MainFrame::chatStopKeying()
+{
+    if (data2gChatActive_.load() || m_textMessagingTransport == nullptr) return;
+
+    log_info("Chat keying stopped by the operator");
+    m_textMessagingTransport->abort();
+
+    // What the sound card has not played yet goes too, as for Abort on the
+    // console.
+    if (g_rxUserdata != nullptr && g_rxUserdata->outfifo1 != nullptr) g_rxUserdata->outfifo1->reset();
+}
+
 wxString MainFrame::chatModemStatus()
 {
     if (!data2gChatActive_.load() || m_data2gTransport == nullptr) return wxEmptyString;

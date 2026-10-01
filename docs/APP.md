@@ -173,6 +173,16 @@ on the air at the tempo it would go out at now, in red once that is longer
 than the transmit time-out (Preferences, Rig control; 180 s when the app's
 timer is off, the usual rig setting). Nothing is shown for codec2 or Data2G.
 
+More messages can be queued while the transmitter is keyed; they go when it
+is free. In the transmission log, clicking a message selects the station it
+is with in the heard list, putting the station back if it has aged out, and a
+directed message for you selects its sender when no station is selected. A
+right click offers `Clear Messages`, which keeps only messages still being
+sent, and, on a message of yours still outstanding, `Remove from Queue` if it
+has not been on the air yet or `Abort` once it has (on the air now, waiting
+for its acknowledgement, or waiting to be retried). Either way the rest of
+the queue carries on.
+
 A chat keying runs the same time-out timer as voice. When one would outlast
 it, the transport sends it as several keyings, each at least 20 s short of the
 limit (clear of the warning the main window gives 15 s before it) and cut only

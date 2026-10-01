@@ -78,6 +78,11 @@ public:
     // station's history does not grow without bound.
     bool pruneMessagesOlderThan(std::time_t cutoff);
 
+    // Deletes every message but these, for the operator clearing the chat:
+    // the ones still being sent keep their rows, so their status can still
+    // be written.
+    bool deleteMessagesExcept(const std::vector<int64_t>& keep);
+
     bool upsertHeardStation(const HeardStation& station);
     std::vector<HeardStation> heardStations();
     bool pruneHeardStationsOlderThan(std::time_t cutoff);

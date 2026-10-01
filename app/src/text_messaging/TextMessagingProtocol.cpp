@@ -1026,6 +1026,66 @@ bool TextMessagingProtocol::hasQueuedTransmissions() const
                        { return pending.state == TransmissionState::Queued; });
 }
 
+TextMessagingProtocol::Cancel TextMessagingProtocol::cancelForLocked(const PendingTransmission& pending) const
+{
+    // Replies and pings have no chat line of their own to cancel from.
+    if (pending.reply || pending.isPing || pending.message.kind != MessageKind::Chat || pending.message.id == 0)
+    {
+        return Cancel::None;
+    }
+
+    // Not yet on the air at all: no retry, and no fragment confirmed.
+    bool untouched = pending.state == TransmissionState::Queued && pending.retries == 0 && pending.confirmed == 0;
+    return untouched ? Cancel::Remove : Cancel::Abort;
+}
+
+TextMessagingProtocol::Cancel TextMessagingProtocol::cancelFor(int64_t messageId) const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const PendingTransmission& pending : outbox_)
+    {
+        if (pending.message.id == messageId) return cancelForLocked(pending);
+    }
+    return Cancel::None;
+}
+
+TextMessagingProtocol::Cancel TextMessagingProtocol::cancelMessage(int64_t messageId, bool* onAirOut)
+{
+    if (onAirOut != nullptr) *onAirOut = false;
+
+    Cancel done = Cancel::None;
+    std::vector<PendingEvent> events;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto it = outbox_.begin(); it != outbox_.end(); ++it)
+        {
+            if (it->message.id != messageId) continue;
+
+            done = cancelForLocked(*it);
+            if (done == Cancel::None) break;
+
+            if (onAirOut != nullptr) *onAirOut = it->state == TransmissionState::Transmitting;
+            updateStatusLocked(*it, done == Cancel::Remove ? MessageStatus::NotSent : MessageStatus::Aborted, events);
+            outbox_.erase(it);
+            break;
+        }
+    }
+
+    deliver(events);
+    return done;
+}
+
+std::vector<int64_t> TextMessagingProtocol::outstandingMessageIds() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<int64_t> ids;
+    for (const PendingTransmission& pending : outbox_)
+    {
+        if (cancelForLocked(pending) != Cancel::None) ids.push_back(pending.message.id);
+    }
+    return ids;
+}
+
 bool TextMessagingProtocol::isMessageQueued(int64_t messageId) const
 {
     std::lock_guard<std::mutex> lock(mutex_);

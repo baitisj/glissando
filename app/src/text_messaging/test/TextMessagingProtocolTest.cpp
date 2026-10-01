@@ -1045,6 +1045,120 @@ void testAbortDropsEverythingOutstanding()
     CHECK(station.transport.transmissions.size() == 2);
 }
 
+// The operator can take back one message without touching the rest. One
+// queued while another is on the air has not gone anywhere yet, so it is
+// removed and never sent; the one on the air is aborted, and the caller is
+// told to stop the keying.
+void testOneMessageCanBeRemovedOrAborted()
+{
+    std::string error;
+
+    Station station("VK3ABC");
+    CHECK(station.protocol.sendMessage("on the air", "W1AW", error));
+    int64_t onAir = station.observer.added[0].id;
+    station.nowMs += std::max(MAX_TURNAROUND_MILLISECONDS, MAX_RETRY_BACKOFF_MILLISECONDS) + 1;
+    station.protocol.tick();
+    CHECK(station.transport.transmitting);
+
+    // Queued while the transmitter is keyed.
+    CHECK(station.protocol.sendMessage("changed my mind", "W1AW", error));
+    CHECK(station.protocol.sendMessage("still wanted", "W1AW", error));
+    int64_t removed = station.observer.added[1].id;
+    int64_t wanted = station.observer.added[2].id;
+
+    CHECK(station.protocol.cancelFor(onAir) == TextMessagingProtocol::Cancel::Abort);
+    CHECK(station.protocol.cancelFor(removed) == TextMessagingProtocol::Cancel::Remove);
+    std::vector<int64_t> outstanding = station.protocol.outstandingMessageIds();
+    CHECK(outstanding.size() == 3);
+
+    bool keyed = true;
+    CHECK(station.protocol.cancelMessage(removed, &keyed) == TextMessagingProtocol::Cancel::Remove);
+    CHECK(!keyed);
+    const TextMessage* update = station.observer.lastUpdateFor(removed);
+    CHECK(update != nullptr && update->status == MessageStatus::NotSent);
+    CHECK(station.protocol.cancelFor(removed) == TextMessagingProtocol::Cancel::None);
+    CHECK(station.protocol.cancelMessage(removed) == TextMessagingProtocol::Cancel::None);
+
+    CHECK(station.protocol.cancelMessage(onAir, &keyed) == TextMessagingProtocol::Cancel::Abort);
+    CHECK(keyed);
+    update = station.observer.lastUpdateFor(onAir);
+    CHECK(update != nullptr && update->status == MessageStatus::Aborted);
+    station.transport.transmitting = false; // the window stopped the keying
+
+    // What is left goes on as before, and only it.
+    station.completeOneTransmission();
+    CHECK(station.transport.transmissions.size() == 2);
+    CHECK(decodeOne(station.transport.transmissions[1][0]).payload.size() > 0);
+    update = station.observer.lastUpdateFor(wanted);
+    CHECK(update != nullptr && update->status == MessageStatus::AwaitingAck);
+    CHECK(station.protocol.outstandingMessageIds() == std::vector<int64_t>{wanted});
+
+    // Neither cancelled message is ever tried again.
+    for (int i = 0; i < 20; i++)
+    {
+        station.completeOneTransmission();
+        station.nowMs += 60 * 1000;
+        station.protocol.tick();
+    }
+    update = station.observer.lastUpdateFor(onAir);
+    CHECK(update != nullptr && update->status == MessageStatus::Aborted);
+    update = station.observer.lastUpdateFor(removed);
+    CHECK(update != nullptr && update->status == MessageStatus::NotSent);
+    CHECK(station.protocol.pendingCount() == 0);
+    CHECK((int)station.transport.transmissions.size() == 2 + MAX_MESSAGE_RETRIES);
+}
+
+// A message waiting for its acknowledgement, or for a retry, has been on the
+// air, so it is aborted rather than removed. Pings, replies and finished
+// messages offer nothing.
+void testSentMessagesAreAbortedNotRemoved()
+{
+    std::string error;
+
+    Station station("VK3ABC");
+    Station far("W1AW");
+    CHECK(station.protocol.sendMessage("waiting on you", "W1AW", error));
+    int64_t waiting = station.observer.added[0].id;
+    station.completeOneTransmission();
+    CHECK(station.observer.lastUpdateFor(waiting)->status == MessageStatus::AwaitingAck);
+    CHECK(station.protocol.cancelFor(waiting) == TextMessagingProtocol::Cancel::Abort);
+
+    // Unanswered, it is queued again for a retry: still an abort.
+    station.nowMs += ACK_TIMEOUT_MILLISECONDS + 1;
+    station.protocol.tick();
+    CHECK(station.observer.lastUpdateFor(waiting)->status == MessageStatus::Retrying);
+    CHECK(station.protocol.cancelFor(waiting) == TextMessagingProtocol::Cancel::Abort);
+
+    bool keyed = true;
+    CHECK(station.protocol.cancelMessage(waiting, &keyed) == TextMessagingProtocol::Cancel::Abort);
+    CHECK(!keyed);
+    CHECK(station.observer.lastUpdateFor(waiting)->status == MessageStatus::Aborted);
+
+    // Its acknowledgement turning up late changes nothing.
+    far.receiveFrom(station.transport);
+    far.completeOneTransmission();
+    station.receiveFrom(far.transport);
+    CHECK(station.observer.lastUpdateFor(waiting)->status == MessageStatus::Aborted);
+
+    CHECK(station.protocol.sendMessage("delivered", "W1AW", error));
+    int64_t delivered = station.observer.added.back().id;
+    size_t keyings = station.transport.transmissions.size();
+    for (int i = 0; i < 10 && station.transport.transmissions.size() == keyings; i++)
+    {
+        station.completeOneTransmission();
+    }
+    CHECK(station.transport.transmissions.size() == keyings + 1);
+    far.receiveFrom(station.transport);
+    far.completeOneTransmission();
+    station.receiveFrom(far.transport);
+    CHECK(station.observer.lastUpdateFor(delivered)->status == MessageStatus::Acknowledged);
+    CHECK(station.protocol.cancelFor(delivered) == TextMessagingProtocol::Cancel::None);
+
+    CHECK(station.protocol.sendPing("W1AW", error));
+    CHECK(station.protocol.outstandingMessageIds().empty());
+    CHECK(station.protocol.cancelFor(12345678) == TextMessagingProtocol::Cancel::None);
+}
+
 // A station on a frequency where it may not send data transmits nothing at
 // all: what was waiting is discarded as not sent, new traffic is refused with
 // the reason, and messages it receives are shown but not acknowledged.
@@ -1959,6 +2073,8 @@ int main()
     testRepliesDoNotWaitForTheAnsweredStationsTurn();
     testInhibitedStationTransmitsNothing();
     testAbortDropsEverythingOutstanding();
+    testOneMessageCanBeRemovedOrAborted();
+    testSentMessagesAreAbortedNotRemoved();
     testInhibitingLeavesSentMessagesToTheirAnswers();
     testFragmentsStillToComeReserveTheChannel();
     testReservationFollowsTheBurstsStillToCome();

@@ -44,6 +44,7 @@
 #include <wx/dcbuffer.h>
 #include <wx/graphics.h>
 #include <wx/menu.h>
+#include <wx/msgdlg.h>
 #include <wx/sizer.h>
 
 #include "main.h"
@@ -66,6 +67,10 @@ constexpr int REFRESH_INTERVAL_MS = 1000;
 // Often enough to follow the shared blink, which changes every half second.
 constexpr int BLINK_INTERVAL_MS = 125;
 
+// A press and release on the chat log further apart than this is a drag to
+// select text, not a click on a message.
+constexpr int CLICK_SLOP_PIXELS = 4;
+
 enum
 {
     ID_STATION_LIST = wxID_HIGHEST + 700,
@@ -74,6 +79,9 @@ enum
     ID_MENU_SELECT_STATION,
     ID_MENU_REMOVE_STATION,
     ID_MENU_LAST_HEARD,
+    ID_MENU_REMOVE_MESSAGE,
+    ID_MENU_ABORT_MESSAGE,
+    ID_MENU_CLEAR_MESSAGES,
     ID_PING,
     ID_SEND,
     ID_AUTO_REPLY,
@@ -278,6 +286,12 @@ TextMessagingDialog::TextMessagingDialog(wxWindow* parent, wxWindowID id, const 
             wxCommandEventHandler(TextMessagingDialog::OnMenuSelectStation));
     Connect(ID_MENU_REMOVE_STATION, wxEVT_COMMAND_MENU_SELECTED,
             wxCommandEventHandler(TextMessagingDialog::OnMenuRemoveStation));
+    Connect(ID_MENU_REMOVE_MESSAGE, wxEVT_COMMAND_MENU_SELECTED,
+            wxCommandEventHandler(TextMessagingDialog::OnMenuCancelMessage));
+    Connect(ID_MENU_ABORT_MESSAGE, wxEVT_COMMAND_MENU_SELECTED,
+            wxCommandEventHandler(TextMessagingDialog::OnMenuCancelMessage));
+    Connect(ID_MENU_CLEAR_MESSAGES, wxEVT_COMMAND_MENU_SELECTED,
+            wxCommandEventHandler(TextMessagingDialog::OnMenuClearMessages));
     Connect(ID_AUTO_REPLY, wxEVT_TOGGLEBUTTON,
             wxCommandEventHandler(TextMessagingDialog::OnAutoReplyToggled));
     Connect(ID_STATION_LIST, wxEVT_COMMAND_LIST_ITEM_SELECTED,
@@ -292,6 +306,12 @@ TextMessagingDialog::TextMessagingDialog(wxWindow* parent, wxWindowID id, const 
                         nullptr, this);
     Connect(ID_ENTRY, wxEVT_COMMAND_TEXT_UPDATED, wxCommandEventHandler(TextMessagingDialog::OnEntryText));
     connectStationMouse(true);
+
+    // The chat log keeps its own handling of the mouse, for selecting text;
+    // these only watch it, and pass every event on.
+    m_chatWindow->Bind(wxEVT_LEFT_DOWN, &TextMessagingDialog::OnChatLeftDown, this);
+    m_chatWindow->Bind(wxEVT_LEFT_UP, &TextMessagingDialog::OnChatLeftUp, this);
+    m_chatWindow->Bind(wxEVT_CONTEXT_MENU, &TextMessagingDialog::OnChatContextMenu, this);
 
     TextMessagingSession::instance().protocol().setObserver(this);
     m_refreshTimer.Start(REFRESH_INTERVAL_MS);
@@ -309,6 +329,9 @@ TextMessagingDialog::~TextMessagingDialog()
     m_txtEntry->Disconnect(wxEVT_KEY_DOWN, wxKeyEventHandler(TextMessagingDialog::OnEntryKeyDown),
                            nullptr, this);
     connectStationMouse(false);
+    m_chatWindow->Unbind(wxEVT_LEFT_DOWN, &TextMessagingDialog::OnChatLeftDown, this);
+    m_chatWindow->Unbind(wxEVT_LEFT_UP, &TextMessagingDialog::OnChatLeftUp, this);
+    m_chatWindow->Unbind(wxEVT_CONTEXT_MENU, &TextMessagingDialog::OnChatContextMenu, this);
 }
 
 // Selection is decided here rather than by the list. A click on the selected
@@ -650,8 +673,15 @@ void TextMessagingDialog::renderChat(bool keepPlace)
     html.reserve(4096);
     html += "<html><body bgcolor=\"" + colors.page + "\" text=\"" + colors.text + "\">";
 
-    for (const TextMessage& message : m_messages)
+    for (size_t index = 0; index < m_messages.size(); index++)
     {
+        const TextMessage& message = m_messages[index];
+
+        // Marks where each message starts, so a click can be traced back to
+        // it: see messageAt(). Ahead of the message's table rather than in
+        // it, where the page would place it at the message's foot.
+        html += wxString::Format("<a name=\"m%d\"></a>", (int)index);
+
         if (message.kind == MessageKind::System)
         {
             html += "<table width=\"100%\"><tr><td align=\"center\"><font size=\"-2\" color=\"" +
@@ -1038,6 +1068,205 @@ void TextMessagingDialog::OnMenuRemoveStation(wxCommandEvent&)
     if (uiLogEnabled()) log_info("UI: station %s removed", m_menuCallsign.c_str());
 }
 
+// The message under a point in the chat log's window, as an index into
+// m_messages. Each message starts with an anchor named for its index; they
+// run down the page in order, so the last one at or above the point is the
+// message it falls in. The first message runs from the top of the page:
+// the toolkit places an anchor that opens the page at the foot of what
+// follows it.
+int TextMessagingDialog::messageAt(const wxPoint& point) const
+{
+    wxHtmlContainerCell* root = m_chatWindow->GetInternalRepresentation();
+    if (root == nullptr || m_messages.empty()) return -1;
+
+    int y = m_chatWindow->CalcUnscrolledPosition(point).y;
+    auto anchorTop = [root](int index) -> int
+    {
+        wxString name = wxString::Format("m%d", index);
+        const wxHtmlCell* cell = root->Find(wxHTML_COND_ISANCHOR, &name);
+        return cell != nullptr ? cell->GetAbsPos().y : -1;
+    };
+
+    // A binary search, so a long log costs a handful of lookups.
+    int low = 1;
+    int high = (int)m_messages.size() - 1;
+    int found = 0;
+    while (low <= high)
+    {
+        int middle = (low + high) / 2;
+        int top = anchorTop(middle);
+        if (top < 0) return -1; // the page is not the one m_messages describes
+
+        if (top <= y)
+        {
+            found = middle;
+            low = middle + 1;
+        }
+        else
+        {
+            high = middle - 1;
+        }
+    }
+
+    return found;
+}
+
+// The station a message is with: who sent it to us, or who we sent it to.
+// Empty for a broadcast of our own.
+std::string TextMessagingDialog::stationOf(const TextMessage& message)
+{
+    // A ping or pong line names the other station as its destination.
+    if (message.kind == MessageKind::System) return message.destCallsign;
+    if (message.direction == MessageDirection::Received) return message.originCallsign;
+
+    return message.broadcast ? std::string() : message.destCallsign;
+}
+
+// Makes this station the one the send button goes to. A station that has
+// aged out of the list is put back in it when the operator asked for it;
+// selecting on the operator's behalf never adds one.
+void TextMessagingDialog::selectStation(const std::string& callsign, bool addIfMissing)
+{
+    if (callsign.empty()) return;
+
+    // The station may have been heard a moment ago, ahead of the list being
+    // redrawn for it.
+    long item = stationItem(callsign);
+    if (item < 0) refreshStations();
+    item = stationItem(callsign);
+
+    if (item < 0 && addIfMissing)
+    {
+        TextMessagingSession::instance().stations().pin(callsign);
+        refreshStations();
+        item = stationItem(callsign);
+    }
+
+    if (item < 0) return;
+
+    setStationSelected(item, true);
+    m_stationList->EnsureVisible(item);
+
+    if (uiLogEnabled()) log_info("UI: station %s selected from the chat log", callsign.c_str());
+}
+
+void TextMessagingDialog::OnChatLeftDown(wxMouseEvent& event)
+{
+    m_chatPressAt = event.GetPosition();
+    event.Skip();
+}
+
+// A click on a message chooses the station it is with, to answer it. A
+// click on a broadcast of our own changes nothing, and a drag is somebody
+// selecting text and is left to the log.
+void TextMessagingDialog::OnChatLeftUp(wxMouseEvent& event)
+{
+    event.Skip();
+
+    wxPoint moved = event.GetPosition() - m_chatPressAt;
+    if (std::abs(moved.x) > CLICK_SLOP_PIXELS || std::abs(moved.y) > CLICK_SLOP_PIXELS) return;
+
+    int index = messageAt(event.GetPosition());
+    if (index < 0) return;
+
+    selectStation(stationOf(m_messages[(size_t)index]), true);
+}
+
+void TextMessagingDialog::OnChatContextMenu(wxContextMenuEvent& event)
+{
+    // From the keyboard there is no position; the newest message is meant.
+    wxPoint screen = event.GetPosition();
+    int index = screen == wxDefaultPosition
+                    ? (int)m_messages.size() - 1
+                    : messageAt(m_chatWindow->ScreenToClient(screen));
+
+    m_menuMessageId = 0;
+    TextMessagingProtocol::Cancel cancel = TextMessagingProtocol::Cancel::None;
+    if (index >= 0)
+    {
+        const TextMessage& message = m_messages[(size_t)index];
+        if (message.direction == MessageDirection::Sent && message.kind == MessageKind::Chat)
+        {
+            cancel = TextMessagingSession::instance().protocol().cancelFor(message.id);
+            if (cancel != TextMessagingProtocol::Cancel::None) m_menuMessageId = message.id;
+        }
+    }
+
+    wxMenu menu;
+    if (cancel == TextMessagingProtocol::Cancel::Remove)
+    {
+        menu.Append(ID_MENU_REMOVE_MESSAGE, _("Remove from Queue"));
+        menu.AppendSeparator();
+    }
+    else if (cancel == TextMessagingProtocol::Cancel::Abort)
+    {
+        menu.Append(ID_MENU_ABORT_MESSAGE, _("Abort"));
+        menu.AppendSeparator();
+    }
+    menu.Append(ID_MENU_CLEAR_MESSAGES, _("Clear Messages"))->Enable(!m_messages.empty());
+
+    PopupMenu(&menu);
+}
+
+void TextMessagingDialog::OnMenuCancelMessage(wxCommandEvent&)
+{
+    if (m_menuMessageId == 0) return;
+
+    bool onAir = false;
+    auto done = TextMessagingSession::instance().protocol().cancelMessage(m_menuMessageId, &onAir);
+    if (done == TextMessagingProtocol::Cancel::None)
+    {
+        // Delivered, or given up on, while the menu was open.
+        setStatus(_("That message is no longer waiting to be sent."));
+        return;
+    }
+
+    // The protocol has forgotten it, so stopping the keying cannot make it
+    // take the cut-off burst for a finished one. Anything that rode in the
+    // same keying goes with it.
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    if (onAir && frame != nullptr) frame->chatStopKeying();
+
+    setStatus(done == TextMessagingProtocol::Cancel::Remove ? _("Message removed from the queue.")
+                                                            : _("Message aborted."));
+    if (uiLogEnabled())
+    {
+        log_info("UI: message id=%d %s%s", (int)m_menuMessageId,
+                 done == TextMessagingProtocol::Cancel::Remove ? "removed from queue" : "aborted",
+                 onAir ? " on the air" : "");
+    }
+}
+
+// Clears the log for good, here and in the message store. Messages still
+// being sent stay, so their chips can still say how they got on.
+void TextMessagingDialog::OnMenuClearMessages(wxCommandEvent&)
+{
+    if (m_messages.empty()) return;
+
+    wxMessageDialog confirm(this, _("Clear every message from the transmission log? "
+                                    "Messages still being sent are kept."),
+                            _("Clear Messages"), wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
+    if (confirm.ShowModal() != wxID_YES) return;
+
+    auto& session = TextMessagingSession::instance();
+    std::vector<int64_t> keep = session.protocol().outstandingMessageIds();
+    if (!session.store().deleteMessagesExcept(keep))
+    {
+        setStatus(wxString::Format(_("The messages could not be cleared: %s"),
+                                   wxString::FromUTF8(session.store().lastError())));
+        return;
+    }
+
+    m_messages.erase(std::remove_if(m_messages.begin(), m_messages.end(),
+                                    [&keep](const TextMessage& message)
+                                    { return std::find(keep.begin(), keep.end(), message.id) == keep.end(); }),
+                     m_messages.end());
+    renderChat();
+    setStatus(_("Messages cleared."));
+
+    if (uiLogEnabled()) log_info("UI: transmission log cleared, %d kept", (int)m_messages.size());
+}
+
 void TextMessagingDialog::OnAddStationText(wxCommandEvent& event)
 {
     bool hasText = !m_txtAddStation->GetValue().empty();
@@ -1071,9 +1300,9 @@ void TextMessagingDialog::OnEntryKeyDown(wxKeyEvent& event)
     bool isEnter = event.GetKeyCode() == WXK_RETURN || event.GetKeyCode() == WXK_NUMPAD_ENTER;
     if (isEnter && !event.ShiftDown())
     {
-        // Enter is the send button by another route, so it is held off while
-        // the transmitter is keyed, or may not be used, just as the button is.
-        // The text stays put; the window already says why.
+        // Enter is the send button by another route, so it is held off where
+        // the transmitter may not be used, just as the button is. The text
+        // stays put; the window already says why.
         if (!m_transmitControlsDisabled) send(selectedCallsign());
         return;
     }
@@ -1179,8 +1408,8 @@ void TextMessagingDialog::updateModemStatus()
     Layout();
 }
 
-// Nothing may be queued while a burst is on the air: the operator gets the
-// transmitter back when it is actually free.
+// More can be queued while a burst is on the air; it goes when the
+// transmitter is free. Only a place the station may not send from stops it.
 void TextMessagingDialog::updateTransmitControls()
 {
     auto& protocol = TextMessagingSession::instance().protocol();
@@ -1220,7 +1449,7 @@ void TextMessagingDialog::updateTransmitControls()
         }
     }
 
-    bool disabled = transmitting || !m_inhibitReason.empty();
+    bool disabled = !m_inhibitReason.empty();
     if (disabled == m_transmitControlsDisabled) return;
 
     m_transmitControlsDisabled = disabled;
@@ -1228,9 +1457,7 @@ void TextMessagingDialog::updateTransmitControls()
 
     if (uiLogEnabled())
     {
-        log_info("UI: send button %s", !disabled      ? "enabled, transmitter free"
-                                       : transmitting ? "disabled, transmitter keyed"
-                                                      : "disabled, receive only");
+        log_info("UI: send button %s", disabled ? "disabled, receive only" : "enabled");
     }
 }
 
@@ -1248,6 +1475,15 @@ void TextMessagingDialog::onMessageAdded(const TextMessage& message)
     {
         appendMessage(copy);
         renderChat();
+
+        // Somebody calling us is somebody to answer, so with nobody else
+        // chosen they become who the send button goes to. A station already
+        // chosen is left alone: the operator may be in the middle of a QSO.
+        bool callingUs = copy.kind == MessageKind::Chat &&
+                         copy.direction == MessageDirection::Received && !copy.broadcast &&
+                         !copy.destCallsign.empty() &&
+                         copy.destCallsign == TextMessagingSession::instance().protocol().myCallsign();
+        if (callingUs && selectedCallsign().empty()) selectStation(copy.originCallsign, false);
 
         if (uiLogEnabled())
         {

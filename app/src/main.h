@@ -353,6 +353,11 @@ public:
     // operator to press Engage. Data2G keys its own radio and never waits.
     bool chatWaitsForEngage();
 
+    // Stops the chat keying on the air now, for the operator aborting the
+    // message in it, and leaves the rest of the queue alone. Data2G keys
+    // its own radio, so nothing can be stopped there.
+    void chatStopKeying();
+
 private:
 
 public:
