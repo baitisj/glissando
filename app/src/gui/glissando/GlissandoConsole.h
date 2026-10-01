@@ -62,6 +62,9 @@ struct GlissandoTelemetry
     bool engageToSend = false;      // chat has something to send and no transmitter until Engage
     bool rigFrequencyKnown = false;
     double rigFrequencyHz = 0.0;
+    bool showSwr = false;           // the meter reads the radio's SWR rather than the signal
+    bool swrKnown = false;          // a reading has come back since keying
+    double swr = 0.0;
 };
 
 // The setup dialogs the console's Preferences button leads to.
@@ -175,6 +178,7 @@ private:
     Chaotica::Button* lensButton_;
     Chaotica::Button* engageButton_;
     bool engageAborts_ = false;     // the button reads Abort
+    bool meterShowsSwr_ = false;    // the telemetry meter has its SWR face on
     wxString bandWidthTip_;         // why the dial's caption warns, empty while it doesn't
     Chaotica::Button* chatButton_;
     Chaotica::Button* snoopButton_;

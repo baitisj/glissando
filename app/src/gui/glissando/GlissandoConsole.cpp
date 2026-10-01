@@ -38,6 +38,34 @@ constexpr double SEARCH_HALF_WIDTH_HZ = 25.0;
 
 constexpr int REFRESH_MILLISECONDS = 250;
 
+// The telemetry meter's two faces. Signal reads red where a frame is only just
+// copyable; SWR reads red above 2.5:1, short of the 3:1 Preferences can abort at.
+Chaotica::Meter::Scale signalScale()
+{
+    Chaotica::Meter::Scale scale;
+    scale.caption = _("Signal");
+    scale.minimum = -30.0;
+    scale.maximum = 10.0;
+    scale.labelFormat = "%+.0f";
+    scale.figureFormat = "%+.1f dB";
+    scale.redFrom = -30.0;
+    scale.redTo = -20.0;
+    return scale;
+}
+
+Chaotica::Meter::Scale swrScale()
+{
+    Chaotica::Meter::Scale scale;
+    scale.caption = _("SWR");
+    scale.minimum = 1.0;
+    scale.maximum = 5.0;
+    scale.labelFormat = "%.0f";
+    scale.figureFormat = "%.1f:1";
+    scale.redFrom = 2.5;
+    scale.redTo = 5.0;
+    return scale;
+}
+
 // The console's name across the top: a title card with searchlight rays
 // behind it, and a line under it that changes with the scale.
 class Marquee : public wxPanel
@@ -264,7 +292,7 @@ void GlissandoConsole::buildControls()
     column->Add(tuningPlate, 0, wxEXPAND | wxBOTTOM, 6);
 
     auto* telemetryPlate = new Panel(page, _("Telemetry"));
-    snrMeter_ = new Meter(telemetryPlate, _("Signal"), -30.0, 10.0, "dB", wxSize(200, 104));
+    snrMeter_ = new Meter(telemetryPlate, signalScale(), wxSize(200, 104));
     telemetryPlate->GetContentSizer()->Add(snrMeter_, 0, wxEXPAND | wxBOTTOM, 6);
     auto* grid = new wxGridSizer(2, 4, 6);
     dopplerReadout_ = new Readout(telemetryPlate, _("Doppler"), wxSize(96, 44));
@@ -610,7 +638,15 @@ void GlissandoConsole::refreshTelemetry()
     for (const GlissandoScopeFrame& frame : host_->glissandoHeardFrames()) scope_->addHeard(frame);
     for (const GlissandoScopeSent& frame : host_->glissandoSentFrames()) scope_->addSent(frame);
 
-    snrMeter_->SetValue(t.haveReport ? t.snrDb : std::nan(""));
+    // On the air, a radio that reports SWR has the meter instead of the
+    // signal last heard.
+    if (t.showSwr != meterShowsSwr_)
+    {
+        meterShowsSwr_ = t.showSwr;
+        snrMeter_->SetScale(meterShowsSwr_ ? swrScale() : signalScale());
+    }
+    if (meterShowsSwr_) snrMeter_->SetValue(t.swrKnown ? t.swr : std::nan(""));
+    else snrMeter_->SetValue(t.haveReport ? t.snrDb : std::nan(""));
     dopplerReadout_->SetText(t.haveReport ? wxString::Format("%.2f Hz", t.dopplerHz) : wxString("---"));
 
     if (t.haveReport)

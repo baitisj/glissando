@@ -554,6 +554,13 @@ private:
         // radio's own frequency stands: the app never retunes it on its own.
         std::atomic<bool> operatorFrequencyPending_;
         void refreshRigFrequencyBeforeKeying_();
+
+        // The radio's SWR while transmitting (see glissando_host.cpp). Touched
+        // on the GUI thread only.
+        void pollRigSwr_();
+        void onRigSwrReading_(double swr);
+        double rigSwr_ = NAN;               // NaN until a reading comes back on this keying
+        uint64_t rigSwrAbortAtMs_ = 0;      // when high SWR last aborted a transmission
         FilterFrequency lastBand_;
         // Restore-point: the TX/tune level that was active when we entered the
         // current band (or when Enable was first clicked for that band). Restore

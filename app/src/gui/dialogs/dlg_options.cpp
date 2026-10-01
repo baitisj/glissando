@@ -210,6 +210,22 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     m_ckboxTOTTimerEnabled->Connect(wxEVT_CHECKBOX, wxCommandEventHandler(OptionsDlg::OnTOTTimerEnable), NULL, this);
 
     sizerRigControl->Add(sbSizer_ptt,0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
+
+    // Read while transmitting, so these can change during a session.
+    wxStaticBox* sb_swr = new wxStaticBox(m_rigControlTab, wxID_ANY, _("SWR"));
+    wxStaticBoxSizer* sbSizer_swr = new wxStaticBoxSizer(sb_swr, wxVERTICAL);
+
+    m_ckboxSwrMeter = new wxCheckBox(sb_swr, wxID_ANY, _("Show SWR on the console's meter while transmitting"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
+    m_ckboxSwrMeter->SetToolTip(_("Asks the radio for its SWR once a second while transmitting, and the console's Signal meter reads SWR instead. Only radios whose Hamlib backend reports SWR are asked. Turn this off if your radio stumbles when spoken to while transmitting."));
+    sbSizer_swr->Add(m_ckboxSwrMeter, 0, static_cast<int>(wxALL), 5);
+
+    m_ckboxSwrAutoAbort = new wxCheckBox(sb_swr, wxID_ANY, _("Abort transmitting when SWR goes over 3:1"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
+    m_ckboxSwrAutoAbort->SetToolTip(_("Stops the transmission at the first reading over 3:1, as the console's Abort button would: the message is dropped, not retried."));
+    sbSizer_swr->Add(m_ckboxSwrAutoAbort, 0, static_cast<int>(wxALL), 5);
+
+    m_ckboxSwrMeter->Connect(wxEVT_CHECKBOX, wxCommandEventHandler(OptionsDlg::OnSwrMeterEnable), NULL, this);
+
+    sizerRigControl->Add(sbSizer_swr, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
     
     wxStaticBoxSizer* sbSizer_hamlib;
     wxStaticBox *sb_hamlib = new wxStaticBox(m_rigControlTab, wxID_ANY, _("Frequency Control Options"));
@@ -600,6 +616,10 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         m_txtTOTTimerSecs->SetValue(wxString::Format("%d", wxGetApp().appConfiguration.rigControlConfiguration.totTimerSecs.get()));
         m_txtTOTTimerSecs->Enable(wxGetApp().appConfiguration.rigControlConfiguration.totTimerEnabled);
 
+        m_ckboxSwrMeter->SetValue(wxGetApp().appConfiguration.rigControlConfiguration.swrMeter);
+        m_ckboxSwrAutoAbort->SetValue(wxGetApp().appConfiguration.rigControlConfiguration.swrAutoAbort);
+        m_ckboxSwrAutoAbort->Enable(wxGetApp().appConfiguration.rigControlConfiguration.swrMeter);
+
         // A FreeDV-era "frequency and mode changes" setting now means
         // frequency changes: the mode is never touched.
         bool frequencyControl =
@@ -687,6 +707,9 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
             if (totSecs < 1) totSecs = 1;
             wxGetApp().appConfiguration.rigControlConfiguration.totTimerSecs = (int)totSecs;
         }
+
+        wxGetApp().appConfiguration.rigControlConfiguration.swrMeter = m_ckboxSwrMeter->GetValue();
+        wxGetApp().appConfiguration.rigControlConfiguration.swrAutoAbort = m_ckboxSwrAutoAbort->GetValue();
 
         wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqModeChanges = false;
         wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqChangesOnly = m_rbFrequencyControl->GetValue();
@@ -890,6 +913,12 @@ void OptionsDlg::OnEnableSpacebarForPTT(wxCommandEvent&)
 void OptionsDlg::OnTOTTimerEnable(wxCommandEvent&)
 {
     m_txtTOTTimerSecs->Enable(m_ckboxTOTTimerEnabled->GetValue());
+}
+
+void OptionsDlg::OnSwrMeterEnable(wxCommandEvent&)
+{
+    // The abort works from the readings the meter asks for.
+    m_ckboxSwrAutoAbort->Enable(m_ckboxSwrMeter->GetValue());
 }
 
 void OptionsDlg::OnSetPTTKey(wxCommandEvent&)

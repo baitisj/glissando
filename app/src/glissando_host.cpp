@@ -29,6 +29,7 @@
 extern paCallBackData* g_rxUserdata;
 
 extern std::atomic<bool> g_tx;
+extern std::atomic<bool> endingTx;
 extern float g_avmag_waterfall[MODEM_STATS_NSPEC];
 
 namespace
@@ -38,6 +39,13 @@ namespace
 // after a frame decodes; frames of one burst decode a frame length apart,
 // so this is only the lamp, not carrier sense (the modem does that).
 constexpr double RECEIVING_LAMP_SECONDS = 4.0;
+
+// Preferences > Rig Control can have a transmission aborted over this SWR.
+constexpr double SWR_ABORT_ABOVE = 3.0;
+
+// After high SWR aborts, the meter keeps showing it this long, so the
+// operator sees why the radio let go.
+constexpr uint64_t SWR_ABORT_HOLD_MS = 5000;
 
 // Set while MainFrame closes the console on its way out, so the console
 // closing does not in turn try to close MainFrame.
@@ -237,7 +245,59 @@ GlissandoTelemetry MainFrame::glissandoTelemetry()
     int64_t frequency = wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency;
     telemetry.rigFrequencyKnown = frequency > 0;
     telemetry.rigFrequencyHz = (double)frequency;
+
+    auto swrMeter = std::dynamic_pointer_cast<IRigSwrMeter>(wxGetApp().rigFrequencyController);
+    bool holding = rigSwrAbortAtMs_ != 0 && steadyNowMs() - rigSwrAbortAtMs_ < SWR_ABORT_HOLD_MS;
+    telemetry.showSwr = wxGetApp().appConfiguration.rigControlConfiguration.swrMeter && swrMeter &&
+                        swrMeter->canReadSwr() && (telemetry.transmitting || holding);
+    telemetry.swrKnown = !std::isnan(rigSwr_);
+    telemetry.swr = telemetry.swrKnown ? rigSwr_ : 0.0;
     return telemetry;
+}
+
+void MainFrame::pollRigSwr_()
+{
+    // Called once a second while audio runs. Only while transmitting: the
+    // reading means nothing otherwise, and a new keying starts with a blank
+    // meter rather than the last one's reading.
+    bool transmitting = g_tx.load(std::memory_order_acquire);
+    if (!transmitting)
+    {
+        bool holding = rigSwrAbortAtMs_ != 0 && steadyNowMs() - rigSwrAbortAtMs_ < SWR_ABORT_HOLD_MS;
+        if (!holding) rigSwr_ = NAN;
+        return;
+    }
+
+    auto swrMeter = std::dynamic_pointer_cast<IRigSwrMeter>(wxGetApp().rigFrequencyController);
+    if (!wxGetApp().appConfiguration.rigControlConfiguration.swrMeter || !swrMeter) return;
+    swrMeter->requestSwr();
+}
+
+void MainFrame::onRigSwrReading_(double swr)
+{
+    // A reading asked for just before the radio let go can land after it.
+    if (!g_tx.load(std::memory_order_acquire)) return;
+
+    // Under 1:1 is no reading at all: some radios give 0 until power is up.
+    if (!(swr >= 1.0)) return;
+    rigSwr_ = swr;
+
+    auto& rig = wxGetApp().appConfiguration.rigControlConfiguration;
+    if (!rig.swrMeter || !rig.swrAutoAbort || swr <= SWR_ABORT_ABOVE) return;
+
+    log_warn("SWR %.1f:1 is over %.0f:1: aborting the transmission", swr, SWR_ABORT_ABOVE);
+    rigSwrAbortAtMs_ = steadyNowMs();
+
+    bool chatOnAir = m_textMessagingTransport != nullptr && m_textMessagingTransport->isTransmitting();
+    glissandoAbortTransmit();
+
+    // Keyed some other way (the PTT key, say): let go as the time-out does.
+    if (!chatOnAir && m_btnTogPTT->GetValue())
+    {
+        m_btnTogPTT->SetValue(false);
+        endingTx.store(true, std::memory_order_release);
+        togglePTT();
+    }
 }
 
 bool MainFrame::glissandoSpectrum(std::vector<float>& magnitudesDb, double& nyquistHz)

@@ -257,6 +257,17 @@ void HamlibRigController::requestCurrentFrequencyMode()
     enqueue_(std::bind(&HamlibRigController::requestCurrentFrequencyModeImpl_, this));
 }
 
+bool HamlibRigController::canReadSwr()
+{
+    return isConnected() && canReadSwr_.load(std::memory_order_acquire);
+}
+
+void HamlibRigController::requestSwr()
+{
+    if (!canReadSwr() || swrRequestPending_.exchange(true, std::memory_order_acq_rel)) return;
+    enqueue_(std::bind(&HamlibRigController::requestSwrImpl_, this));
+}
+
 int HamlibRigController::getRigResponseTimeMicroseconds()
 {
     return rigResponseTime_;
@@ -476,6 +487,9 @@ void HamlibRigController::connectImpl_()
         {
             multipleVfos_ = true;
         }
+
+        canReadSwr_.store(rig_has_get_level(tmpRig, RIG_LEVEL_SWR) != 0, std::memory_order_release);
+        log_info("Radio %s report SWR", canReadSwr_.load() ? "can" : "cannot");
 
         // Make sure PTT is not enabled as there have been reports of some 
         // radios starting off in this state.
@@ -753,6 +767,27 @@ void HamlibRigController::setModeImpl_(IRigFrequencyController::Mode mode)
             }
         }
     }
+}
+
+void HamlibRigController::requestSwrImpl_()
+{
+    swrRequestPending_.store(false, std::memory_order_release);
+
+    // Unlike the frequency and mode, this is read during TX on purpose: the
+    // meter has nothing to show otherwise. Only radios whose Hamlib backend
+    // says they report SWR are ever asked.
+    auto tmpRig = rig_.load(std::memory_order_acquire);
+    if (tmpRig == nullptr || destroying_) return;
+
+    value_t value;
+    value.f = 0;
+    int result = rig_get_level(tmpRig, RIG_VFO_CURR, RIG_LEVEL_SWR, &value);
+    if (result != RIG_OK)
+    {
+        log_debug("rig_get_level(SWR): error = %s ", rigerror(result));
+        return;
+    }
+    onSwrReading(this, value.f);
 }
 
 void HamlibRigController::requestCurrentFrequencyModeImpl_()

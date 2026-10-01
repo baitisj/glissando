@@ -31,13 +31,14 @@
 #include "ThreadedObject.h"
 #include "IRigFrequencyController.h"
 #include "IRigPttController.h"
+#include "IRigSwrMeter.h"
 
 extern "C" 
 {
     #include <hamlib/rig.h>
 }
 
-class HamlibRigController : public ThreadedObject, public IRigFrequencyController, public IRigPttController
+class HamlibRigController : public ThreadedObject, public IRigFrequencyController, public IRigPttController, public IRigSwrMeter
 {
 public:
     enum PttType 
@@ -60,6 +61,8 @@ public:
     virtual void setFrequency(uint64_t frequency) override;
     virtual void setMode(IRigFrequencyController::Mode mode) override;
     virtual void requestCurrentFrequencyMode() override;
+    virtual bool canReadSwr() override;
+    virtual void requestSwr() override;
 
     static void InitializeHamlibLibrary();
     static int RigNameToIndex(std::string const& rigName);
@@ -96,6 +99,10 @@ private:
     bool destroying_;
     
     int rigResponseTime_;
+
+    // Set on connect from the rig's capabilities.
+    std::atomic<bool> canReadSwr_{false};
+    std::atomic<bool> swrRequestPending_{false};
   
     // Tracks errors encountered during/after rig_open() so that
     // we only display the error box once.
@@ -121,6 +128,7 @@ private:
     void setFrequencyImpl_(uint64_t frequencyHz);
     void setModeImpl_(IRigFrequencyController::Mode mode);
     void requestCurrentFrequencyModeImpl_();
+    void requestSwrImpl_();
     
     static RigList RigList_;
     static RigNameList RigNameList_;

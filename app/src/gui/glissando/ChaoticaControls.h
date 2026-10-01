@@ -11,6 +11,7 @@
 #ifndef GUI_GLISSANDO__CHAOTICA_CONTROLS_H
 #define GUI_GLISSANDO__CHAOTICA_CONTROLS_H
 
+#include <cmath>
 #include <functional>
 #include <vector>
 
@@ -175,20 +176,34 @@ private:
 class Meter : public Control
 {
 public:
-    Meter(wxWindow* parent, const wxString& caption, double minimum, double maximum,
-          const wxString& units, const wxSize& size = wxSize(190, 110));
+    // What the face shows: four major divisions from minimum to maximum,
+    // with the ticks and labels from redFrom to redTo painted red.
+    struct Scale
+    {
+        wxString caption;
+        double minimum = 0.0;
+        double maximum = 1.0;
+        wxString labelFormat = "%.0f";      // the numbers on the arc
+        wxString figureFormat = "%.1f";     // the reading in the corner
+        double redFrom = NAN;
+        double redTo = NAN;
+    };
+
+    Meter(wxWindow* parent, const Scale& scale, const wxSize& size = wxSize(190, 110));
 
     // NaN parks the needle and blanks the figure.
     void SetValue(double value);
+
+    // Repaints the face with another scale; the value stays as it is.
+    void SetScale(const Scale& scale);
 
 protected:
     virtual void paint(wxGraphicsContext* gc, const wxSize& size) override;
 
 private:
-    wxString caption_;
-    wxString units_;
-    double minimum_;
-    double maximum_;
+    bool red(double v) const;
+
+    Scale scale_;
     double value_;
 };
 
