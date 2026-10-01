@@ -381,6 +381,41 @@ bool MessageStore::pruneMessagesOlderThan(std::time_t cutoff)
     return ok;
 }
 
+bool MessageStore::deleteMessagesExcept(const std::vector<int64_t>& keep)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (db_ == nullptr)
+    {
+        lastError_ = "database is not open";
+        return false;
+    }
+
+    std::string sql = "DELETE FROM messages";
+    if (!keep.empty())
+    {
+        sql += " WHERE id NOT IN (";
+        for (size_t i = 0; i < keep.size(); i++) sql += i == 0 ? "?" : ", ?";
+        sql += ")";
+    }
+    sql += ";";
+
+    sqlite3_stmt* statement = nullptr;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &statement, nullptr) != SQLITE_OK)
+    {
+        setError("preparing message clear");
+        return false;
+    }
+
+    for (size_t i = 0; i < keep.size(); i++) sqlite3_bind_int64(statement, (int)i + 1, (sqlite3_int64)keep[i]);
+
+    bool ok = sqlite3_step(statement) == SQLITE_DONE;
+    if (!ok) setError("clearing messages");
+    sqlite3_finalize(statement);
+
+    return ok;
+}
+
 bool MessageStore::upsertHeardStation(const HeardStation& station)
 {
     std::lock_guard<std::mutex> lock(mutex_);

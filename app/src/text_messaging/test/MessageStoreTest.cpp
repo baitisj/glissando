@@ -156,6 +156,32 @@ void testMessageLimitAndPrune()
     CHECK(messages[0].text == "message 5");
 }
 
+// Clearing the chat keeps only the messages still being sent.
+void testClearMessagesKeepsOutstanding()
+{
+    MessageStore store;
+    CHECK(store.open(":memory:"));
+
+    std::vector<int64_t> ids;
+    for (int i = 0; i < 5; i++)
+    {
+        TextMessage message = makeSentMessage("message " + std::to_string(i), NOW + i);
+        CHECK(store.addMessage(message));
+        ids.push_back(message.id);
+    }
+
+    CHECK(store.deleteMessagesExcept({ids[1], ids[3]}));
+    std::vector<TextMessage> messages = store.recentMessages(50);
+    CHECK(messages.size() == 2);
+    CHECK(messages.size() == 2 && messages[0].id == ids[1] && messages[1].id == ids[3]);
+
+    // Kept rows still take status changes.
+    CHECK(store.updateMessageStatus(ids[3], MessageStatus::Acknowledged, 0));
+
+    CHECK(store.deleteMessagesExcept({}));
+    CHECK(store.recentMessages(50).empty());
+}
+
 void testHeardStationPersistence()
 {
     MessageStore store;
@@ -335,6 +361,7 @@ int main()
 {
     testMessageRoundTrip();
     testMessageLimitAndPrune();
+    testClearMessagesKeepsOutstanding();
     testHeardStationPersistence();
     testClosedStoreFails();
     testHeardStationList();

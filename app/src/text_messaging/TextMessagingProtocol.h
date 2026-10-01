@@ -167,8 +167,6 @@ public:
     AckWait ackWait() const;
 
     // True while a burst is actually on the air, ours or the voice keyer's.
-    // The chat window disables sending on it, so nothing is queued behind a
-    // keyed transmitter.
     bool isTransmitting() const;
 
     // True while anything of ours is waiting to go on the air: a message, a
@@ -180,6 +178,28 @@ public:
     // queued when the app last closed is in the history but not the queue,
     // and engaging will not send it.
     bool isMessageQueued(int64_t messageId) const;
+
+    // What the operator can do with a chat message of ours that is still
+    // outstanding. One waiting for its first turn on the air can be removed
+    // from the queue, and is then never sent. One on the air, waiting for
+    // its acknowledgement or waiting to be retried can be aborted. None for
+    // anything else: delivered, failed, already stopped, or not ours.
+    enum class Cancel
+    {
+        None,
+        Remove,
+        Abort,
+    };
+    Cancel cancelFor(int64_t messageId) const;
+
+    // Does it: a removed message ends NotSent and an aborted one Aborted,
+    // and nothing of it goes on the air again. Returns what was done, and in
+    // onAirOut whether it was on the air: the caller stops that keying,
+    // which this cannot do. Whatever else was queued carries on.
+    Cancel cancelMessage(int64_t messageId, bool* onAirOut = nullptr);
+
+    // The chat messages still outstanding, by message store id.
+    std::vector<int64_t> outstandingMessageIds() const;
 
 private:
     enum class TransmissionState
@@ -275,6 +295,7 @@ private:
     void purgeStaleReassembliesLocked(uint64_t nowMs);
     void discardQueuedLocked(std::vector<PendingEvent>& events);
     void dropOutboxLocked(MessageStatus status, bool everything, std::vector<PendingEvent>& events);
+    Cancel cancelForLocked(const PendingTransmission& pending) const;
 
     // Holds the transmitter off until the far end has had its turn. Never
     // shortens a wait that is already running. The first holds everything;

@@ -123,6 +123,9 @@ private:
     void appendMessage(const TextMessaging::TextMessage& message);
     void updateTransmitControls();
     void setColumnIfChanged(long item, int column, const wxString& text);
+    int messageAt(const wxPoint& point) const;
+    static std::string stationOf(const TextMessaging::TextMessage& message);
+    void selectStation(const std::string& callsign, bool addIfMissing);
 
     // The status line says one of three kinds of thing, and each stops being
     // true at a different moment.
@@ -152,6 +155,11 @@ private:
     void OnStationRightDown(wxMouseEvent& event);
     void OnMenuSelectStation(wxCommandEvent& event);
     void OnMenuRemoveStation(wxCommandEvent& event);
+    void OnChatLeftDown(wxMouseEvent& event);
+    void OnChatLeftUp(wxMouseEvent& event);
+    void OnChatContextMenu(wxContextMenuEvent& event);
+    void OnMenuCancelMessage(wxCommandEvent& event);
+    void OnMenuClearMessages(wxCommandEvent& event);
     void OnAddStationText(wxCommandEvent& event);
     void OnAddStation(wxCommandEvent& event);
     void OnAutoReplyToggled(wxCommandEvent& event);
@@ -194,6 +202,14 @@ private:
     // The station the context menu was opened on. Looked up again by name
     // when an item is chosen, since the list may have changed underneath.
     std::string m_menuCallsign;
+
+    // Where the mouse went down on the chat log, to tell a click on a
+    // message from a drag selecting its text.
+    wxPoint m_chatPressAt;
+
+    // The message the chat log's menu was opened on, by store id; 0 when it
+    // offered nothing to remove or abort.
+    int64_t m_menuMessageId = 0;
 
     std::vector<TextMessaging::TextMessage> m_messages;
 };
