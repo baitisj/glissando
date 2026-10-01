@@ -421,6 +421,39 @@ void testAirTimingCountsTheChords()
     CHECK(std::abs(chords.replyWindowMs - bare.replyWindowMs - ms(adagioChord)) <= 1);
 }
 
+// Where an answer is heard by its opening chord, the reply window ends once
+// the chord would have been heard, not once the answer's first frame could
+// decode; the timeouts still wait for that frame.
+void testReplyWindowEndsAtTheAnswersChord()
+{
+    auto ms = [](double seconds) { return (int)std::lround(seconds * 1000.0); };
+    auto keysAfter = [&](double ourLatency, double farFrame) {
+        return ms(ourLatency + farFrame / 2.0) + TURNAROUND_AFTER_RX_MILLISECONDS + TURNAROUND_JITTER_MILLISECONDS;
+    };
+    const double prestoFrame = 6.88;
+    const double prestoLatency = glissandoLatency(prestoFrame);
+    const double adagioLatency = glissandoLatency(ADAGIO_FRAME);
+    const double sensed = 1.6;
+
+    AirTiming frames = AirTiming::forFrameSeconds(prestoFrame, 9, prestoLatency, ADAGIO_FRAME, adagioLatency,
+                                                  0.6, 2.56);
+    AirTiming chord = AirTiming::forFrameSeconds(prestoFrame, 9, prestoLatency, ADAGIO_FRAME, adagioLatency,
+                                                 0.6, 2.56, -1.0, sensed);
+    CHECK(chord.replyWindowMs == REPLY_WINDOW_MILLISECONDS + keysAfter(prestoLatency, ADAGIO_FRAME) + ms(sensed));
+    CHECK(chord.replyWindowMs < frames.replyWindowMs - 50000); // an Adagio frame and more
+    CHECK(chord.ackTimeoutMs == frames.ackTimeoutMs);
+    CHECK(chord.pingTimeoutMs == frames.pingTimeoutMs);
+
+    // Presto answering Presto: 16 s instead of 25.
+    AirTiming presto = AirTiming::forFrameSeconds(prestoFrame, 9, prestoLatency, prestoFrame, prestoLatency,
+                                                  0.6, 0.6, -1.0, sensed);
+    CHECK(presto.replyWindowMs > 15000 && presto.replyWindowMs < 17000);
+
+    // Data2G passes no far end, and keeps its window.
+    AirTiming data2g = AirTiming::forFrameSeconds(2.0, 64, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, sensed);
+    CHECK(data2g.replyWindowMs == AirTiming::forFrameSeconds(2.0, 64, 1.0).replyWindowMs);
+}
+
 // A ping sent at Allegro while listening at every tempo, answered at Adagio:
 // the answer's first frame is heard 80 s after the ping ended, well past the
 // 53 s an Allegro answer takes, and the channel stays busy until the pong is
@@ -2150,6 +2183,7 @@ int main()
     testPingTimesOut();
     testAirTimingWaitsForTheSlowestAnswer();
     testAirTimingCountsTheChords();
+    testReplyWindowEndsAtTheAnswersChord();
     testPingWaitsForAnAnswerAtASlowerTempo();
     testAutoReplyCanBeDisabled();
     testAckWaitDoesNotBlockTheQueue();

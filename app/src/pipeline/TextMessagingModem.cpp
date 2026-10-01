@@ -66,6 +66,11 @@ constexpr float GLISSANDO_PEAK = 16384.0f;
 // Allowance for a receiver search to finish once its audio is in.
 constexpr double GLISSANDO_SEARCH_SECONDS = 1.0;
 
+// Allowance for an opening chord to be heard once it has ended: the chord
+// listener's next hop (0.1 s), the audio path and the protocol's tick, with
+// room to spare.
+constexpr double CHORD_HEARD_SECONDS = 1.0;
+
 // Automatic gear shifting follows the last frame heard for this long, then
 // falls back to the tempo chosen by hand: an old report says nothing about
 // the band now.
@@ -716,13 +721,19 @@ AirTiming TextMessagingModem::airTiming() const
     // waits a little longer for an answer, and as long as a bar at the
     // slowest tempo, which is what a station on an older build opens with.
     auto chordFor = [](double frameSeconds) { return frameSeconds * 4.0 / Glissando::SYMBOLS_PER_FRAME; };
+    // With chords on, an answer is heard by its opening chord, a moment
+    // after the chord ends, so the reply window need not wait for its first
+    // frame (Jeff's call, 2026-10-01: a second ping held 2 minutes at
+    // Adagio behind one nobody answered). The far end's chord is taken to
+    // be as long as an older build's, as above.
+    const double replyChord = std::max(Glissando::OPENING_CHORD_SECONDS, chordFor(slowestFrameSeconds));
     return AirTiming::forFrameSeconds(info.frameSeconds(),
                                       Glissando::SEGMENT_DATA_BYTES * info.voices,
                                       decodeLatency(info.frameSeconds()), slowestFrameSeconds,
                                       decodeLatency(slowestFrameSeconds),
                                       chords ? Glissando::OPENING_CHORD_SECONDS : 0.0,
-                                      std::max(Glissando::OPENING_CHORD_SECONDS, chordFor(slowestFrameSeconds)),
-                                      closingSeconds);
+                                      replyChord, closingSeconds,
+                                      chords ? replyChord + CHORD_HEARD_SECONDS : 0.0);
 }
 
 double TextMessagingModem::glissandoMessageSeconds(size_t textBytes) const

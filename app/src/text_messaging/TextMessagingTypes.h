@@ -269,13 +269,23 @@ struct AirTiming
     // 0 for none), closingChordSeconds the one that closes it (negative for
     // the same as the opening one) and replyChordSeconds the one that opens
     // an answer at the slowest tempo.
+    //
+    // answerSensedSeconds, when given, is how soon after the far end keys
+    // carrier sense hears it, as Glissando's opening chord lets it. The
+    // reply window, which keeps our own keyings off an answer that may be
+    // coming, then ends once the start of one would have been heard rather
+    // than once its first frame could have decoded: at Presto 16 s instead
+    // of 25, at Adagio 54 s instead of 2 minutes. An answer too weak for its
+    // chord to be heard (below about -14 dB) can be keyed over; the
+    // acknowledgement and ping timeouts still wait for its first frame.
     static AirTiming forFrameSeconds(double frameSeconds, int bytesPerFrame,
                                      double decodeLatencySeconds,
                                      double replyFrameSeconds = 0.0,
                                      double replyDecodeLatencySeconds = 0.0,
                                      double chordSeconds = 0.0,
                                      double replyChordSeconds = 0.0,
-                                     double closingChordSeconds = -1.0);
+                                     double closingChordSeconds = -1.0,
+                                     double answerSensedSeconds = 0.0);
 };
 
 // What the station is currently waiting to hear back, which is what the chat

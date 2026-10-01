@@ -205,6 +205,15 @@ about 3 s more at Presto. Before this, two real modems at -12 dB and at -15 dB
 each lost an acknowledgement to the tail, costing a retry two minutes
 later, and at -15 dB the pong to a ping as well.
 
+With chords on, the wait that keeps our next keying off an answer that may
+still be coming (after a ping or message, or after we answer somebody) ends
+once the answer's opening chord would have been heard, not once its first
+frame could have decoded. A ping queued behind one nobody answers now goes
+16 s after it at Presto (was 25 s), 21 s at Allegro (was 39 s) and about
+54 s at Adagio (was about 2 minutes). The cost: an answer too weak for its
+chord to be heard, below about -14 dB, can be keyed over. The
+acknowledgement and ping timeouts still wait for the answer's first frame.
+
 Air time for a short message (up to 12 characters of text behind the 15 byte
 header, three segments):
 about 20 s at Presto, 41 s at Allegro, 2.8 minutes at Adagio. A full 54 byte

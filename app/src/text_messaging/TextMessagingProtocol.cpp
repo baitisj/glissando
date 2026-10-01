@@ -228,7 +228,8 @@ void TextMessagingProtocol::dropOutboxLocked(MessageStatus status, bool everythi
 AirTiming AirTiming::forFrameSeconds(double frameSeconds, int bytesPerFrame,
                                      double decodeLatencySeconds, double replyFrameSeconds,
                                      double replyDecodeLatencySeconds, double chordSeconds,
-                                     double replyChordSeconds, double closingChordSeconds)
+                                     double replyChordSeconds, double closingChordSeconds,
+                                     double answerSensedSeconds)
 {
     AirTiming timing;
     if (frameSeconds <= 0.0 || bytesPerFrame <= 0) return timing;
@@ -266,7 +267,12 @@ AirTiming AirTiming::forFrameSeconds(double frameSeconds, int bytesPerFrame,
                           ms(replyChordSeconds + replyFrameSeconds + replyDecodeLatencySeconds)
                     : 0;
 
-    timing.replyWindowMs = REPLY_WINDOW_MILLISECONDS + std::max(ms(seen), firstReplyFrame);
+    // Where the start of an answer can be heard, as the far end keys,
+    // the window need only last until then.
+    timing.replyWindowMs =
+        farEndGiven && answerSensedSeconds > 0.0
+            ? REPLY_WINDOW_MILLISECONDS + farEndKeysAfter(replyFrameSeconds) + ms(answerSensedSeconds)
+            : REPLY_WINDOW_MILLISECONDS + std::max(ms(seen), firstReplyFrame);
     timing.turnaroundJitterMs = TURNAROUND_JITTER_MILLISECONDS + ms(frameSeconds / 2.0);
     timing.textFragmentAirMs = ms(textAir) + TEXT_FRAGMENT_AIR_MILLISECONDS;
     timing.signallingFollowedReservationMs = 2 * timing.textFragmentAirMs;
