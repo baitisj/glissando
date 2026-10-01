@@ -76,7 +76,7 @@ struct GlissandoScopeSent
     int voice = 0;                  // a duet's second voice sings alongside the first
     bool heroes = true;             // pentatonic
     std::array<double, 8> notesHz{};
-    std::vector<int> melody;        // note index of every symbol
+    std::vector<int> melody;        // note index of every symbol (-1 silent, in a CW tail)
     double leadSeconds = 0.0;       // the opening chord, sung before this frame
     double tailSeconds = 0.0;       // the closing chord, sung after it
 };

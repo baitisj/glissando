@@ -168,6 +168,17 @@ void MainFrame::applyGlissandoToModem_(bool enabled)
     modemConfig.tuningOffsetHz = config.glissandoTuningDeciHz / 10.0;
     modemConfig.listenAllGears = config.glissandoListenAllGears;
     modemConfig.chords = config.glissandoChords;
+    switch (config.glissandoTail)
+    {
+    case 0: modemConfig.tail = TextMessagingModem::GlissandoConfig::Tail::Off; break;
+    case 1: modemConfig.tail = TextMessagingModem::GlissandoConfig::Tail::Chord; break;
+    default: modemConfig.tail = TextMessagingModem::GlissandoConfig::Tail::Cw; break;
+    }
+    modemConfig.cwText = TextMessagingModem::cwTailText(
+        ((wxString)config.glissandoCwText).ToStdString(),
+        config.reportingConfiguration.reportingCallsign->ToStdString());
+    modemConfig.cwWpm = config.glissandoCwWpm;
+    modemConfig.cwIdMinutes = config.glissandoCwIdMinutes;
     textMessagingModem().setGlissando(modemConfig);
 
     // Automatic shifting can change the tempo at any frame heard, and every
@@ -311,7 +322,18 @@ std::vector<GlissandoScopeSent> MainFrame::glissandoSentFrames()
         frame.melody.assign(sent.melody.begin(), sent.melody.end());
         frame.leadSeconds = sent.leadSeconds;
         frame.tailSeconds = sent.tailSeconds;
-        frames.push_back(std::move(frame));
+        frames.push_back(frame);
+        if (!sent.tailMelody.empty())
+        {
+            // The CW tail follows as a tune of its own, a Morse unit a note.
+            GlissandoScopeSent tail = frame;
+            tail.symbolSeconds = sent.tailUnitSeconds;
+            tail.voice = 0;
+            tail.melody = sent.tailMelody;
+            tail.leadSeconds = 0.0;
+            tail.tailSeconds = 0.0;
+            frames.push_back(std::move(tail));
+        }
     }
     return frames;
 }

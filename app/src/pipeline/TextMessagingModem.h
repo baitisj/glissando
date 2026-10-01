@@ -41,12 +41,14 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "AnswerTempo.h"
 #include "FrameCodec.h"
 #include "TextMessagingTypes.h"
 #include "GlissandoChord.h"
+#include "GlissandoCw.h"
 #include "GlissandoLink.h"
 #include "GlissandoModem.h"
 #include "GlissandoReceiver.h"
@@ -128,8 +130,29 @@ public:
         double tuningOffsetHz = 0.0;
         bool listenAllGears = true;
         bool listenAllScales = true;    // hear stations singing in any scale, not just ours
-        bool chords = true;             // open and close each keying with the scale's chord
+        bool chords = true;             // open each keying with the E4+D5 chord
+
+        // How each keying ends: nothing, a bar of every note of the scale,
+        // or the CW Glorifier singing cwText (callsign already filled in)
+        // at cwWpm. The CW tail plays at most once every cwIdMinutes (every
+        // keying at 0), the chord in between; it doubles as the station ID.
+        // With no text, or a tail too long to fit (see GlissandoCw.h), the
+        // chord closes the keying instead.
+        enum class Tail
+        {
+            Off,
+            Chord,
+            Cw,
+        };
+        Tail tail = Tail::Cw;
+        std::string cwText;
+        int cwWpm = Glissando::CW_DEFAULT_WPM;
+        int cwIdMinutes = 10;
     };
+
+    // The CW tail's text: format with every <MYCALL> replaced by callsign.
+    // Empty when the format names the callsign and none is set.
+    static std::string cwTailText(const std::string& format, const std::string& callsign);
 
     void setGlissando(const GlissandoConfig& config);
     GlissandoConfig glissandoConfig() const;
@@ -178,6 +201,11 @@ public:
         std::array<int, Glissando::SYMBOLS_PER_FRAME> melody{};
         double leadSeconds = 0.0;       // the opening chord, sung before this frame
         double tailSeconds = 0.0;       // the closing chord, sung after it
+
+        // A CW tail sung after this frame instead of the chord: one note
+        // index per Morse unit (-1 for silence), each tailUnitSeconds long.
+        std::vector<int> tailMelody;
+        double tailUnitSeconds = 0.0;
     };
 
     static constexpr size_t GLISSANDO_SENT_LIMIT = 256;
@@ -229,6 +257,10 @@ private:
     void onGlissandoDecode(const Glissando::StreamDecode& decode);
     void configureGlissandoReceiverLocked();
     int transmitGearLocked() const;
+    // True when the next keying ends with the CW tail rather than the chord.
+    bool cwTailDueLocked(uint64_t nowMs) const;
+    // How long the next keying's tail lasts at this gear.
+    double closingSecondsLocked(int gear, uint64_t nowMs) const;
 
     mutable std::mutex glissandoMutex_;
     GlissandoConfig glissando_;
@@ -245,6 +277,7 @@ private:
     // GUI's, hence its own lock; isSounding() needs none.
     std::mutex chordMutex_;
     Glissando::ChordListener chordListener_;
+    uint64_t lastCwTailMs_ = 0;         // steady clock; zero before the first, under glissandoMutex_
     std::atomic<bool> glissandoOn_;
 
     // The end of the frame that completed the last burst heard, as the

@@ -19,11 +19,13 @@ ear hears the tempo from it:
 | Allegro | 0.64 s | 13.8 s + 1.2 s |
 | Presto (and duet) | 0.32 s | 6.9 s + 0.9 s |
 
-The chords go at the ends of a keying, not around each frame. They are on
-by default. The switch is in Preferences, under text chat: "Open and close
-each Glissando transmission with a chord". The chat's timers, the Send
-button's on-air time and the split before the 180 s time-out all count the
-chords.
+The chords go at the ends of a keying, not around each frame. Both are on
+by default, and set in Preferences, Options, Modem, under Text Chat: a
+switch for the opening chord, and a Tail choice of Off, Chord or CW for the
+end. With CW, the station's call is sung in Morse at most once every ten
+minutes and the closing chord ends the keyings in between (see
+[CW_TAIL.md](CW_TAIL.md)). The chat's timers, the Send button's on-air time
+and the split before the 180 s time-out all count the chords and the tail.
 
 ## The opening chord as carrier sense
 
