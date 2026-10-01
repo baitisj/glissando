@@ -2,11 +2,11 @@
 
 Somebody who stumbles on Glissando on the air hears a pretty melody and has
 nothing to search for. So, by default, a Glissando transmission can end by
-spelling it out in Morse code: **GLISSANDO DE AG7EW**, with your own call.
+spelling it out in Morse code: **GLISS DE AG7EW**, with your own call.
 Each dit and dah is sung on a note of the scale being sent. The CW
 Glorifier chooses the notes.
 
-![The tail "Glissando de AG7EW" in the pentatonic and diabolus scales](images/cw-tail.svg)
+![The tail "Gliss de AG7EW" in the pentatonic and diabolus scales](images/cw-tail.svg)
 
 ## What it sounds like
 
@@ -49,7 +49,7 @@ In Preferences, Options, Modem, under Text Chat:
 |---|---|---|
 | Open each Glissando transmission with a chord | on | E4 and D5 for 0.6 s; see [CHORDS.md](CHORDS.md) |
 | Tail | CW, glorified | Off, Chord (every note of the scale for one bar), CW glorified, or CW straight on E4+D5 |
-| CW text | `Glissando de <MYCALL>` | `<MYCALL>` becomes the callsign on the Station tab |
+| CW text | `Gliss de <MYCALL>` | `<MYCALL>` becomes the callsign on the Station tab |
 | CW speed | 20 WPM | 10 to 40 |
 | At most once every | 10 minutes | 0 plays it on every transmission |
 
@@ -65,10 +65,10 @@ minutes has passed. The closing chord ends the transmissions in between.
 
 ## Why at most every ten minutes, and why 20 WPM
 
-At 20 WPM, "GLISSANDO DE AG7EW" is 164 Morse units, counting the word space
-that separates it from the last frame. That is 9.8 s. A ping or an
+At 20 WPM, "GLISS DE AG7EW" is 124 Morse units, counting the word space
+that separates it from the last frame. That is 7.4 s. A ping or an
 acknowledgement at Presto is only 7.8 s with its chords, so a CW tail on
-every one would more than double it. Once every ten minutes keeps the chat
+every one would nearly double it. Once every ten minutes keeps the chat
 brisk.
 
 Ten minutes is also how often US stations must identify (47 CFR

@@ -4,7 +4,7 @@
 //                  scale, for the tail that ends a transmission.
 //
 // A casual listener who hears Glissando on the air has nothing to search
-// for. The tail spells it out in Morse ("Glissando de AG7EW" by default),
+// for. The tail spells it out in Morse ("Gliss de AG7EW" by default),
 // which also identifies the station in plain CW. The rhythm is standard
 // Morse, so it copies by ear as usual; only the pitch of each dit and dah
 // moves, following the rules long notes follow in a melody:

@@ -76,7 +76,7 @@ FreeDVConfiguration::FreeDVConfiguration()
     , glissandoListenAllGears("/Glissando/ListenAllGears", true)
     , glissandoChords("/Glissando/Chords", true)
     , glissandoTail("/Glissando/Tail", 2)
-    , glissandoCwText("/Glissando/CwText", "Glissando de <MYCALL>")
+    , glissandoCwText("/Glissando/CwText", "Gliss de <MYCALL>")
     , glissandoCwWpm("/Glissando/CwWpm", 20)
     , glissandoCwIdMinutes("/Glissando/CwIdMinutes", 10)
     , glissandoScanRateDeci("/Glissando/ScanRateDeci", 40)
@@ -160,6 +160,9 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     load_(config, glissandoTail);
     if (!tailSaved && !glissandoChords) glissandoTail = 0;
     load_(config, glissandoCwText);
+    // The first default spelled the mode out in full; a text still equal to
+    // it takes the shorter one.
+    if ((wxString)glissandoCwText == "Glissando de <MYCALL>") glissandoCwText = wxString("Gliss de <MYCALL>");
     load_(config, glissandoCwWpm);
     load_(config, glissandoCwIdMinutes);
     load_(config, glissandoScanRateDeci);
