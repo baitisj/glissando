@@ -39,7 +39,7 @@ constexpr double SEARCH_HALF_WIDTH_HZ = 25.0;
 constexpr int REFRESH_MILLISECONDS = 250;
 
 // The telemetry meter's two faces. Signal reads red where a frame is only just
-// copyable; SWR reads red from 3:1, where Preferences can have it abort.
+// copyable; SWR reads red above 2.5:1, short of the 3:1 Preferences can abort at.
 Chaotica::Meter::Scale signalScale()
 {
     Chaotica::Meter::Scale scale;
@@ -61,7 +61,7 @@ Chaotica::Meter::Scale swrScale()
     scale.maximum = 5.0;
     scale.labelFormat = "%.0f";
     scale.figureFormat = "%.1f:1";
-    scale.redFrom = 3.0;
+    scale.redFrom = 2.5;
     scale.redTo = 5.0;
     return scale;
 }
