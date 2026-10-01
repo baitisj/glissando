@@ -56,7 +56,7 @@ function(CheckGitVersion)
         set(FREEDV_VERSION "${Glissando_VERSION}")
     endif()
     set(FREEDV_VERSION_CLEAN "${Glissando_VERSION}")
-    file(WRITE ${CMAKE_BINARY_DIR}/freedv-version.txt ${FREEDV_VERSION})
+    file(WRITE ${CMAKE_BINARY_DIR}/glissando-version.txt ${FREEDV_VERSION})
 
     # Only update the git_version.cpp if the hash has changed. This will
     # prevent us from rebuilding the project more than we need to.
