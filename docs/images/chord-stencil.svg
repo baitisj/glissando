@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 376" width="760" height="376">
+<rect width="760" height="376" rx="6" fill="#FFFFFF"/>
+<g font-family="Menlo, Consolas, monospace" font-size="12" fill="#1F2430">
+<text x="142" y="22" fill="#5A6477">lamps 0 to 11 are FFT bins; the stencil's holes are 3 lamps apart</text>
+<text x="545" y="44" fill="#5A6477">add both</text><text x="645" y="44" fill="#5A6477">dimmer one</text>
+<text x="12" y="92" font-weight="bold">A real chord</text>
+<rect x="142" y="58" width="340" height="66" rx="3" fill="#E6E1D6"/>
+<rect x="256" y="58" width="24" height="66" fill="#FFFFFF" stroke="#5A6477" stroke-dasharray="3 2"/>
+<rect x="340" y="58" width="24" height="66" fill="#FFFFFF" stroke="#5A6477" stroke-dasharray="3 2"/>
+<rect x="148" y="115.0" width="16" height="5.0" fill="#5A6477"/>
+<text x="150" y="136" font-size="10" fill="#5A6477">0</text>
+<rect x="176" y="117.5" width="16" height="2.5" fill="#5A6477"/>
+<text x="178" y="136" font-size="10" fill="#5A6477">1</text>
+<rect x="204" y="113.7" width="16" height="6.3" fill="#5A6477"/>
+<text x="206" y="136" font-size="10" fill="#5A6477">2</text>
+<rect x="232" y="116.2" width="16" height="3.8" fill="#5A6477"/>
+<text x="234" y="136" font-size="10" fill="#5A6477">3</text>
+<rect x="260" y="69.6" width="16" height="50.4" fill="#0E7383"/>
+<text x="262" y="136" font-size="10" fill="#5A6477">4</text>
+<rect x="288" y="115.4" width="16" height="4.6" fill="#5A6477"/>
+<text x="290" y="136" font-size="10" fill="#5A6477">5</text>
+<rect x="316" y="117.1" width="16" height="2.9" fill="#5A6477"/>
+<text x="318" y="136" font-size="10" fill="#5A6477">6</text>
+<rect x="344" y="78.0" width="16" height="42.0" fill="#0E7383"/>
+<text x="346" y="136" font-size="10" fill="#5A6477">7</text>
+<rect x="372" y="114.5" width="16" height="5.5" fill="#5A6477"/>
+<text x="374" y="136" font-size="10" fill="#5A6477">8</text>
+<rect x="400" y="117.9" width="16" height="2.1" fill="#5A6477"/>
+<text x="402" y="136" font-size="10" fill="#5A6477">9</text>
+<rect x="428" y="115.8" width="16" height="4.2" fill="#5A6477"/>
+<text x="430" y="136" font-size="10" fill="#5A6477">10</text>
+<rect x="456" y="116.6" width="16" height="3.4" fill="#5A6477"/>
+<text x="458" y="136" font-size="10" fill="#5A6477">11</text>
+<text x="545" y="96" font-size="15" fill="#0E7383">22 heard</text>
+<text x="645" y="96" font-size="15" fill="#0E7383">10 heard</text>
+<text x="12" y="187" font-weight="bold">One bright lamp</text>
+<rect x="142" y="153" width="340" height="66" rx="3" fill="#E6E1D6"/>
+<rect x="256" y="153" width="24" height="66" fill="#FFFFFF" stroke="#5A6477" stroke-dasharray="3 2"/>
+<rect x="340" y="153" width="24" height="66" fill="#FFFFFF" stroke="#5A6477" stroke-dasharray="3 2"/>
+<rect x="148" y="211.2" width="16" height="3.8" fill="#5A6477"/>
+<text x="150" y="231" font-size="10" fill="#5A6477">0</text>
+<rect x="176" y="209.1" width="16" height="5.9" fill="#5A6477"/>
+<text x="178" y="231" font-size="10" fill="#5A6477">1</text>
+<rect x="204" y="212.1" width="16" height="2.9" fill="#5A6477"/>
+<text x="206" y="231" font-size="10" fill="#5A6477">2</text>
+<rect x="232" y="210.4" width="16" height="4.6" fill="#5A6477"/>
+<text x="234" y="231" font-size="10" fill="#5A6477">3</text>
+<rect x="260" y="210.8" width="16" height="4.2" fill="#0E7383"/>
+<text x="262" y="231" font-size="10" fill="#5A6477">4</text>
+<rect x="288" y="212.5" width="16" height="2.5" fill="#5A6477"/>
+<text x="290" y="231" font-size="10" fill="#5A6477">5</text>
+<rect x="316" y="210.0" width="16" height="5.0" fill="#5A6477"/>
+<text x="318" y="231" font-size="10" fill="#5A6477">6</text>
+<rect x="344" y="156.2" width="16" height="58.8" fill="#0E7383"/>
+<text x="368" y="167" fill="#B0472F" font-weight="bold">40</text>
+<text x="346" y="231" font-size="10" fill="#5A6477">7</text>
+<rect x="372" y="211.6" width="16" height="3.4" fill="#5A6477"/>
+<text x="374" y="231" font-size="10" fill="#5A6477">8</text>
+<rect x="400" y="208.7" width="16" height="6.3" fill="#5A6477"/>
+<text x="402" y="231" font-size="10" fill="#5A6477">9</text>
+<rect x="428" y="211.2" width="16" height="3.8" fill="#5A6477"/>
+<text x="430" y="231" font-size="10" fill="#5A6477">10</text>
+<rect x="456" y="210.4" width="16" height="4.6" fill="#5A6477"/>
+<text x="458" y="231" font-size="10" fill="#5A6477">11</text>
+<text x="545" y="191" font-size="15" fill="#B0472F">41 heard</text>
+<text x="645" y="191" font-size="15" fill="#0E7383">1 quiet</text>
+<text x="12" y="282" font-weight="bold">Noise alone</text>
+<rect x="142" y="248" width="340" height="66" rx="3" fill="#E6E1D6"/>
+<rect x="256" y="248" width="24" height="66" fill="#FFFFFF" stroke="#5A6477" stroke-dasharray="3 2"/>
+<rect x="340" y="248" width="24" height="66" fill="#FFFFFF" stroke="#5A6477" stroke-dasharray="3 2"/>
+<rect x="148" y="303.3" width="16" height="6.7" fill="#5A6477"/>
+<text x="150" y="326" font-size="10" fill="#5A6477">0</text>
+<rect x="176" y="307.1" width="16" height="2.9" fill="#5A6477"/>
+<text x="178" y="326" font-size="10" fill="#5A6477">1</text>
+<rect x="204" y="297.8" width="16" height="12.2" fill="#5A6477"/>
+<text x="206" y="326" font-size="10" fill="#5A6477">2</text>
+<rect x="232" y="305.8" width="16" height="4.2" fill="#5A6477"/>
+<text x="234" y="326" font-size="10" fill="#5A6477">3</text>
+<rect x="260" y="302.4" width="16" height="7.6" fill="#0E7383"/>
+<text x="262" y="326" font-size="10" fill="#5A6477">4</text>
+<rect x="288" y="307.5" width="16" height="2.5" fill="#5A6477"/>
+<text x="290" y="326" font-size="10" fill="#5A6477">5</text>
+<rect x="316" y="300.8" width="16" height="9.2" fill="#5A6477"/>
+<text x="318" y="326" font-size="10" fill="#5A6477">6</text>
+<rect x="344" y="304.1" width="16" height="5.9" fill="#0E7383"/>
+<text x="346" y="326" font-size="10" fill="#5A6477">7</text>
+<rect x="372" y="307.9" width="16" height="2.1" fill="#5A6477"/>
+<text x="374" y="326" font-size="10" fill="#5A6477">8</text>
+<rect x="400" y="297.0" width="16" height="13.0" fill="#5A6477"/>
+<text x="402" y="326" font-size="10" fill="#5A6477">9</text>
+<rect x="428" y="305.0" width="16" height="5.0" fill="#5A6477"/>
+<text x="430" y="326" font-size="10" fill="#5A6477">10</text>
+<rect x="456" y="306.2" width="16" height="3.8" fill="#5A6477"/>
+<text x="458" y="326" font-size="10" fill="#5A6477">11</text>
+<text x="545" y="286" font-size="15" fill="#0E7383">3.2 quiet</text>
+<text x="645" y="286" font-size="15" fill="#0E7383">1.4 quiet</text>
+<text x="142" y="350" fill="#5A6477" font-size="11">Thresholds 19 for the sum and 8 for the dimmer lamp give the same</text>
+<text x="142" y="364" fill="#5A6477" font-size="11">false alarms on noise. Red is a wrong verdict.</text>
+</g></svg>

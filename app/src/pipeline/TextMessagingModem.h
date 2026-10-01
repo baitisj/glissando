@@ -265,6 +265,10 @@ private:
     // How long the next keying's tail lasts at this gear.
     double closingSecondsLocked(int gear, uint64_t nowMs) const;
 
+    // How long a station heard in this tempo may go on sounding after its
+    // last frame: its closing chord or CW tail.
+    double farEndTailSecondsLocked(int gear) const;
+
     mutable std::mutex glissandoMutex_;
     GlissandoConfig glissando_;
     GlissandoStatus glissandoStatus_;
@@ -280,6 +284,8 @@ private:
     // GUI's, hence its own lock; isSounding() needs none.
     std::mutex chordMutex_;
     Glissando::ChordListener chordListener_;
+    bool chordWasSounding_ = false;                 // under chordMutex_
+    std::atomic<long long> chordStoppedAt_{-1};     // receiver samples, when it last stopped sounding
     uint64_t lastCwTailMs_ = 0;         // steady clock; zero before the first, under glissandoMutex_
     std::atomic<bool> glissandoOn_;
 

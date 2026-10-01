@@ -184,6 +184,36 @@ this they covered every tempo the receiver listens for: at Presto an
 unanswered ping held the queue for about 2 minutes and gave up after 2.2;
 now it holds it for 39 s and gives up after 55 s.
 
+A pong or acknowledgement with a message of ours riding behind it tells
+every listener that more follows, and a listener that then loses the message
+holds the channel for two text fragments after the reply. Our own traffic
+used to wait that out every time, plus the answered station's turn: about
+two minutes after such a keying at Presto, and many more at slower tempos.
+The wait now ends as soon as the answered station is heard again, as it
+nearly always is, acknowledging the message that rode along. With two real
+modems talking at Presto, a message typed just after a ping, a pong with a
+message behind it and its acknowledgement went out after 4 s instead of
+2 minutes.
+
+Carrier sense also holds the channel after a keying's last frame for the far
+end's closing chord or CW tail, which no frame decode covers. A reply keyed
+over the tail loses its opening, and with it the acknowledgement or pong.
+The chord listener hears the tail stop when it followed the keying; where it
+did not, at weak signals, the channel is held for as long as a CW tail like
+ours would last at 20 WPM, which keeps an answer to a weak station back
+about 3 s more at Presto. Before this, two real modems at -12 dB and at -15 dB
+each lost an acknowledgement to the tail, costing a retry two minutes
+later, and at -15 dB the pong to a ping as well.
+
+With chords on, the wait that keeps our next keying off an answer that may
+still be coming (after a ping or message, or after we answer somebody) ends
+once the answer's opening chord would have been heard, not once its first
+frame could have decoded. A ping queued behind one nobody answers now goes
+16 s after it at Presto (was 25 s), 21 s at Allegro (was 39 s) and about
+54 s at Adagio (was about 2 minutes). The cost: an answer too weak for its
+chord to be heard, below about -14 dB, can be keyed over. The
+acknowledgement and ping timeouts still wait for the answer's first frame.
+
 Air time for a short message (up to 12 characters of text behind the 15 byte
 header, three segments):
 about 20 s at Presto, 41 s at Allegro, 2.8 minutes at Adagio. A full 54 byte
@@ -199,10 +229,11 @@ is free. In the transmission log, clicking a message selects the station it
 is with in the heard list, putting the station back if it has aged out, and a
 directed message for you selects its sender when no station is selected. A
 right click offers `Clear Messages`, which keeps only messages still being
-sent, and, on a message of yours still outstanding, `Remove from Queue` if it
-has not been on the air yet or `Abort` once it has (on the air now, waiting
-for its acknowledgement, or waiting to be retried). Either way the rest of
-the queue carries on.
+sent, and, on a message or ping of yours still outstanding, `Remove from
+Queue` if it has not been on the air yet or `Abort` once it has (on the air
+now, waiting for its acknowledgement or pong, or waiting to be retried).
+Either way the rest of the queue carries on. A ping's line says where it has
+got to: queued, on the air, awaiting PONG, not sent or aborted.
 
 A chat keying runs the same time-out timer as voice. When one would outlast
 it, the transport sends it as several keyings, each at least 20 s short of the

@@ -421,6 +421,39 @@ void testAirTimingCountsTheChords()
     CHECK(std::abs(chords.replyWindowMs - bare.replyWindowMs - ms(adagioChord)) <= 1);
 }
 
+// Where an answer is heard by its opening chord, the reply window ends once
+// the chord would have been heard, not once the answer's first frame could
+// decode; the timeouts still wait for that frame.
+void testReplyWindowEndsAtTheAnswersChord()
+{
+    auto ms = [](double seconds) { return (int)std::lround(seconds * 1000.0); };
+    auto keysAfter = [&](double ourLatency, double farFrame) {
+        return ms(ourLatency + farFrame / 2.0) + TURNAROUND_AFTER_RX_MILLISECONDS + TURNAROUND_JITTER_MILLISECONDS;
+    };
+    const double prestoFrame = 6.88;
+    const double prestoLatency = glissandoLatency(prestoFrame);
+    const double adagioLatency = glissandoLatency(ADAGIO_FRAME);
+    const double sensed = 1.6;
+
+    AirTiming frames = AirTiming::forFrameSeconds(prestoFrame, 9, prestoLatency, ADAGIO_FRAME, adagioLatency,
+                                                  0.6, 2.56);
+    AirTiming chord = AirTiming::forFrameSeconds(prestoFrame, 9, prestoLatency, ADAGIO_FRAME, adagioLatency,
+                                                 0.6, 2.56, -1.0, sensed);
+    CHECK(chord.replyWindowMs == REPLY_WINDOW_MILLISECONDS + keysAfter(prestoLatency, ADAGIO_FRAME) + ms(sensed));
+    CHECK(chord.replyWindowMs < frames.replyWindowMs - 50000); // an Adagio frame and more
+    CHECK(chord.ackTimeoutMs == frames.ackTimeoutMs);
+    CHECK(chord.pingTimeoutMs == frames.pingTimeoutMs);
+
+    // Presto answering Presto: 16 s instead of 25.
+    AirTiming presto = AirTiming::forFrameSeconds(prestoFrame, 9, prestoLatency, prestoFrame, prestoLatency,
+                                                  0.6, 0.6, -1.0, sensed);
+    CHECK(presto.replyWindowMs > 15000 && presto.replyWindowMs < 17000);
+
+    // Data2G passes no far end, and keeps its window.
+    AirTiming data2g = AirTiming::forFrameSeconds(2.0, 64, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, sensed);
+    CHECK(data2g.replyWindowMs == AirTiming::forFrameSeconds(2.0, 64, 1.0).replyWindowMs);
+}
+
 // A ping sent at Allegro while listening at every tempo, answered at Adagio:
 // the answer's first frame is heard 80 s after the ping ended, well past the
 // 53 s an Allegro answer takes, and the channel stays busy until the pong is
@@ -964,6 +997,55 @@ void testOwnTrafficWaitsUntilListenersLetGo()
     CHECK(firstOwn != 0);
 }
 
+// That wait is for a station that lost what rode behind the reply. One heard
+// again has not: it is answering, so our own traffic goes after its turn as
+// usual. At Presto the wait above held every message of ours for over two
+// minutes after a pong with a message behind it, where the far end's answer
+// to that message had come within half a minute.
+void testOwnTrafficGoesOnceTheAnsweredStationIsHeard()
+{
+    Station sender("W1AW");
+    Station replier("VK3ABC");
+    AirTiming presto = AirTiming::forFrameSeconds(6.88, 9, 2.72, 6.88, 2.72, 0.6, 0.6, 0.32);
+    sender.protocol.setAirTiming(presto);
+    replier.protocol.setAirTiming(presto);
+
+    std::string error;
+    CHECK(replier.protocol.sendMessage("rides", "W1AW", error));
+    CHECK(replier.protocol.sendMessage("waits", "W1AW", error));
+    CHECK(sender.protocol.sendMessage("first", "VK3ABC", error));
+    sender.completeOneTransmission();
+    replier.receiveFrom(sender.transport);
+
+    replier.completeOneTransmission();
+    CHECK(replier.transport.modes.back().size() == 2);
+    uint64_t keyedAt = replier.nowMs;
+    uint64_t heldUntil = keyedAt + (uint64_t)presto.textFragmentAirMs +
+                         (uint64_t)presto.signallingFollowedReservationMs;
+
+    // The sender heard it all, and acknowledges the message that rode along.
+    sender.nowMs = replier.nowMs;
+    sender.receiveFrom(replier.transport);
+    sender.completeOneTransmission();
+    CHECK(decodeOne(sender.transport.transmissions.back()[0]).type == FrameType::MessageAck);
+    replier.nowMs = sender.nowMs;
+    replier.receiveFrom(sender.transport);
+
+    uint64_t firstOwn = 0;
+    for (; replier.nowMs <= heldUntil + (uint64_t)presto.replyWindowMs + 10000; replier.nowMs += 100)
+    {
+        replier.protocol.tick();
+        if (replier.transport.transmissions.size() > 1)
+        {
+            firstOwn = replier.nowMs;
+            break;
+        }
+    }
+    CHECK(firstOwn != 0);
+    CHECK(firstOwn < heldUntil);
+    CHECK(firstOwn >= keyedAt + (uint64_t)presto.replyWindowMs);
+}
+
 // The turn given to a station just answered holds back our own traffic, not a
 // reply to what that station sends in its turn.
 void testRepliesDoNotWaitForTheAnsweredStationsTurn()
@@ -1154,9 +1236,54 @@ void testSentMessagesAreAbortedNotRemoved()
     CHECK(station.observer.lastUpdateFor(delivered)->status == MessageStatus::Acknowledged);
     CHECK(station.protocol.cancelFor(delivered) == TextMessagingProtocol::Cancel::None);
 
-    CHECK(station.protocol.sendPing("W1AW", error));
-    CHECK(station.protocol.outstandingMessageIds().empty());
     CHECK(station.protocol.cancelFor(12345678) == TextMessagingProtocol::Cancel::None);
+}
+
+// A ping is taken back the same way: removed while it waits for its turn,
+// aborted once it is on the air or waiting for the pong.
+void testPingsCanBeRemovedOrAborted()
+{
+    std::string error;
+
+    Station station("VK3ABC");
+    Station far("W1AW");
+    CHECK(station.protocol.sendPing("W1AW", error));
+    int64_t waiting = station.observer.added.back().id;
+    CHECK(station.protocol.cancelFor(waiting) == TextMessagingProtocol::Cancel::Remove);
+    CHECK(station.protocol.outstandingMessageIds() == std::vector<int64_t>{waiting});
+
+    bool keyed = true;
+    CHECK(station.protocol.cancelMessage(waiting, &keyed) == TextMessagingProtocol::Cancel::Remove);
+    CHECK(!keyed);
+    CHECK(station.observer.lastUpdateFor(waiting)->status == MessageStatus::NotSent);
+    CHECK(station.protocol.pendingCount() == 0);
+    station.completeOneTransmission();
+    CHECK(station.transport.transmissions.empty());
+
+    // On the air.
+    CHECK(station.protocol.sendPing("W1AW", error));
+    int64_t onAir = station.observer.added.back().id;
+    station.nowMs += std::max(MAX_TURNAROUND_MILLISECONDS, MAX_RETRY_BACKOFF_MILLISECONDS) + 1;
+    station.protocol.tick();
+    CHECK(station.transport.transmitting);
+    CHECK(station.protocol.cancelFor(onAir) == TextMessagingProtocol::Cancel::Abort);
+    CHECK(station.protocol.cancelMessage(onAir, &keyed) == TextMessagingProtocol::Cancel::Abort);
+    CHECK(keyed);
+    CHECK(station.observer.lastUpdateFor(onAir)->status == MessageStatus::Aborted);
+    station.transport.transmitting = false;
+
+    // Waiting for the pong, which then arrives and changes nothing.
+    CHECK(station.protocol.sendPing("W1AW", error));
+    int64_t answered = station.observer.added.back().id;
+    station.completeOneTransmission();
+    CHECK(station.observer.lastUpdateFor(answered)->status == MessageStatus::AwaitingAck);
+    CHECK(station.protocol.cancelMessage(answered, &keyed) == TextMessagingProtocol::Cancel::Abort);
+    CHECK(!keyed);
+    far.receiveFrom(station.transport);
+    far.completeOneTransmission();
+    station.receiveFrom(far.transport);
+    CHECK(station.observer.lastUpdateFor(answered)->status == MessageStatus::Aborted);
+    CHECK(station.protocol.pendingCount() == 0);
 }
 
 // A station on a frequency where it may not send data transmits nothing at
@@ -2056,6 +2183,7 @@ int main()
     testPingTimesOut();
     testAirTimingWaitsForTheSlowestAnswer();
     testAirTimingCountsTheChords();
+    testReplyWindowEndsAtTheAnswersChord();
     testPingWaitsForAnAnswerAtASlowerTempo();
     testAutoReplyCanBeDisabled();
     testAckWaitDoesNotBlockTheQueue();
@@ -2070,11 +2198,13 @@ int main()
     testBusyStationsTakeTurns();
     testOnlyWaitingTrafficOfOurOwnRides();
     testOwnTrafficWaitsUntilListenersLetGo();
+    testOwnTrafficGoesOnceTheAnsweredStationIsHeard();
     testRepliesDoNotWaitForTheAnsweredStationsTurn();
     testInhibitedStationTransmitsNothing();
     testAbortDropsEverythingOutstanding();
     testOneMessageCanBeRemovedOrAborted();
     testSentMessagesAreAbortedNotRemoved();
+    testPingsCanBeRemovedOrAborted();
     testInhibitingLeavesSentMessagesToTheirAnswers();
     testFragmentsStillToComeReserveTheChannel();
     testReservationFollowsTheBurstsStillToCome();

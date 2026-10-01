@@ -23,6 +23,12 @@ constexpr double PI = 3.14159265358979323846;
 // a time.
 constexpr int WINDOW = (int)(OPENING_CHORD_SECONDS * SAMPLE_RATE_HZ);
 constexpr int HOP = SAMPLE_RATE_HZ / 10;
+
+// Windows back to the one that ends where the current one starts.
+constexpr size_t WINDOWS_BEFORE = (size_t)(WINDOW / HOP);
+
+// Windows of each scale's comb kept, for what was usual before a chord.
+constexpr size_t COMB_WINDOWS = (size_t)(ChordListener::BEFORE_SECONDS * SAMPLE_RATE_HZ / HOP);
 constexpr int FFT_SIZE = 8192;
 constexpr double BIN_HZ = (double)SAMPLE_RATE_HZ / FFT_SIZE;
 
@@ -33,7 +39,7 @@ constexpr double NOISE_HIGH_HZ = 3000.0;
 
 // A note sounding in a chord whose two powers differ more than this is a
 // carrier with noise beside it, not a chord.
-constexpr double MAX_NOTE_RATIO = 30.0;
+constexpr double MAX_NOTE_RATIO = 10.0;
 
 // E4 and D5, a minor seventh, in every scale (the pentatonic's lowest note
 // and fifth, MIDI 64 and 74 in the others).
@@ -85,7 +91,10 @@ ChordListener::ChordListener()
     , window_((size_t)WINDOW, 0.0f)
     , work_(2 * (size_t)FFT_SIZE, 0.0)
     , power_((size_t)FFT_SIZE / 2, 0.0)
+    , history_(WINDOWS_BEFORE, std::vector<double>((size_t)FFT_SIZE / 2, 0.0))
+    , normalized_((size_t)FFT_SIZE / 2, 0.0)
 {
+    configure(0.0, 25.0);
 }
 
 void ChordListener::configure(double tuningOffsetHz, double maxOffsetHz)
@@ -94,6 +103,12 @@ void ChordListener::configure(double tuningOffsetHz, double maxOffsetHz)
     maxOffsetHz_ = std::max(0.0, maxOffsetHz);
     tracking_ = false;
     sounding_.store(false, std::memory_order_release);
+
+    // What was usual at the old tuning says nothing about the new one.
+    steps_ = (int)std::floor(maxOffsetHz_ / BIN_HZ);
+    combs_.assign(COMB_WINDOWS * SCALE_COUNT * (size_t)(2 * steps_ + 1), 0.0f);
+    combsNext_ = 0;
+    combsCount_ = 0;
 }
 
 void ChordListener::reset()
@@ -106,6 +121,15 @@ void ChordListener::reset()
     last_ = Heard();
     tracking_ = false;
     sounding_.store(false, std::memory_order_release);
+    historyNext_ = 0;
+    historyCount_ = 0;
+    combsNext_ = 0;
+    combsCount_ = 0;
+}
+
+void ChordListener::heardFrame()
+{
+    if (tracking_) chordStartSample_ = samples_;
 }
 
 void ChordListener::push(const short* samples, int numSamples)
@@ -151,13 +175,14 @@ double ChordListener::noiseLevel()
 
 // Every note of a scale at one tuning, each the loudest of its bin and the
 // bins either side, which follows a station that drifts a little.
-double ChordListener::combPower(const std::array<double, NOTES>& notes, double offsetHz) const
+double ChordListener::combPower(const std::vector<double>& power, const std::array<double, NOTES>& notes,
+                                double offsetHz)
 {
     double sum = 0.0;
     for (double hz : notes)
     {
         int k = bin(hz + offsetHz);
-        sum += std::max(power_[(size_t)k], std::max(power_[(size_t)(k - 1)], power_[(size_t)(k + 1)]));
+        sum += std::max(power[(size_t)k], std::max(power[(size_t)(k - 1)], power[(size_t)(k + 1)]));
     }
     return sum;
 }
@@ -174,30 +199,45 @@ void ChordListener::analyse()
 
     // Digital silence: nobody is on the air.
     const double noise = noiseLevel();
+    const std::vector<double>& before = history_[historyNext_];
+    const bool beforeKnown = historyCount_ >= WINDOWS_BEFORE;
     if (noise <= 0.0)
     {
         tracking_ = false;
         sounding_.store(false, std::memory_order_release);
+        remember(true);
+        rememberCombs(true);
         return;
     }
+    for (size_t k = 0; k < power_.size(); k++) normalized_[k] = power_[k] / noise;
 
     // The chord: E4 and D5, with the weaker of them over the threshold.
     // Every scale opens with the same two notes, so there is one chord to
-    // look for at each tuning.
-    const int steps = (int)std::floor(maxOffsetHz_ / BIN_HZ);
+    // look for at each tuning. Both notes have to be new, as they are when
+    // a station keys: the window before this one is all before the chord.
+    // On a busy band signals that were already there, a carrier, RTTY or
+    // the tones of FT8 wandering across the two notes, otherwise made a
+    // chord ten times a second and held the channel for ever.
+    const int steps = steps_;
     Heard best;
+    int bestStep = 0;
     for (int step = -steps; step <= steps; step++)
     {
         const double offset = tuningOffsetHz_ + step * BIN_HZ;
-        const double low = power_[(size_t)bin(CHORD_LOW_HZ + offset)] / noise;
-        const double high = power_[(size_t)bin(CHORD_HIGH_HZ + offset)] / noise;
+        const size_t lowBin = (size_t)bin(CHORD_LOW_HZ + offset);
+        const size_t highBin = (size_t)bin(CHORD_HIGH_HZ + offset);
+        const double low = normalized_[lowBin];
+        const double high = normalized_[highBin];
         const double weaker = std::min(low, high);
+        if (weaker < CHORD_THRESHOLD || weaker <= best.strength) continue;
         if (std::max(low, high) > MAX_NOTE_RATIO * weaker) continue;
-        if (weaker > best.strength)
-        {
-            best.offsetHz = offset;
-            best.strength = weaker;
-        }
+        if (beforeKnown && std::max(before[lowBin], before[highBin]) > ONSET_RATIO * weaker) continue;
+        if (std::min(purity(lowBin), purity(highBin)) < PURITY) continue;
+        if (!steady(lowBin) || !steady(highBin)) continue;
+
+        best.offsetHz = offset;
+        best.strength = weaker;
+        bestStep = step;
     }
 
     if (best.strength >= CHORD_THRESHOLD)
@@ -205,9 +245,17 @@ void ChordListener::analyse()
         best.endSample = samples_;
         last_ = best;
         chordsHeard_++;
-        tracking_ = true;
-        scaleEnergy_.fill(0.0);
         lastSoundedSample_ = samples_;
+
+        // A chord heard again in the next few windows is the same chord;
+        // what was there before it stays as first measured.
+        if (!tracking_)
+        {
+            tracking_ = true;
+            chordStartSample_ = samples_;
+            scaleEnergy_.fill(0.0);
+            for (size_t s = 0; s < before_.size(); s++) before_[s] = usualComb(s, bestStep);
+        }
     }
     else if (tracking_)
     {
@@ -221,15 +269,125 @@ void ChordListener::analyse()
         size_t singing = 0;
         for (size_t s = 0; s < power.size(); s++)
         {
-            power[s] = combPower(scaleNotes((Scale)s, 0), last_.offsetHz) / noise;
+            power[s] = combPower(normalized_, scaleNotes((Scale)s, 0), last_.offsetHz);
             scaleEnergy_[s] += power[s];
             if (scaleEnergy_[s] > scaleEnergy_[singing]) singing = s;
         }
-        if (power[singing] >= SOUNDING_THRESHOLD) lastSoundedSample_ = samples_;
+
+        // Only notes over what was on the channel before the chord count:
+        // a signal already sitting on them is not the melody.
+        double needed = std::max(SOUNDING_THRESHOLD, OVER_BEFORE * before_[singing]);
+        if (power[singing] >= needed) lastSoundedSample_ = samples_;
         if (samples_ - lastSoundedSample_ > (long long)(HOLD_SECONDS * SAMPLE_RATE_HZ)) tracking_ = false;
     }
 
+    if (tracking_ && samples_ - chordStartSample_ > (long long)(MAX_TRACK_SECONDS * SAMPLE_RATE_HZ))
+    {
+        tracking_ = false;
+    }
+
     sounding_.store(tracking_, std::memory_order_release);
+    remember(false);
+    rememberCombs(false);
+}
+
+// Whether a note sounds in both halves of the window, as the chord's do. A
+// tone held the whole window puts a quarter of its power in each half; two
+// signals that happen to sit on the chord's notes for part of it do not.
+bool ChordListener::steady(size_t k) const
+{
+    const double w = 2.0 * PI * (double)k / FFT_SIZE;
+    const double full = power_[k];
+    const int half = WINDOW / 2;
+    for (int start : {0, half})
+    {
+        double re = 0.0, im = 0.0;
+        for (int n = 0; n < half; n++)
+        {
+            const double x = window_[(size_t)(start + n)];
+            re += x * std::cos(w * (start + n));
+            im -= x * std::sin(w * (start + n));
+        }
+        if (re * re + im * im < STEADY_SHARE * full / 4.0) return false;
+    }
+    return true;
+}
+
+// Every scale's comb at every tuning step of this window, for what is usual
+// on the channel when a chord comes.
+void ChordListener::rememberCombs(bool silence)
+{
+    const size_t perWindow = SCALE_COUNT * (size_t)(2 * steps_ + 1);
+    float* slot = &combs_[combsNext_ * perWindow];
+    for (size_t s = 0; s < SCALE_COUNT; s++)
+    {
+        const std::array<double, NOTES> notes = scaleNotes((Scale)s, 0);
+        for (int step = -steps_; step <= steps_; step++)
+        {
+            slot[s * (size_t)(2 * steps_ + 1) + (size_t)(step + steps_)] =
+                silence ? 0.0f : (float)combPower(normalized_, notes, tuningOffsetHz_ + step * BIN_HZ);
+        }
+    }
+    combsNext_ = (combsNext_ + 1) % COMB_WINDOWS;
+    combsCount_++;
+}
+
+// The 90th percentile of a scale's comb at one tuning step over the
+// windows kept, leaving out the last window's worth, which may hold the
+// chord. 0 with too little kept to say.
+double ChordListener::usualComb(size_t scale, int step)
+{
+    const size_t kept = std::min(combsCount_, COMB_WINDOWS);
+    if (kept <= WINDOWS_BEFORE) return 0.0;
+
+    const size_t perWindow = SCALE_COUNT * (size_t)(2 * steps_ + 1);
+    const size_t index = scale * (size_t)(2 * steps_ + 1) + (size_t)(step + steps_);
+    sorted_.clear();
+    for (size_t back = WINDOWS_BEFORE + 1; back <= kept; back++)
+    {
+        size_t window = (combsNext_ + COMB_WINDOWS - back) % COMB_WINDOWS;
+        sorted_.push_back(combs_[window * perWindow + index]);
+    }
+    size_t at = std::min(sorted_.size() - 1, (size_t)(BEFORE_PERCENTILE * (double)sorted_.size()));
+    std::nth_element(sorted_.begin(), sorted_.begin() + (std::ptrdiff_t)at, sorted_.end());
+    return sorted_[at];
+}
+
+// A note's power over the average a few hertz either side of it. The
+// chord's notes are steady for the whole window, so their power sits in a
+// line a couple of bins wide; a signal that wanders, the tones of FT8 or a
+// voice, spreads its own across the bins around it.
+double ChordListener::purity(size_t k) const
+{
+    const int from = (int)std::lround(PURITY_FROM_HZ / BIN_HZ);
+    const int to = (int)std::lround(PURITY_TO_HZ / BIN_HZ);
+    double sum = 0.0;
+    int count = 0;
+    for (int d = from; d <= to; d++)
+    {
+        for (int side : {-1, 1})
+        {
+            long long j = (long long)k + side * d;
+            if (j < 0 || j >= (long long)normalized_.size()) continue;
+            sum += normalized_[(size_t)j];
+            count++;
+        }
+    }
+    double around = count > 0 ? sum / count : 0.0;
+    return around > 0.0 ? normalized_[k] / around : 0.0;
+}
+
+// Keeps this window's spectrum, over the noise, for the chord a window from
+// now.
+void ChordListener::remember(bool silence)
+{
+    std::vector<double>& slot = history_[historyNext_];
+    if (silence)
+        std::fill(slot.begin(), slot.end(), 0.0);
+    else
+        slot = normalized_;
+    historyNext_ = (historyNext_ + 1) % history_.size();
+    historyCount_++;
 }
 
 } // namespace Glissando

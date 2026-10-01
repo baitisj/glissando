@@ -108,6 +108,7 @@ TextMessagingProtocol::TextMessagingProtocol(MessageStore& store, HeardStationLi
     , ownTrafficQuietUntilMs_(0)
     , jitterState_(1)
     , keyingHeldUntilMs_(0)
+    , answeredHoldUntilMs_(0)
     , channelBusy_(false)
     , channelBusySinceMs_(0)
     , channelReservedUntilMs_(0)
@@ -227,7 +228,8 @@ void TextMessagingProtocol::dropOutboxLocked(MessageStatus status, bool everythi
 AirTiming AirTiming::forFrameSeconds(double frameSeconds, int bytesPerFrame,
                                      double decodeLatencySeconds, double replyFrameSeconds,
                                      double replyDecodeLatencySeconds, double chordSeconds,
-                                     double replyChordSeconds, double closingChordSeconds)
+                                     double replyChordSeconds, double closingChordSeconds,
+                                     double answerSensedSeconds)
 {
     AirTiming timing;
     if (frameSeconds <= 0.0 || bytesPerFrame <= 0) return timing;
@@ -265,7 +267,12 @@ AirTiming AirTiming::forFrameSeconds(double frameSeconds, int bytesPerFrame,
                           ms(replyChordSeconds + replyFrameSeconds + replyDecodeLatencySeconds)
                     : 0;
 
-    timing.replyWindowMs = REPLY_WINDOW_MILLISECONDS + std::max(ms(seen), firstReplyFrame);
+    // Where the start of an answer can be heard, as the far end keys,
+    // the window need only last until then.
+    timing.replyWindowMs =
+        farEndGiven && answerSensedSeconds > 0.0
+            ? REPLY_WINDOW_MILLISECONDS + farEndKeysAfter(replyFrameSeconds) + ms(answerSensedSeconds)
+            : REPLY_WINDOW_MILLISECONDS + std::max(ms(seen), firstReplyFrame);
     timing.turnaroundJitterMs = TURNAROUND_JITTER_MILLISECONDS + ms(frameSeconds / 2.0);
     timing.textFragmentAirMs = ms(textAir) + TEXT_FRAGMENT_AIR_MILLISECONDS;
     timing.signallingFollowedReservationMs = 2 * timing.textFragmentAirMs;
@@ -707,6 +714,14 @@ void TextMessagingProtocol::onFrameReceived(const Frame& frame, float snr)
         // straight away talks over it.
         deferTransmissionLocked(monotonicMs_(), timing_.turnaroundAfterRxMs, 0);
 
+        // A station we answered is sending, so it is not holding the channel
+        // for the rest of our keying, however much of it it lost.
+        if (frame.originCallsign == answeredStation_)
+        {
+            answeredHoldUntilMs_ = 0;
+            answeredStation_.clear();
+        }
+
         std::time_t now = wallClock_();
         stations_.heard(frame.originCallsign, snr, now);
 
@@ -1028,11 +1043,10 @@ bool TextMessagingProtocol::hasQueuedTransmissions() const
 
 TextMessagingProtocol::Cancel TextMessagingProtocol::cancelForLocked(const PendingTransmission& pending) const
 {
-    // Replies and pings have no chat line of their own to cancel from.
-    if (pending.reply || pending.isPing || pending.message.kind != MessageKind::Chat || pending.message.id == 0)
-    {
-        return Cancel::None;
-    }
+    // Replies have no line of their own in the chat to cancel from; a
+    // message or a ping of ours does.
+    if (pending.reply || pending.message.id == 0) return Cancel::None;
+    if (!pending.isPing && pending.message.kind != MessageKind::Chat) return Cancel::None;
 
     // Not yet on the air at all: no retry, and no fragment confirmed.
     bool untouched = pending.state == TransmissionState::Queued && pending.retries == 0 && pending.confirmed == 0;
@@ -1108,13 +1122,15 @@ bool TextMessagingProtocol::isMessageQueued(int64_t messageId) const
 // cost is that a reply to one station can key while a slow acknowledgement
 // from another is just starting; carrier sense covers that once the other
 // burst is more than a second old. Nor does a reply wait out the turn we give
-// a station we have just answered: that is for keyings of our own.
+// a station we have just answered, or the wait for it to let go of the
+// channel: those are for keyings of our own.
 uint64_t TextMessagingProtocol::quietUntilLocked(bool forReply) const
 {
     uint64_t quietUntil = quietUntilMs_;
     if (forReply) return quietUntil;
 
     if (ownTrafficQuietUntilMs_ > quietUntil) quietUntil = ownTrafficQuietUntilMs_;
+    if (answeredHoldUntilMs_ > quietUntil) quietUntil = answeredHoldUntilMs_;
 
     for (const PendingTransmission& pending : outbox_)
     {
@@ -1176,12 +1192,6 @@ void TextMessagingProtocol::deferTransmissionLocked(uint64_t fromMs, int baseMs,
 {
     uint64_t until = fromMs + (uint64_t)baseMs + randomDelayLocked(jitterMs);
     if (until > quietUntilMs_) quietUntilMs_ = until;
-}
-
-void TextMessagingProtocol::deferOwnTrafficLocked(uint64_t fromMs, int baseMs, int jitterMs)
-{
-    uint64_t until = fromMs + (uint64_t)baseMs + randomDelayLocked(jitterMs);
-    if (until > ownTrafficQuietUntilMs_) ownTrafficQuietUntilMs_ = until;
 }
 
 // A delay in [0, maxMs] from the station's own sequence, so any two stations
@@ -1251,11 +1261,24 @@ void TextMessagingProtocol::serviceOutboxLocked(uint64_t nowMs, bool frozen,
             // Having answered somebody, give them the channel before keying
             // anything of our own: see the note on REPLY_WINDOW_MILLISECONDS.
             // Their turn starts when they stop holding the channel for us,
-            // which can be later than our unkeying.
+            // which can be later than our unkeying: if they lost what rode
+            // behind the reply, not until their reservation runs out. That
+            // is a wait apart, because it is over as soon as they are heard
+            // again, as they nearly always are: answering the message that
+            // rode along. Counted from the unkeying alone, at Presto it held
+            // every message of ours back for over two minutes after a pong
+            // with a message behind it, and at Adagio for over ten minutes.
             if (sent.reply)
             {
-                deferOwnTrafficLocked(std::max(nowMs, keyingHeldUntilMs_), timing_.replyWindowMs,
-                                      timing_.turnaroundJitterMs);
+                uint64_t jitter = randomDelayLocked(timing_.turnaroundJitterMs);
+                uint64_t turn = nowMs + (uint64_t)timing_.replyWindowMs + jitter;
+                if (turn > ownTrafficQuietUntilMs_) ownTrafficQuietUntilMs_ = turn;
+
+                if (keyingHeldUntilMs_ > nowMs)
+                {
+                    answeredHoldUntilMs_ = keyingHeldUntilMs_ + (uint64_t)timing_.replyWindowMs + jitter;
+                    answeredStation_ = sent.destination;
+                }
             }
 
             sent.sentAtMs = nowMs;

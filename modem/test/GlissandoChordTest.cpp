@@ -3,6 +3,7 @@
 // Purpose:         The opening chord and the listener that hears it.
 //=========================================================================
 
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -163,10 +164,12 @@ void testFalseAlarms()
     }
 }
 
-// A strong Presto melody sings E4 and D5 within 0.6 s often enough to count
-// as the chord, so a station on an older build that plays no chord, or one
-// joined part way through, is heard too. Adagio's notes are too long for it.
-void testHearsAStrongMelody()
+// A melody joined part way through is not a chord, however strong: the
+// chord is two steady notes starting together, and a melody's notes come
+// and go. The receiver hears such a station once a frame decodes. A
+// station on an older build opened with every note of its scale at once,
+// which holds E4 and D5 steady and is still heard.
+void testHearsChordsNotMelodies()
 {
     Random rng(14);
     ModemSettings settings;
@@ -175,7 +178,218 @@ void testHearsAStrongMelody()
     addNoise(frame, 0.0, meanSquare(frame), rng);
     ChordListener melody;
     melody.push(frame.data(), (int)frame.size());
-    CHECK(melody.chordsHeard() > 0);
+    CHECK(melody.chordsHeard() == 0);
+
+    for (int s = 0; s < SCALE_COUNT; s++)
+    {
+        settings.scale = (Scale)s;
+        std::vector<float> audio(2 * RATE, 0.0f);
+        std::vector<float> old = chord(settings);
+        audio.insert(audio.end(), old.begin(), old.end());
+        audio.resize(audio.size() + 2 * RATE, 0.0f);
+        addNoise(audio, 0.0, meanSquare(old), rng);
+        ChordListener older;
+        older.push(audio.data(), (int)audio.size());
+        CHECK(older.chordsHeard() > 0);
+    }
+}
+
+// Other signals on the band, a dozen FT8 signals and a voice, at -8 to
+// +12 dB each. They used to make a chord ten times a second and keep the
+// channel busy for good, which froze the chat queue. With parked set,
+// three of the FT8 signals sit across the chord's notes, the worst case.
+std::vector<float> busyBand(double seconds, Random& rng, bool parked, bool voice = true)
+{
+    std::vector<float> audio((size_t)(seconds * RATE), 0.0f);
+    const double twoPi = 2.0 * 3.14159265358979323846;
+
+    // 79 symbols of 0.16 s on eight tones 6.25 Hz apart, in 15 s slots.
+    double bases[12] = {322, 598, 602, 1542, 2390, 1806, 1464, 1701, 1768, 1323, 1876, 2559};
+    if (!parked)
+    {
+        for (double& base : bases) base = rng.uniform(200.0, 2900.0);
+    }
+    for (double base : bases)
+    {
+        double amplitude = std::sqrt(2.0 * 1e-4 * std::pow(10.0, rng.uniform(-8.0, 12.0) / 10.0));
+        double phase = 0.0;
+        int tone = 0;
+        for (size_t n = 0; n < audio.size(); n++)
+        {
+            double slot = std::fmod(n / (double)RATE, 15.0);
+            if (slot < 0.5 || slot >= 0.5 + 79 * 0.16) continue;
+            if (n % (size_t)(0.16 * RATE) == 0) tone = (int)rng.uniform(0.0, 8.0);
+            phase += twoPi * (base + 6.25 * tone) / RATE;
+            audio[n] += (float)(amplitude * std::sin(phase));
+        }
+    }
+
+    // A voice: harmonics of a wandering pitch through two formants, two
+    // seconds in three, well up over the noise.
+    double pitch = 130.0;
+    double phase = 0.0;
+    for (size_t n = 0; n < audio.size(); n++)
+    {
+        if (n % (RATE / 10) == 0) pitch = rng.uniform(100.0, 180.0);
+        phase += twoPi * pitch / RATE;
+        if (!voice || std::fmod(n / (double)RATE, 3.0) >= 2.0) continue;
+        double v = 0.0;
+        for (int k = 1; k * pitch < 3000.0; k++)
+        {
+            double f = k * pitch;
+            double formants = std::exp(-std::pow((f - 500.0) / 300.0, 2)) + 0.5 * std::exp(-std::pow((f - 1500.0) / 400.0, 2));
+            v += formants * std::sin(k * phase);
+        }
+        audio[n] += (float)(0.02 * v);
+    }
+
+    // Noise of power 1e-4 in 2500 Hz.
+    addNoise(audio, 0.0, 1e-4, rng);
+    return audio;
+}
+
+void testIgnoresABusyBand()
+{
+    for (bool parked : {false, true})
+    {
+        Random rng(parked ? 17 : 15);
+        std::vector<float> band = busyBand(20 * 60, rng, parked);
+        ChordListener listener;
+        const int block = RATE / 10;
+        long long sounding = 0;
+        long long run = 0;
+        long long longest = 0;
+        for (size_t i = 0; i + block <= band.size(); i += block)
+        {
+            listener.push(&band[i], block);
+            run = listener.isSounding() ? run + block : 0;
+            if (listener.isSounding()) sounding += block;
+            longest = std::max(longest, run);
+        }
+        printf("20 minutes of a busy band%s: %lld chords, sounding %.0f%% of the time, at most %.1f s at once\n",
+               parked ? " with FT8 on the chord's notes" : "", listener.chordsHeard(),
+               100.0 * sounding / (double)band.size(), longest / (double)RATE);
+        CHECK(sounding < (long long)band.size() / (parked ? 2 : 10));
+        CHECK(longest < 20 * RATE);
+    }
+}
+
+// And a transmission among those FT8 signals is still heard, unless one of
+// them was already sitting on E4 or D5. Its melody is followed only where
+// it stands out from them: the frame receiver holds the channel once the
+// first frame decodes, as it does for a station that played no chord.
+void testHearsATransmissionOnABusyBand()
+{
+    Random rng(16);
+    int heard = 0;
+    double busy = 0.0;
+    const int trials = 8;
+    for (int t = 0; t < trials; t++)
+    {
+        ModemSettings settings;
+        settings.gear = t % 2 == 0 ? 4 : 3;
+        settings.scale = (Scale)(t % SCALE_COUNT);
+        std::vector<float> frame = modulate({rng.payload()}, settings);
+        std::vector<float> opening = openingChord(settings);
+        std::vector<float> closing = chord(settings);
+
+        std::vector<float> audio = busyBand(60.0, rng, false, false);
+        size_t start = (size_t)(rng.uniform(20.0, 30.0) * RATE);
+        // At -8 dB in 2500 Hz against the band's noise.
+        double gain = std::sqrt(1e-4 * std::pow(10.0, -8.0 / 10.0) / meanSquare(frame));
+        std::vector<float> tx = opening;
+        size_t framesStart = start + tx.size();
+        tx.insert(tx.end(), frame.begin(), frame.end());
+        tx.insert(tx.end(), closing.begin(), closing.end());
+        size_t end = start + tx.size();
+        for (size_t n = 0; n < tx.size() && start + n < audio.size(); n++) audio[start + n] += (float)(gain * tx[n]);
+
+        ChordListener listener;
+        const int block = RATE / 100;
+        long long followed = 0;
+        bool inTime = false;
+        for (size_t i = 0; i + block <= audio.size(); i += block)
+        {
+            listener.push(&audio[i], block);
+            if (!listener.isSounding()) continue;
+            if (i >= framesStart && i < framesStart + RATE) inTime = true;
+            if (i >= framesStart && i < end) followed += block;
+        }
+        heard += inTime;
+        busy += followed / (double)(end - framesStart);
+    }
+    printf("On a busy band at -8 dB: chord heard %d/%d, busy for %.0f%% of the melody\n", heard, trials,
+           100.0 * busy / trials);
+    CHECK(heard >= trials * 5 / 8);
+    CHECK(busy / trials > 0.3);
+}
+
+// However long something after a chord goes on sounding like a melody, the
+// chord holds the channel no longer than MAX_TRACK_SECONDS; by then a real
+// melody's first frame has decoded at any tempo, and the receiver has it.
+void testTrackingEnds()
+{
+    Random rng(18);
+    ModemSettings settings;
+    std::vector<float> audio(2 * RATE, 0.0f);
+    std::vector<float> opening = openingChord(settings);
+    audio.insert(audio.end(), opening.begin(), opening.end());
+    const std::array<double, NOTES> notes = scaleNotes(Scale::Pentatonic, 0);
+    double phase = 0.0;
+    for (int n = 0; n < 150 * RATE; n++)
+    {
+        phase += 2.0 * 3.14159265358979323846 * notes[(size_t)(n / (RATE / 2)) % NOTES] / RATE;
+        audio.push_back((float)std::sin(phase));
+    }
+    addNoise(audio, 0.0, 0.5, rng);
+
+    ChordListener listener;
+    const int block = RATE / 10;
+    double lastSounding = 0.0;
+    for (size_t i = 0; i + block <= audio.size(); i += block)
+    {
+        listener.push(&audio[i], block);
+        if (listener.isSounding()) lastSounding = i / (double)RATE;
+    }
+    CHECK(listener.chordsHeard() > 0);
+    CHECK(lastSounding > 60.0);
+    CHECK(lastSounding < 2.0 + ChordListener::MAX_TRACK_SECONDS + 1.0);
+}
+
+// Frames decoding renew the cap, so a long keying is followed to the end of
+// its melody, and the listener lets go a moment after the notes stop.
+void testFramesKeepTrackingGoing()
+{
+    Random rng(19);
+    ModemSettings settings;
+    std::vector<float> audio(2 * RATE, 0.0f);
+    std::vector<float> opening = openingChord(settings);
+    audio.insert(audio.end(), opening.begin(), opening.end());
+    const std::array<double, NOTES> notes = scaleNotes(Scale::Pentatonic, 0);
+    double phase = 0.0;
+    const double melodySeconds = 2.0 * ChordListener::MAX_TRACK_SECONDS;
+    for (int n = 0; n < (int)(melodySeconds * RATE); n++)
+    {
+        phase += 2.0 * 3.14159265358979323846 * notes[(size_t)(n / (RATE / 2)) % NOTES] / RATE;
+        audio.push_back((float)std::sin(phase));
+    }
+    const double melodyEnds = audio.size() / (double)RATE;
+    audio.resize(audio.size() + 10 * RATE, 0.0f);
+    addNoise(audio, 0.0, 0.5, rng);
+
+    ChordListener listener;
+    const int block = RATE / 10;
+    double lastSounding = 0.0;
+    for (size_t i = 0; i + block <= audio.size(); i += block)
+    {
+        listener.push(&audio[i], block);
+        if (listener.isSounding()) lastSounding = i / (double)RATE;
+
+        // A frame every 14 s while the melody lasts, as at Allegro.
+        if (i % (14 * RATE) < (size_t)block && i / (double)RATE < melodyEnds) listener.heardFrame();
+    }
+    CHECK(lastSounding > melodyEnds - 1.0);
+    CHECK(lastSounding < melodyEnds + ChordListener::HOLD_SECONDS + 1.0);
 }
 
 } // namespace
@@ -186,7 +400,11 @@ int main()
     testHearsATransmission();
     testSensitivity();
     testFalseAlarms();
-    testHearsAStrongMelody();
+    testHearsChordsNotMelodies();
+    testIgnoresABusyBand();
+    testHearsATransmissionOnABusyBand();
+    testTrackingEnds();
+    testFramesKeepTrackingGoing();
     if (failures == 0) printf("PASS\n");
     return failures == 0 ? 0 : 1;
 }

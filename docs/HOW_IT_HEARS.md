@@ -24,7 +24,8 @@ log-frequency axis. At Adagio each symbol lasts 640 ms, so each glide takes
 
 Line references below are to [GlissandoDemod.cpp](../modem/GlissandoDemod.cpp)
 as of September 2026. The function names will stay put longer than the
-line numbers.
+line numbers. Lesson 6 leaves the frame decoder for the listener that hears
+the opening chord, in [GlissandoChord.cpp](../modem/GlissandoChord.cpp).
 
 ## Lesson 1: a matched filter is a stencil
 
@@ -150,6 +151,140 @@ Two refinements matter:
 About 1 in 8 data symbols repeats the previous note. When it does, the
 symbol is a held tone for its whole length and the stencil is a plain tone
 detector. The other 7 in 8 carry a glide.
+
+## Lesson 6: hearing the opening chord, two lamps and an "and"
+
+Lessons 1 to 5 decode a frame. Before any of that, the chat needs a much
+quicker answer to a much simpler question: is somebody keying right now?
+That is carrier sense, and it is what keeps two stations from talking over
+each other. Every transmission opens with two notes played together for
+0.6 s, E4 (329.63 Hz) and D5 (587.33 Hz), and the chord listener's only job
+is to notice that pair ([CHORDS.md](CHORDS.md)). It is sometimes called the
+fifths detector, but the interval is a minor seventh: E4 and D5 are the one
+pair of notes all four scales share, so a single test covers every scale.
+
+### Eleven lamps and a stencil
+
+Jeff pictured it this way. Lay out a row of lamps, each one lit by how much
+sound there is at its pitch. Cut a cardboard stencil with two holes the
+chord's distance apart, slide it along the row, and at each position ask
+whether light shows through both holes.
+
+That picture is very nearly the code. The lamps are the bins of a Fourier
+transform (the same tone-detector bank as in Lesson 3). Every tenth of a
+second the listener takes the last 0.6 s of audio, exactly one chord long,
+and runs an 8192-point FFT on it at 8 kHz, so each lamp is about 0.98 Hz
+wide. The two holes are 257.7 Hz apart, about 264 lamps. Sliding the
+stencil is the tuning search: the other station may be off tune by up to
+25 Hz either way, so the listener reads the pair at 51 positions one lamp
+apart. Like the dechirp in Lesson 3, one FFT serves all 51; sliding the
+stencil costs two lookups per position, not another transform.
+
+Each lamp is measured in units of the noise. The listener takes the median
+lamp between 200 and 3000 Hz, which a handful of loud signals can't move,
+and scales it to the average brightness of a noise-only lamp (for noise, the
+median is ln 2 of the mean). After that, a lamp reading 8 is eight times
+as bright as noise usually makes it, whatever the audio level.
+
+### Where adding the two holes breaks down
+
+The obvious test adds the light from both holes and compares the total with
+a threshold. Jeff spotted the flaw: what if one lamp is blazing and the
+other is dark? A carrier on 587 Hz, or one FT8 tone, fills a single hole so
+brightly that the sum clears any sensible threshold. Adding is an "or": it
+says yes if either note is loud enough.
+
+![Three rows of twelve lamps under a stencil with holes at lamps 4 and 7. A real chord lights both and both tests hear it. One very bright lamp at 7 makes the sum say heard, wrongly, while the dimmer-lamp test stays quiet. Noise alone keeps both quiet.](images/chord-stencil.svg)
+
+*The stencil's holes over lamps 4 and 7 (drawn three lamps apart; on the
+air they are 264 apart). The two tests are set to the same false-alarm rate
+on noise. Only the dimmer-lamp test rejects the single bright lamp.*
+
+What we want is an "and": E4 is lit *and* D5 is lit. The listener gets one
+by judging the pair on its dimmer lamp. At each stencil position it takes
+the smaller of the two readings and asks whether that is over 8
+(`CHORD_THRESHOLD`). A single blazing lamp can't pass, because the other
+hole is still showing only noise.
+
+### What the "and" costs, and why it is cheap
+
+You might expect two separate yes-or-no tests to throw away sensitivity
+compared with pooling the light. A little, but not much. On noise, a lamp's
+reading follows an exponential law: the chance it reaches 8 is e⁻⁸, about
+1 in 3000. Both lamps of one position must do so at once, so a false chord
+at that position has chance e⁻⁸ × e⁻⁸ = e⁻¹⁶, about 1 in 9 million. The
+summing test gives the same false-alarm rate with a threshold of 19 on the
+total. With both tests set to that rate, a simulation of a chord in noise
+gives:
+
+| | Sum of both lamps over 19 | Dimmer lamp over 8 |
+|---|---|---|
+| Chord heard half the time | each note 9.1 dB over a noise lamp | each note 9.8 dB over a noise lamp |
+| One lamp at 30 dB, noise in the other hole | heard every time | heard 0.04 % of the time |
+
+So the "and" costs about 0.7 dB on a real chord and turns the blazing-lamp
+case from always wrong to almost never. Two things make it cheap. The
+transmitter sends both notes at the same level, so on a clean path the
+lamps really are equal and nothing is lost by looking at the dimmer one.
+And the threshold can be low, 8 rather than something like 16, because two
+coincidences have to happen together before noise can fake a chord.
+
+With 51 positions and ten windows a second, the listener makes about 510
+of these tests every second. At 1 in 9 million each, noise alone makes a
+false chord roughly once every five hours, before the checks below remove
+most of those too.
+
+### Four more questions before a chord counts
+
+A busy band isn't white noise. FT8 tones, RTTY, carriers and voices can
+light both holes at once by accident, and early versions of the listener
+called that a chord ten times a second. So a position that passes the
+dimmer-lamp test must also pass four checks (`ChordListener::analyse()`,
+[GlissandoChord.cpp L224–L241](../modem/GlissandoChord.cpp#L224-L241)):
+
+- **Nearly even.** The brighter lamp may be at most 10 times the dimmer
+  (`MAX_NOTE_RATIO`). A strong carrier with a noise spike that happens to
+  reach 8 in the other hole fails here. Ten times leaves room for fading
+  to treat the two notes differently.
+- **Just switched on.** The window that ended where this one starts, all
+  of it from before a chord could have begun, must have shown both lamps at
+  under half the dimmer reading now (`ONSET_RATIO`). A station keys from
+  silence; a signal already sitting on E4 is not a new chord.
+- **A pinpoint, not a lit wall.** Each lamp must be at least 4 times the
+  average of the lamps 4 to 10 Hz either side of it (`PURITY`, `purity()`).
+  A held note is a sharp line a couple of lamps wide. Voices and the
+  wandering tones of FT8 smear their light across the neighbours.
+- **Lit the whole time.** Each note must sound in both halves of the
+  0.6 s window (`STEADY_SHARE`, `steady()`). Two short signals that each
+  touch a hole for part of the window are not a chord.
+
+The position that passes everything with the brightest dimmer lamp wins,
+and its tuning becomes the station's tuning for what follows.
+
+### After the chord: a stencil with eight holes
+
+Once a chord is heard, the channel stays busy for as long as the melody
+continues. Now the stencil has eight holes, one for each note of a scale, at
+the tuning the chord gave. A melody plays one note at a time, so the
+listener adds the eight lamps (this time the sum is right, since only one
+note sounds at once) and does that for all four scales. The scale that has
+been brightest since the chord is the one being sung. Its total must reach
+26, about 1.7 times what noise alone makes, and also 1.5 times what that
+same stencil usually showed during the 15 s before the chord, so a signal
+that was already sitting on those notes doesn't count as melody.
+
+The channel is released 2.5 s after the last bright reading
+(`HOLD_SECONDS`), which spans the gaps between notes. On its own a chord
+holds the channel for at most 75 s, enough for the first frame of an Adagio
+melody to decode. Every frame that does decode starts those 75 s again
+(`heardFrame()`), so a long keying is followed to its end, while a chord
+the band made up by accident lets go after 75 s.
+
+Measured over 20 minutes of a busy band, with a dozen FT8 signals and a
+voice, these checks took the channel from busy all of the time to busy 6%
+of the time, never for more than 7.9 s at once ([CHORDS.md](CHORDS.md)).
+Below about −14 dB the chord is too faint for the lamps to stand out at
+all, and carrier sense falls back on decoded frames.
 
 ## What glide-then-hold gains and gives up
 
