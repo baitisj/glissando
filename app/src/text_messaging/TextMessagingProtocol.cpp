@@ -227,7 +227,7 @@ void TextMessagingProtocol::dropOutboxLocked(MessageStatus status, bool everythi
 AirTiming AirTiming::forFrameSeconds(double frameSeconds, int bytesPerFrame,
                                      double decodeLatencySeconds, double replyFrameSeconds,
                                      double replyDecodeLatencySeconds, double chordSeconds,
-                                     double replyChordSeconds)
+                                     double replyChordSeconds, double closingChordSeconds)
 {
     AirTiming timing;
     if (frameSeconds <= 0.0 || bytesPerFrame <= 0) return timing;
@@ -237,8 +237,10 @@ AirTiming AirTiming::forFrameSeconds(double frameSeconds, int bytesPerFrame,
 
     // A Glissando keying opens and closes with a chord, which is air time
     // but no data.
-    double signallingAir = frames(SIGNALLING_FRAME_BYTES) * frameSeconds + 2.0 * chordSeconds;
-    double textAir = frames(TEXT_FRAME_BYTES) * frameSeconds + 2.0 * chordSeconds;
+    if (closingChordSeconds < 0.0) closingChordSeconds = chordSeconds;
+    double chordsAir = chordSeconds + closingChordSeconds;
+    double signallingAir = frames(SIGNALLING_FRAME_BYTES) * frameSeconds + chordsAir;
+    double textAir = frames(TEXT_FRAME_BYTES) * frameSeconds + chordsAir;
 
     // The far end hears a burst of ours only once its first frame has been
     // decoded, a frame and a search after it began (after the opening
