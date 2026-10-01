@@ -4,7 +4,7 @@
 #
 # By default it configures and builds a Release tree in ../build-appimage.
 # Set BUILD_DIR to package an existing build instead (it must contain
-# src/glissando and freedv-version.txt).
+# src/glissando and glissando-version.txt).
 
 export APPNAME="Glissando"
 MACH_ARCH=`uname -m`
@@ -62,7 +62,7 @@ cp -aL /etc/ssl/certs/* "$APPDIR/etc/ssl/certs"
   --output appimage
 
 # Include version number in AppImage filename
-VERSION=`cat "$BUILD_DIR/freedv-version.txt"`
+VERSION=`cat "$BUILD_DIR/glissando-version.txt"`
 mv ${APPNAME}-${MACH_ARCH}.AppImage ${APPNAME}-$VERSION-${MACH_ARCH}.AppImage
 
 echo "Done: ${APPNAME}-$VERSION-${MACH_ARCH}.AppImage"
