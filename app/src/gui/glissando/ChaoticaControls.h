@@ -200,6 +200,9 @@ public:
 
     void SetText(const wxString& text);
 
+    // A caption in alarm red says the reading needs the operator's eye.
+    void SetCaption(const wxString& caption, bool alarm = false);
+
     // Where the display window starts below the caption, so that controls
     // beside a readout can line up with the window rather than the caption.
     static int WindowTop();
@@ -210,6 +213,7 @@ protected:
 private:
     wxString caption_;
     wxString text_;
+    bool alarm_ = false;
 };
 
 // One entry in a drop-down of choices; see ShowChoices().

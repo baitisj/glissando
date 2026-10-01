@@ -149,6 +149,20 @@ std::array<double, NOTES> scaleNotes(Scale scale, int voice)
     return notes;
 }
 
+double signalWidthHz(Scale scale, int gear)
+{
+    double low = 1e9, high = 0.0;
+    for (int voice = 0; voice < gearInfo(gear).voices; voice++)
+    {
+        for (double note : scaleNotes(scale, voice))
+        {
+            low = std::min(low, note);
+            high = std::max(high, note);
+        }
+    }
+    return high - low + SIGNAL_WIDTH_SPREAD_HZ;
+}
+
 namespace detail
 {
 

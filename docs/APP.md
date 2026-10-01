@@ -127,6 +127,27 @@ solo frame sits 330 to 880 Hz above the dial; the duet voice reaches about
 | 12 m | 24.911 | Just below FT8 (24.915); inside the US data segment, though Region 2 marks it CW. |
 | 10 m | 28.067 | The same pattern, below PSK31 and FT8 (28.070-28.074) and far from the beacons at 28.200. |
 
+On 30 m, the IARU Region 1 band plan caps every emission at 500 Hz (200 Hz
+below 10.130), and some countries outside the Americas follow it. Measured
+on the modem's own output, a frame's bandwidth (99% of its power; the -26 dB
+width is in brackets) is:
+
+| Scale | Adagio to Presto | Presto duet |
+|---|---|---|
+| Pentatonic | 553-563 Hz (559-603) | 2317 Hz |
+| Diabolus | 504-515 Hz (510-554) | 2030 Hz |
+| Whole tone | 413-424 Hz (419-461) | 1771 Hz |
+| Diminished | 261-271 Hz (265-307) | 1342 Hz |
+
+The opening E4+D5 chord is 266 Hz wide, and the straight CW tail is 323 Hz.
+The closing chord is as wide as its scale. So where 500 Hz applies, send in
+the diminished or whole tone scale on 30 m and leave the duet off. A
+pentatonic station still hears them, because by default the receiver listens
+for all four scales. While the dial is on 30 m and the scale or duet is wider
+than 500 Hz, the console's Radio dial caption turns red and reads `Over 500 Hz
+for 30 m`, with the width in its tooltip. It is only a warning: US rules set
+no width limit on 30 m, so nothing stops a transmission.
+
 On 60 m keep to 9.15 W ERP (15 W EIRP outside the US); the app does not set
 power. The 20 Hz weak-signal slot at 5.366-5.3665 is too narrow for any
 Glissando melody, and the older 60 m channels want a data signal centred on
