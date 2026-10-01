@@ -249,6 +249,22 @@ void testChord()
 
 } // namespace
 
+// The widths docs/APP.md gives for 30 m, where much of the world allows
+// 500 Hz: only the diminished and whole tone scales fit, and no duet does.
+void testSignalWidth()
+{
+    const int duet = 5;
+    for (int gear = 1; gear < duet; gear++)
+    {
+        CHECK(signalWidthHz(Scale::Pentatonic, gear) > 500.0);
+        CHECK(signalWidthHz(Scale::Diabolus, gear) > 500.0);
+        CHECK(signalWidthHz(Scale::WholeTone, gear) < 500.0);
+        CHECK(signalWidthHz(Scale::Diminished, gear) < 500.0);
+    }
+    for (int i = 0; i < SCALE_COUNT; i++) CHECK(signalWidthHz((Scale)i, duet) > 1000.0);
+    CHECK(std::fabs(signalWidthHz(Scale::Pentatonic, 3) - (880.00 - 329.63 + SIGNAL_WIDTH_SPREAD_HZ)) < 1e-9);
+}
+
 int main()
 {
     testAgainstPrototype();
@@ -257,6 +273,7 @@ int main()
     testTuningOffset();
     testMelody();
     testChord();
+    testSignalWidth();
     if (failures == 0) printf("glissando modulation tests passed\n");
     return failures == 0 ? 0 : 1;
 }

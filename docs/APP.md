@@ -143,7 +143,10 @@ The opening E4+D5 chord is 266 Hz wide, and the straight CW tail is 323 Hz.
 The closing chord is as wide as its scale. So where 500 Hz applies, send in
 the diminished or whole tone scale on 30 m and leave the duet off. A
 pentatonic station still hears them, because by default the receiver listens
-for all four scales.
+for all four scales. While the dial is on 30 m and the scale or duet is wider
+than 500 Hz, the console's Radio dial caption turns red and reads `Over 500 Hz
+for 30 m`, with the width in its tooltip. It is only a warning: US rules set
+no width limit on 30 m, so nothing stops a transmission.
 
 On 60 m keep to 9.15 W ERP (15 W EIRP outside the US); the app does not set
 power. The 20 Hz weak-signal slot at 5.366-5.3665 is too narrow for any

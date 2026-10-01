@@ -610,6 +610,14 @@ void Readout::SetText(const wxString& text)
     Refresh();
 }
 
+void Readout::SetCaption(const wxString& caption, bool alarm)
+{
+    if (caption_ == caption && alarm_ == alarm) return;
+    caption_ = caption;
+    alarm_ = alarm;
+    Refresh();
+}
+
 int Readout::WindowTop()
 {
     std::unique_ptr<wxGraphicsContext> gc(wxGraphicsRenderer::GetDefaultRenderer()->CreateMeasuringContext());
@@ -623,7 +631,7 @@ int Readout::WindowTop()
 
 void Readout::paint(wxGraphicsContext* gc, const wxSize& size)
 {
-    gc->SetFont(font(FontRole::Caption), Colour::Dim);
+    gc->SetFont(font(FontRole::Caption), alarm_ ? Colour::Alarm : Colour::Dim);
     drawSpacedText(gc, caption_, 4, 1, 1.5);
 
     double tw = 0, th = 0;
