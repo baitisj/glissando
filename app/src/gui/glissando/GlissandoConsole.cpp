@@ -675,10 +675,36 @@ void GlissandoConsole::refreshTelemetry()
 
     rigReadout_->SetText(t.rigFrequencyKnown ? wxString::Format("%.3f kHz", t.rigFrequencyHz / 1000.0)
                                              : wxString("---"));
+    updateBandWidthWarning(t);
 
     // Both windows can be opened or closed from elsewhere too.
     chatButton_->SetChecked(host_->glissandoChatShown());
     snoopButton_->SetChecked(host_->glissandoSnoopShown());
+}
+
+// Much of the world holds 30 m to 500 Hz (the IARU Region 1 band plan, which
+// some countries make law); US rules set no width there. So it is a warning
+// on the dial, never a block: the operator knows which rules they are under.
+void GlissandoConsole::updateBandWidthWarning(const GlissandoTelemetry& t)
+{
+    const double LIMIT_HZ = 500.0;
+    double widthHz = Glissando::signalWidthHz(settings_.scale, t.transmitGear);
+    bool warn = t.rigFrequencyKnown && t.rigFrequencyHz >= 10100000.0 && t.rigFrequencyHz <= 10150000.0 &&
+                widthHz > LIMIT_HZ;
+    wxString tip = warn ? wxString::Format(_("%s at %s is about %.0f Hz wide. Much of the world holds 30 m to "
+                                             "%.0f Hz (IARU Region 1); there, send in the diminished or whole "
+                                             "tone scale and leave the duet off. US rules set no width limit on "
+                                             "30 m."),
+                                           scaleLabel(settings_.scale), gearLabel(t.transmitGear), widthHz, LIMIT_HZ)
+                        : wxString();
+    if (tip == bandWidthTip_) return;
+    bandWidthTip_ = tip;
+
+    rigReadout_->SetCaption(warn ? _("Over 500 Hz for 30 m") : _("Radio dial"), warn);
+    if (warn)
+        rigReadout_->SetToolTip(tip);
+    else
+        rigReadout_->UnsetToolTip();
 }
 
 void GlissandoConsole::OnTimer(wxTimerEvent&)

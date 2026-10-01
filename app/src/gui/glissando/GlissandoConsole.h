@@ -146,6 +146,7 @@ private:
     void setTuning(double hz);
     void enterRigFrequency();
     void showFrequencyPresets();
+    void updateBandWidthWarning(const GlissandoTelemetry& t);
     void showPreferences();
 
     void OnTimer(wxTimerEvent& event);
@@ -178,6 +179,7 @@ private:
     Chaotica::Button* engageButton_;
     bool engageAborts_ = false;     // the button reads Abort
     bool meterShowsSwr_ = false;    // the telemetry meter has its SWR face on
+    wxString bandWidthTip_;         // why the dial's caption warns, empty while it doesn't
     Chaotica::Button* chatButton_;
     Chaotica::Button* snoopButton_;
     Chaotica::Button* preferencesButton_;

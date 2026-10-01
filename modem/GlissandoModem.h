@@ -69,6 +69,14 @@ bool scaleFromName(const std::string& name, Scale& scaleOut);
 // before any tuning offset.
 std::array<double, NOTES> scaleNotes(Scale scale, int voice);
 
+// About how wide a transmission in this scale and gear is on the air, in Hz:
+// from the lowest note to the highest of every voice the gear sings, plus
+// SIGNAL_WIDTH_SPREAD_HZ for the glides and keying. Measured on modulate()'s
+// output, the -26 dB width runs up to 40 Hz over the notes' span (Presto),
+// and the closing chord is no wider than the frames.
+constexpr double SIGNAL_WIDTH_SPREAD_HZ = 40.0;
+double signalWidthHz(Scale scale, int gear);
+
 // 77 bits, one per element (0 or 1), first bit first as in the prototype.
 using Payload = std::array<uint8_t, PAYLOAD_BITS>;
 

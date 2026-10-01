@@ -32,37 +32,33 @@ add_subdirectory(rig_control)
 add_subdirectory(text_messaging)
 
 # WIN32 is needed for Windows GUI apps and is ignored for UNIX like systems.
-add_executable(freedv WIN32 ${FREEDV_SOURCES} ${RES_FILES})
+add_executable(glissando WIN32 ${FREEDV_SOURCES} ${RES_FILES})
 
-# The target keeps FreeDV's name, so everything that builds on it still
-# works; the program it makes is glissando (glissando.exe on Windows).
-set_target_properties(freedv PROPERTIES OUTPUT_NAME glissando)
-
-target_compile_options(freedv PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
-target_link_libraries(freedv fdv_audio fdv_audio_pipeline fdv_audio_pipeline_extra fdv_config fdv_gui_controls fdv_gui_dialogs fdv_gui_glissando fdv_gui_util fdv_os_wrapper fdv_rig_control fdv_reporting fdv_text_messaging fdv_util codec2 git_version)
+target_compile_options(glissando PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
+target_link_libraries(glissando fdv_audio fdv_audio_pipeline fdv_audio_pipeline_extra fdv_config fdv_gui_controls fdv_gui_dialogs fdv_gui_glissando fdv_gui_util fdv_os_wrapper fdv_rig_control fdv_reporting fdv_text_messaging fdv_util codec2 git_version)
 
 # Add dependencies for other statically built libraries, if applicable.
 if(FREEDV_STATIC_DEPS)
-    add_dependencies(freedv ${FREEDV_STATIC_DEPS})
+    add_dependencies(glissando ${FREEDV_STATIC_DEPS})
     add_dependencies(fdv_audio ${FREEDV_STATIC_DEPS})
     add_dependencies(fdv_audio_pipeline_extra ${FREEDV_STATIC_DEPS})
 endif(FREEDV_STATIC_DEPS)
 
 # Link other dependencies
 if(APPLE)
-target_link_libraries(freedv ${FREEDV_LINK_LIBS} ${FREEDV_LINK_LIBS_OSX})
+target_link_libraries(glissando ${FREEDV_LINK_LIBS} ${FREEDV_LINK_LIBS_OSX})
 elseif(WIN32)
-target_link_libraries(freedv ${FREEDV_LINK_LIBS} ws2_32)
+target_link_libraries(glissando ${FREEDV_LINK_LIBS} ws2_32)
 else()
-target_link_libraries(freedv ${FREEDV_LINK_LIBS})
+target_link_libraries(glissando ${FREEDV_LINK_LIBS})
 endif(APPLE)
 
 if(BOOTSTRAP_WXWIDGETS)
-    target_compile_definitions(freedv PRIVATE ${WXBUILD_BUILD_DEFS})
-    target_include_directories(freedv PRIVATE ${WXBUILD_INCLUDES})
+    target_compile_definitions(glissando PRIVATE ${WXBUILD_BUILD_DEFS})
+    target_include_directories(glissando PRIVATE ${WXBUILD_INCLUDES})
     
-    add_dependencies(freedv wx::core wx::base wx::aui wx::html wx::net wx::adv wx::propgrid wx::xrc)
-    target_link_libraries(freedv wx::core wx::base wx::aui wx::html wx::net wx::adv wx::propgrid)
+    add_dependencies(glissando wx::core wx::base wx::aui wx::html wx::net wx::adv wx::propgrid wx::xrc)
+    target_link_libraries(glissando wx::core wx::base wx::aui wx::html wx::net wx::adv wx::propgrid)
 endif(BOOTSTRAP_WXWIDGETS)
 
 # For older Xcode (< 9.0), bypass usage of @available.
@@ -75,7 +71,7 @@ endif(APPLE)
 # If on Linux, force static libstdc++. This is to prevent versioning
 # problems when using AppImages.
 if(LINUX AND STATIC_LIBGCC)
-    target_link_options(freedv PRIVATE -static-libgcc -static-libstdc++)
+    target_link_options(glissando PRIVATE -static-libgcc -static-libstdc++)
 endif(LINUX AND STATIC_LIBGCC)
 
 # On Linux/GTK builds, make the GTK3 headers directly accessible in main.cpp
@@ -121,13 +117,13 @@ if(LINUX)
 
             if(WX_BUILT_FOR_GTK3)
                 message(STATUS "GTK3 development files found, will implement Linux-specific GUI workarounds")
-                target_include_directories(freedv PRIVATE ${GTK3_INCLUDE_DIRS})
-                target_link_libraries(freedv ${GTK3_LIBRARIES})
+                target_include_directories(glissando PRIVATE ${GTK3_INCLUDE_DIRS})
+                target_link_libraries(glissando ${GTK3_LIBRARIES})
                 add_definitions(-DHAS_GTK3)
 
                 # fdv_gui_util (added via add_subdirectory(gui) above, before this
                 # point) needs these too -- WindowPositionRestore.cpp lives there,
-                # not in freedv's own sources. add_definitions()/directory-scoped
+                # not in glissando's own sources. add_definitions()/directory-scoped
                 # include dirs only propagate to subdirectories added *after* this
                 # point, so it has to be set on the already-created target directly.
                 target_compile_definitions(fdv_gui_util PRIVATE HAS_GTK3)
@@ -151,7 +147,7 @@ endif(FREEDV_VERSION_TAG)
 # Insert source and generated header directories before other search directories.
 include_directories(BEFORE ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
 
-install(TARGETS freedv
+install(TARGETS glissando
     RUNTIME DESTINATION bin
 )
 
