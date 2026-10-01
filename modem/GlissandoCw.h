@@ -4,7 +4,7 @@
 //                  scale, for the tail that ends a transmission.
 //
 // A casual listener who hears Glissando on the air has nothing to search
-// for. The tail spells it out in Morse ("Glissando de AG7EW" by default),
+// for. The tail spells it out in Morse ("Gliss de AG7EW" by default),
 // which also identifies the station in plain CW. The rhythm is standard
 // Morse, so it copies by ear as usual; only the pitch of each dit and dah
 // moves, following the rules long notes follow in a melody:
@@ -65,10 +65,24 @@ std::vector<CwElement> cwTune(const std::string& text, Scale scale);
 double cwTailSeconds(const std::string& text, int wpm);
 bool cwTailFits(const std::string& text, int wpm);
 
-// The tail's audio at SAMPLE_RATE_HZ on the low voice of the scale, tuning
-// offset included, peak amplitude 1 like a frame. Speed is clamped to
-// CW_MIN_WPM .. CW_MAX_WPM.
-std::vector<float> cwTail(const std::string& text, int wpm, const ModemSettings& settings);
+// How the tail is sung: the Glorifier's tune, or straight Morse keyed on
+// E4 and D5 together, the opening chord's two notes, which every scale
+// shares and which a CW decoder tuned to either note can copy.
+enum class CwStyle
+{
+    Glorified,
+    Straight,
+};
+
+// The tail's audio at SAMPLE_RATE_HZ, tuning offset included, peak
+// amplitude 1 like a frame. Glorified, it is sung on the low voice of the
+// scale. Speed is clamped to CW_MIN_WPM .. CW_MAX_WPM.
+std::vector<float> cwTail(const std::string& text, int wpm, const ModemSettings& settings,
+                          CwStyle style = CwStyle::Glorified);
+
+// The two notes of the straight tail, before any tuning offset.
+constexpr double CW_STRAIGHT_LOW_HZ = 329.63;   // E4
+constexpr double CW_STRAIGHT_HIGH_HZ = 587.33;  // D5
 
 } // namespace Glissando
 

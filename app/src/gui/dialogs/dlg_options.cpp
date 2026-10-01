@@ -319,12 +319,13 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     tailSizer->AddGrowableCol(1);
 
     tailSizer->Add(new wxStaticText(sb_textChat, wxID_ANY, _("Tail:")), 0, wxALIGN_CENTER_VERTICAL);
-    wxString tailChoices[] = {_("Off"), _("Chord"), _("CW")};
-    m_choiceGlissandoTail = new wxChoice(sb_textChat, wxID_ANY, wxDefaultPosition, wxDefaultSize, 3, tailChoices);
+    wxString tailChoices[] = {_("Off"), _("Chord"), _("CW, glorified"), _("CW, straight on E4+D5")};
+    m_choiceGlissandoTail = new wxChoice(sb_textChat, wxID_ANY, wxDefaultPosition, wxDefaultSize, 4, tailChoices);
     m_choiceGlissandoTail->SetToolTip(
         _("How each Glissando transmission ends. Chord: every note of the scale for one bar. "
-          "CW: the text below in Morse, each dit and dah sung on a note of the scale, so a listener "
-          "knows what to search for; it also identifies the station. The CW tail plays at most once "
+          "CW: the text below in Morse, so a listener knows what to search for; it also identifies "
+          "the station. Glorified sings each dit and dah on a note of the scale; straight keys them on "
+          "E4 and D5 together, which a CW decoder tuned to either note can copy. The CW tail plays at most once "
           "every so many minutes, and the chord ends the transmissions in between."));
     tailSizer->Add(m_choiceGlissandoTail, 0, wxALIGN_LEFT);
 
@@ -612,7 +613,7 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
 
         m_ckboxTextChatUsDataSegmentsOnly->SetValue(wxGetApp().appConfiguration.textChatUsDataSegmentsOnly);
         m_ckboxGlissandoChords->SetValue(wxGetApp().appConfiguration.glissandoChords);
-        m_choiceGlissandoTail->SetSelection(std::min(std::max(wxGetApp().appConfiguration.glissandoTail.get(), 0), 2));
+        m_choiceGlissandoTail->SetSelection(std::min(std::max(wxGetApp().appConfiguration.glissandoTail.get(), 0), 3));
         m_txtGlissandoCwText->ChangeValue(wxGetApp().appConfiguration.glissandoCwText);
         m_spinGlissandoCwWpm->SetValue(wxGetApp().appConfiguration.glissandoCwWpm);
         m_spinGlissandoCwIdMinutes->SetValue(wxGetApp().appConfiguration.glissandoCwIdMinutes);
@@ -1108,7 +1109,7 @@ void OptionsDlg::updateData2GControls_()
 //-------------------------------------------------------------------------
 void OptionsDlg::updateCwTailControls_()
 {
-    bool cw = m_choiceGlissandoTail->GetSelection() == 2;
+    bool cw = m_choiceGlissandoTail->GetSelection() >= 2;
     m_txtGlissandoCwText->Enable(cw);
     m_spinGlissandoCwWpm->Enable(cw);
     m_spinGlissandoCwIdMinutes->Enable(cw);

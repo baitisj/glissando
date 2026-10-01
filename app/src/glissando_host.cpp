@@ -172,6 +172,7 @@ void MainFrame::applyGlissandoToModem_(bool enabled)
     {
     case 0: modemConfig.tail = TextMessagingModem::GlissandoConfig::Tail::Off; break;
     case 1: modemConfig.tail = TextMessagingModem::GlissandoConfig::Tail::Chord; break;
+    case 3: modemConfig.tail = TextMessagingModem::GlissandoConfig::Tail::CwStraight; break;
     default: modemConfig.tail = TextMessagingModem::GlissandoConfig::Tail::Cw; break;
     }
     modemConfig.cwText = TextMessagingModem::cwTailText(
@@ -332,7 +333,14 @@ std::vector<GlissandoScopeSent> MainFrame::glissandoSentFrames()
             tail.melody = sent.tailMelody;
             tail.leadSeconds = 0.0;
             tail.tailSeconds = 0.0;
-            frames.push_back(std::move(tail));
+            frames.push_back(tail);
+            if (!sent.tailHarmony.empty())
+            {
+                // A straight tail's second note, sounding with the first.
+                tail.voice = 1;
+                tail.melody = sent.tailHarmony;
+                frames.push_back(std::move(tail));
+            }
         }
     }
     return frames;

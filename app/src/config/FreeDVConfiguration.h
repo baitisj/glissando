@@ -93,7 +93,7 @@ public:
     ConfigurationDataElement<int> glissandoTuningDeciHz;
     ConfigurationDataElement<bool> glissandoListenAllGears;
     ConfigurationDataElement<bool> glissandoChords;         // the opening chord
-    ConfigurationDataElement<int> glissandoTail;            // 0 off, 1 chord, 2 CW
+    ConfigurationDataElement<int> glissandoTail;            // 0 off, 1 chord, 2 CW glorified, 3 CW straight
     ConfigurationDataElement<wxString> glissandoCwText;     // <MYCALL> is the Station callsign
     ConfigurationDataElement<int> glissandoCwWpm;
     ConfigurationDataElement<int> glissandoCwIdMinutes;     // 0: every keying
