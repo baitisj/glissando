@@ -53,6 +53,8 @@ RigControlConfiguration::RigControlConfiguration()
     , leftChannelVoxTone("/Rig/leftChannelVoxTone",  false)
     , totTimerEnabled("/Rig/TotTimerEnabled", true)
     , totTimerSecs("/Rig/TotTimerSecs", 180)
+    , swrMeter("/Rig/SwrMeter", true)
+    , swrAutoAbort("/Rig/SwrAutoAbort", false)
 {
     // empty
 }
@@ -97,6 +99,8 @@ void RigControlConfiguration::load(wxConfigBase* config)
 
     load_(config, totTimerEnabled);
     load_(config, totTimerSecs);
+    load_(config, swrMeter);
+    load_(config, swrAutoAbort);
 }
 
 void RigControlConfiguration::save(wxConfigBase* config)
@@ -133,4 +137,6 @@ void RigControlConfiguration::save(wxConfigBase* config)
 
     save_(config, totTimerEnabled);
     save_(config, totTimerSecs);
+    save_(config, swrMeter);
+    save_(config, swrAutoAbort);
 }

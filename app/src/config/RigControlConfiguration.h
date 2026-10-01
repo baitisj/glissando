@@ -65,6 +65,11 @@ public:
     ConfigurationDataElement<bool> totTimerEnabled;
     ConfigurationDataElement<int>  totTimerSecs;
 
+    // While transmitting, radios that report SWR have it read once a second
+    // and shown on the console's meter; and optionally abort over 3:1.
+    ConfigurationDataElement<bool> swrMeter;
+    ConfigurationDataElement<bool> swrAutoAbort;
+
     virtual void load(wxConfigBase* config) override;
     virtual void save(wxConfigBase* config) override;
 };

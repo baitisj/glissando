@@ -67,6 +67,7 @@ class OptionsDlg : public wxDialog
         void    OnEnableSpacebarForPTT(wxCommandEvent& event);
         void    OnSetPTTKey(wxCommandEvent& event);
         void    OnTOTTimerEnable(wxCommandEvent& event);
+        void    OnSwrMeterEnable(wxCommandEvent& event);
         void    OnDialogCharHook(wxKeyEvent& event);
         void    OnPTTKeyCapture(wxKeyEvent& event);
         void    enterPTTCaptureMode_();
@@ -95,6 +96,10 @@ class OptionsDlg : public wxDialog
         /* Time-Out Timer options */
         wxCheckBox    *m_ckboxTOTTimerEnabled;
         wxTextCtrl    *m_txtTOTTimerSecs;
+
+        /* SWR meter */
+        wxCheckBox    *m_ckboxSwrMeter;
+        wxCheckBox    *m_ckboxSwrAutoAbort;
         
         /* test frames, other simulated channel impairments */
 

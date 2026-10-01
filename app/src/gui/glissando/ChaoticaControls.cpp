@@ -513,13 +513,9 @@ void Lamp::paint(wxGraphicsContext* gc, const wxSize& size)
 
 //--------------------------------------------------------------- Meter
 
-Meter::Meter(wxWindow* parent, const wxString& caption, double minimum, double maximum,
-             const wxString& units, const wxSize& size)
+Meter::Meter(wxWindow* parent, const Scale& scale, const wxSize& size)
     : Control(parent, wxID_ANY, size)
-    , caption_(caption)
-    , units_(units)
-    , minimum_(minimum)
-    , maximum_(maximum)
+    , scale_(scale)
     , value_(std::nan(""))
 {
     // empty
@@ -530,6 +526,19 @@ void Meter::SetValue(double value)
     if ((std::isnan(value) && std::isnan(value_)) || value == value_) return;
     value_ = value;
     Refresh();
+}
+
+void Meter::SetScale(const Scale& scale)
+{
+    scale_ = scale;
+    Refresh();
+}
+
+bool Meter::red(double v) const
+{
+    // A hair of slack, so that a tick computed as -20.000000001 still counts.
+    double slack = (scale_.maximum - scale_.minimum) * 1e-6;
+    return v >= scale_.redFrom - slack && v <= scale_.redTo + slack;
 }
 
 void Meter::paint(wxGraphicsContext* gc, const wxSize& size)
@@ -555,13 +564,15 @@ void Meter::paint(wxGraphicsContext* gc, const wxSize& size)
         double a = start + METER_SWEEP * i / (majors * 5.0);
         bool major = i % 5 == 0;
         double inner = radius * (major ? 0.86 : 0.92);
-        gc->SetPen(wxPen(Colour::Bakelite, major ? 2 : 1));
+        double v = scale_.minimum + (scale_.maximum - scale_.minimum) * i / (majors * 5.0);
+        const wxColour& ink = red(v) ? Colour::Alarm : Colour::Bakelite;
+        gc->SetPen(wxPen(ink, major ? 2 : 1));
         gc->StrokeLine(cx + inner * std::cos(a), cy + inner * std::sin(a),
                        cx + radius * std::cos(a), cy + radius * std::sin(a));
         if (major)
         {
-            double v = minimum_ + (maximum_ - minimum_) * i / (majors * 5.0);
-            wxString label = wxString::Format("%+.0f", v);
+            wxString label = wxString::Format(scale_.labelFormat, v);
+            gc->SetFont(font(FontRole::Caption), ink);
             double tw = 0, th = 0;
             gc->GetTextExtent(label, &tw, &th);
             double lr = radius * 0.74;
@@ -572,15 +583,14 @@ void Meter::paint(wxGraphicsContext* gc, const wxSize& size)
     double tw = 0, th = 0;
     gc->SetFont(font(FontRole::Plate), Colour::Bakelite);
     gc->GetTextExtent("X", &tw, &th);
-    drawSpacedText(gc, caption_, x + 8, y + h - th - 5, 2.0);
+    drawSpacedText(gc, scale_.caption, x + 8, y + h - th - 5, 2.0);
 
-    wxString figure = std::isnan(value_) ? wxString("---")
-                                         : wxString::Format("%+.1f %s", value_, units_);
+    wxString figure = std::isnan(value_) ? wxString("---") : wxString::Format(scale_.figureFormat, value_);
     gc->GetTextExtent(figure, &tw, &th);
     gc->DrawText(figure, x + w - tw - 8, y + h - th - 5);
 
-    double v = std::isnan(value_) ? minimum_ : std::min(maximum_, std::max(minimum_, value_));
-    double a = start + METER_SWEEP * (v - minimum_) / std::max(1e-9, maximum_ - minimum_);
+    double v = std::isnan(value_) ? scale_.minimum : std::min(scale_.maximum, std::max(scale_.minimum, value_));
+    double a = start + METER_SWEEP * (v - scale_.minimum) / std::max(1e-9, scale_.maximum - scale_.minimum);
     gc->SetPen(wxPen(Colour::Bakelite, 2));
     gc->StrokeLine(cx, cy, cx + radius * 0.98 * std::cos(a), cy + radius * 0.98 * std::sin(a));
     gc->SetPen(*wxTRANSPARENT_PEN);

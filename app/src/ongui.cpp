@@ -476,6 +476,10 @@ bool MainFrame::OpenHamlibRig() {
         wxGetApp().rigFrequencyController->onFreqModeChange += [&](IRigFrequencyController* ptr, uint64_t freq, IRigFrequencyController::Mode mode) {
             onFrequencyModeChange_(ptr, freq, mode);
         };
+
+        tmp->onSwrReading += [this](IRigSwrMeter*, double swr) {
+            CallAfter([this, swr]() { onRigSwrReading_(swr); });
+        };
         wxGetApp().rigFrequencyController->connect();
         return true;
     }

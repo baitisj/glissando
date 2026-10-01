@@ -1359,6 +1359,7 @@ void MainFrame::OnTimer(wxTimerEvent &evt)
             log_debug("update freq and mode ...."); 
             wxGetApp().rigFrequencyController->requestCurrentFrequencyMode();
         }
+        pollRigSwr_();
      }
       else if (timerId == ID_TIMER_DEMOD_IN)
       {
