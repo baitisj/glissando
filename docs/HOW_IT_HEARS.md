@@ -159,13 +159,13 @@ quicker answer to a much simpler question: is somebody keying right now?
 That is carrier sense, and it is what keeps two stations from talking over
 each other. Every transmission opens with two notes played together for
 0.6 s, E4 (329.63 Hz) and D5 (587.33 Hz), and the chord listener's only job
-is to notice that pair ([CHORDS.md](CHORDS.md)). It is sometimes called the
-fifths detector, but the interval is a minor seventh: E4 and D5 are the one
-pair of notes all four scales share, so a single test covers every scale.
+is to notice that pair ([CHORDS.md](CHORDS.md)). The interval is a minor 
+seventh: E4 and D5 are the one pair of notes all four scales share, so a 
+single test covers every scale.
 
 ### Eleven lamps and a stencil
 
-Jeff pictured it this way. Lay out a row of lamps, each one lit by how much
+Picture it this way: lay out a row of lamps, each one lit by how much
 sound there is at its pitch. Cut a cardboard stencil with two holes the
 chord's distance apart, slide it along the row, and at each position ask
 whether light shows through both holes.
