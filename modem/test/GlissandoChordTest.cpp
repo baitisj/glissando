@@ -356,6 +356,42 @@ void testTrackingEnds()
     CHECK(lastSounding < 2.0 + ChordListener::MAX_TRACK_SECONDS + 1.0);
 }
 
+// Frames decoding renew the cap, so a long keying is followed to the end of
+// its melody, and the listener lets go a moment after the notes stop.
+void testFramesKeepTrackingGoing()
+{
+    Random rng(19);
+    ModemSettings settings;
+    std::vector<float> audio(2 * RATE, 0.0f);
+    std::vector<float> opening = openingChord(settings);
+    audio.insert(audio.end(), opening.begin(), opening.end());
+    const std::array<double, NOTES> notes = scaleNotes(Scale::Pentatonic, 0);
+    double phase = 0.0;
+    const double melodySeconds = 2.0 * ChordListener::MAX_TRACK_SECONDS;
+    for (int n = 0; n < (int)(melodySeconds * RATE); n++)
+    {
+        phase += 2.0 * 3.14159265358979323846 * notes[(size_t)(n / (RATE / 2)) % NOTES] / RATE;
+        audio.push_back((float)std::sin(phase));
+    }
+    const double melodyEnds = audio.size() / (double)RATE;
+    audio.resize(audio.size() + 10 * RATE, 0.0f);
+    addNoise(audio, 0.0, 0.5, rng);
+
+    ChordListener listener;
+    const int block = RATE / 10;
+    double lastSounding = 0.0;
+    for (size_t i = 0; i + block <= audio.size(); i += block)
+    {
+        listener.push(&audio[i], block);
+        if (listener.isSounding()) lastSounding = i / (double)RATE;
+
+        // A frame every 14 s while the melody lasts, as at Allegro.
+        if (i % (14 * RATE) < (size_t)block && i / (double)RATE < melodyEnds) listener.heardFrame();
+    }
+    CHECK(lastSounding > melodyEnds - 1.0);
+    CHECK(lastSounding < melodyEnds + ChordListener::HOLD_SECONDS + 1.0);
+}
+
 } // namespace
 
 int main()
@@ -368,6 +404,7 @@ int main()
     testIgnoresABusyBand();
     testHearsATransmissionOnABusyBand();
     testTrackingEnds();
+    testFramesKeepTrackingGoing();
     if (failures == 0) printf("PASS\n");
     return failures == 0 ? 0 : 1;
 }

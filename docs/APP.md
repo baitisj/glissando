@@ -184,6 +184,27 @@ this they covered every tempo the receiver listens for: at Presto an
 unanswered ping held the queue for about 2 minutes and gave up after 2.2;
 now it holds it for 39 s and gives up after 55 s.
 
+A pong or acknowledgement with a message of ours riding behind it tells
+every listener that more follows, and a listener that then loses the message
+holds the channel for two text fragments after the reply. Our own traffic
+used to wait that out every time, plus the answered station's turn: about
+two minutes after such a keying at Presto, and many more at slower tempos.
+The wait now ends as soon as the answered station is heard again, as it
+nearly always is, acknowledging the message that rode along. With two real
+modems talking at Presto, a message typed just after a ping, a pong with a
+message behind it and its acknowledgement went out after 4 s instead of
+2 minutes.
+
+Carrier sense also holds the channel after a keying's last frame for the far
+end's closing chord or CW tail, which no frame decode covers. A reply keyed
+over the tail loses its opening, and with it the acknowledgement or pong.
+The chord listener hears the tail stop when it followed the keying; where it
+did not, at weak signals, the channel is held for as long as a CW tail like
+ours would last at 20 WPM, which keeps an answer to a weak station back
+about 3 s more at Presto. Before this, two real modems at -12 dB and at -15 dB
+each lost an acknowledgement to the tail, costing a retry two minutes
+later, and at -15 dB the pong to a ping as well.
+
 Air time for a short message (up to 12 characters of text behind the 15 byte
 header, three segments):
 about 20 s at Presto, 41 s at Allegro, 2.8 minutes at Adagio. A full 54 byte

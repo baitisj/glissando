@@ -57,9 +57,11 @@ busy spell. Now:
 - **The melody must stand out from what was already there.** After a
   chord, its scale's notes must reach 1.5 times their 90th percentile over
   the 15 s before it, as well as the fixed threshold.
-- **No chord holds the channel more than 75 s.** That is long enough for
-  the first frame of an Adagio melody to decode, after which the frame
-  receiver holds the channel.
+- **No chord holds the channel more than 75 s on its own.** That is long
+  enough for the first frame of an Adagio melody to decode. Each frame
+  that decodes starts the 75 s again, so a long keying is followed through
+  its closing chord or CW tail to the end; a chord the band made up, with
+  no frames after it, lets go after 75 s.
 
 Measured over 20 minutes of a busy band (a dozen FT8 signals at −8 to
 +12 dB and a voice two seconds in three):

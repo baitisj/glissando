@@ -964,6 +964,55 @@ void testOwnTrafficWaitsUntilListenersLetGo()
     CHECK(firstOwn != 0);
 }
 
+// That wait is for a station that lost what rode behind the reply. One heard
+// again has not: it is answering, so our own traffic goes after its turn as
+// usual. At Presto the wait above held every message of ours for over two
+// minutes after a pong with a message behind it, where the far end's answer
+// to that message had come within half a minute.
+void testOwnTrafficGoesOnceTheAnsweredStationIsHeard()
+{
+    Station sender("W1AW");
+    Station replier("VK3ABC");
+    AirTiming presto = AirTiming::forFrameSeconds(6.88, 9, 2.72, 6.88, 2.72, 0.6, 0.6, 0.32);
+    sender.protocol.setAirTiming(presto);
+    replier.protocol.setAirTiming(presto);
+
+    std::string error;
+    CHECK(replier.protocol.sendMessage("rides", "W1AW", error));
+    CHECK(replier.protocol.sendMessage("waits", "W1AW", error));
+    CHECK(sender.protocol.sendMessage("first", "VK3ABC", error));
+    sender.completeOneTransmission();
+    replier.receiveFrom(sender.transport);
+
+    replier.completeOneTransmission();
+    CHECK(replier.transport.modes.back().size() == 2);
+    uint64_t keyedAt = replier.nowMs;
+    uint64_t heldUntil = keyedAt + (uint64_t)presto.textFragmentAirMs +
+                         (uint64_t)presto.signallingFollowedReservationMs;
+
+    // The sender heard it all, and acknowledges the message that rode along.
+    sender.nowMs = replier.nowMs;
+    sender.receiveFrom(replier.transport);
+    sender.completeOneTransmission();
+    CHECK(decodeOne(sender.transport.transmissions.back()[0]).type == FrameType::MessageAck);
+    replier.nowMs = sender.nowMs;
+    replier.receiveFrom(sender.transport);
+
+    uint64_t firstOwn = 0;
+    for (; replier.nowMs <= heldUntil + (uint64_t)presto.replyWindowMs + 10000; replier.nowMs += 100)
+    {
+        replier.protocol.tick();
+        if (replier.transport.transmissions.size() > 1)
+        {
+            firstOwn = replier.nowMs;
+            break;
+        }
+    }
+    CHECK(firstOwn != 0);
+    CHECK(firstOwn < heldUntil);
+    CHECK(firstOwn >= keyedAt + (uint64_t)presto.replyWindowMs);
+}
+
 // The turn given to a station just answered holds back our own traffic, not a
 // reply to what that station sends in its turn.
 void testRepliesDoNotWaitForTheAnsweredStationsTurn()
@@ -2115,6 +2164,7 @@ int main()
     testBusyStationsTakeTurns();
     testOnlyWaitingTrafficOfOurOwnRides();
     testOwnTrafficWaitsUntilListenersLetGo();
+    testOwnTrafficGoesOnceTheAnsweredStationIsHeard();
     testRepliesDoNotWaitForTheAnsweredStationsTurn();
     testInhibitedStationTransmitsNothing();
     testAbortDropsEverythingOutstanding();

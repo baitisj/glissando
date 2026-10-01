@@ -544,6 +544,12 @@ void TextMessagingModem::demodulate(const short* samples, int numSamples)
         glissandoRx_->push(samples, numSamples);
         std::lock_guard<std::mutex> lock(chordMutex_);
         chordListener_.push(samples, numSamples);
+
+        // Where the listener last heard the notes stop, on the receiver's
+        // clock, for isReceiving().
+        bool sounding = chordListener_.isSounding();
+        if (chordWasSounding_ && !sounding) chordStoppedAt_.store(glissandoRx_->samplesReceived(), std::memory_order_release);
+        chordWasSounding_ = sounding;
         return;
     }
 
@@ -564,6 +570,8 @@ void TextMessagingModem::resetReceivers()
     {
         std::lock_guard<std::mutex> lock(chordMutex_);
         chordListener_.reset();
+        chordWasSounding_ = false;
+        chordStoppedAt_.store(-1, std::memory_order_release);
     }
 
     std::lock_guard<std::mutex> lock(rxMutex_);
@@ -591,20 +599,35 @@ bool TextMessagingModem::isReceiving() const
         // somebody has the channel, well before any frame of theirs decodes.
         if (chordListener_.isSounding()) return true;
 
+        int gear = 0;
+        double tailSeconds = 0.0;
+        {
+            std::lock_guard<std::mutex> lock(glissandoMutex_);
+            gear = glissandoStatus_.heardGear != 0 ? glissandoStatus_.heardGear : transmitGearLocked();
+            tailSeconds = farEndTailSecondsLocked(gear);
+        }
+
         // A burst whose last frame has been heard is over: the far end is
         // waiting for an answer, and holding the channel for another frame
         // and a half kept it waiting 68 s at Adagio before it could have one.
         // A message with more bursts to come holds the channel in the
-        // protocol, from what its frames say.
-        if (glissandoRx_->lastFrameEnd() == completedFrameEnd_.load(std::memory_order_acquire)) return false;
+        // protocol, from what its frames say. But the far end may still be
+        // singing its closing chord or CW tail, and is not listening until
+        // it stops: a reply keyed over the tail loses its opening, and with
+        // it the acknowledgement or pong. The chord listener hears the tail
+        // stop when it followed the keying; at weaker signals it does not
+        // (two stations at -12 dB lost an acknowledgement this way, and the
+        // message waited minutes for its retry), and the channel is held for
+        // as long as a tail can be.
+        long long completed = completedFrameEnd_.load(std::memory_order_acquire);
+        if (glissandoRx_->lastFrameEnd() == completed)
+        {
+            if (chordStoppedAt_.load(std::memory_order_acquire) >= completed) return false;
+            return glissandoRx_->samplesReceived() < completed + (long long)(tailSeconds * Glissando::SAMPLE_RATE_HZ);
+        }
 
         // A frame of a burst decodes one frame length after the one before
         // it, plus the search; hold the channel across that gap.
-        int gear = 0;
-        {
-            std::lock_guard<std::mutex> lock(glissandoMutex_);
-            gear = glissandoStatus_.heardGear != 0 ? glissandoStatus_.heardGear : transmitGearLocked();
-        }
         long long hold = (long long)(Glissando::gearInfo(gear).frameSamples() * 1.5);
         return glissandoRx_->isBusy(hold);
     }
@@ -743,6 +766,22 @@ bool TextMessagingModem::cwTailDueLocked(uint64_t nowMs) const
     return lastCwTailMs_ == 0 || nowMs - lastCwTailMs_ >= (uint64_t)std::max(glissando_.cwIdMinutes, 0) * 60000;
 }
 
+double TextMessagingModem::farEndTailSecondsLocked(int gear) const
+{
+    // Nothing on the air says how a station closes, or whether its CW
+    // identification is due, so this allows for it every time: the bar of
+    // the tempo heard, or a CW tail as long as ours at the usual speed. At
+    // Presto that keeps a weak station's answer back about three seconds
+    // more; at Andante and slower the decode takes longer than any tail.
+    double seconds = Glissando::chordSeconds(gear);
+    int wpm = std::min(glissando_.cwWpm, Glissando::CW_DEFAULT_WPM);
+    if (Glissando::cwTailFits(glissando_.cwText, wpm))
+    {
+        seconds = std::max(seconds, Glissando::cwTailSeconds(glissando_.cwText, wpm));
+    }
+    return seconds;
+}
+
 double TextMessagingModem::closingSecondsLocked(int gear, uint64_t nowMs) const
 {
     if (cwTailDueLocked(nowMs)) return Glissando::cwTailSeconds(glissando_.cwText, glissando_.cwWpm);
@@ -827,6 +866,10 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
         }
     }
     if (complete) completedFrameEnd_.store(glissandoRx_->lastFrameEnd(), std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(chordMutex_);
+        chordListener_.heardFrame();
+    }
     lastSyncMs_.store(steadyMs(), std::memory_order_release);
 
     if (rxLogEnabled())

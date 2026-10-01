@@ -299,10 +299,8 @@ private:
     Cancel cancelForLocked(const PendingTransmission& pending) const;
 
     // Holds the transmitter off until the far end has had its turn. Never
-    // shortens a wait that is already running. The first holds everything;
-    // the second only traffic of our own, never a reply we owe.
+    // shortens a wait that is already running.
     void deferTransmissionLocked(uint64_t fromMs, int baseMs, int jitterMs);
-    void deferOwnTrafficLocked(uint64_t fromMs, int baseMs, int jitterMs);
     uint64_t quietUntilLocked(bool forReply) const;
     bool channelFrozenLocked(uint64_t nowMs);
     void holdTimersLocked(uint64_t pausedMs);
@@ -337,6 +335,13 @@ private:
     // A reply with something behind it tells them more follows, and one that
     // then loses what follows reserves for two fragments after the reply.
     uint64_t keyingHeldUntilMs_;
+
+    // Our own traffic waits for the station a reply with something behind
+    // it answered, for as long as keyingHeldUntilMs_ says it may still be
+    // holding the channel for us, plus its turn. Hearing that station again
+    // shows it has let go, and ends the wait; see quietUntilLocked().
+    uint64_t answeredHoldUntilMs_;
+    std::string answeredStation_;
 
     // Carrier sense bookkeeping, updated every tick whether or not anything
     // is queued, so a busy spell is measured from when it really began.

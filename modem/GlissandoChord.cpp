@@ -127,6 +127,11 @@ void ChordListener::reset()
     combsCount_ = 0;
 }
 
+void ChordListener::heardFrame()
+{
+    if (tracking_) chordStartSample_ = samples_;
+}
+
 void ChordListener::push(const short* samples, int numSamples)
 {
     std::vector<float> scaled((size_t)std::max(numSamples, 0));

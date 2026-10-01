@@ -59,6 +59,13 @@ public:
     // own transmission.
     void reset();
 
+    // A frame of a melody has just decoded: whatever chord is being followed
+    // opened a real keying, so MAX_TRACK_SECONDS counts again from here.
+    // Without this a keying longer than that, as one at Allegro and slower
+    // often is, stopped being followed before its closing chord or CW tail,
+    // which no frame decode covers, and a reply keyed over the tail.
+    void heardFrame();
+
     // An opening chord has been heard and the notes of its scale, at its
     // tuning, have sounded within the last HOLD. Safe from any thread.
     bool isSounding() const { return sounding_.load(std::memory_order_acquire); }
@@ -108,8 +115,8 @@ public:
     static constexpr double BEFORE_PERCENTILE = 0.9;
 
     // The longest a chord holds the channel on its own: until the first
-    // frame of an Adagio melody after it has decoded, when the receiver
-    // takes over. A chord the band made up costs no more than this.
+    // frame of an Adagio melody after it has decoded, which renews it (see
+    // heardFrame()). A chord the band made up costs no more than this.
     static constexpr double MAX_TRACK_SECONDS = 75.0;
 
 private:
@@ -140,7 +147,7 @@ private:
     bool tracking_ = false;
     std::array<double, SCALE_COUNT> scaleEnergy_{}; // each scale's notes since the chord
     std::array<double, SCALE_COUNT> before_{};      // and their usual comb before it
-    long long chordStartSample_ = 0;                // of the chord that started tracking
+    long long chordStartSample_ = 0;                // of the chord that started tracking, or the last frame heard since
 
     // The last few windows' power per bin over their noise, oldest at
     // historyNext_: the one a full window before the current one is what
