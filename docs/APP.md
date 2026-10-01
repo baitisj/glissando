@@ -199,10 +199,11 @@ is free. In the transmission log, clicking a message selects the station it
 is with in the heard list, putting the station back if it has aged out, and a
 directed message for you selects its sender when no station is selected. A
 right click offers `Clear Messages`, which keeps only messages still being
-sent, and, on a message of yours still outstanding, `Remove from Queue` if it
-has not been on the air yet or `Abort` once it has (on the air now, waiting
-for its acknowledgement, or waiting to be retried). Either way the rest of
-the queue carries on.
+sent, and, on a message or ping of yours still outstanding, `Remove from
+Queue` if it has not been on the air yet or `Abort` once it has (on the air
+now, waiting for its acknowledgement or pong, or waiting to be retried).
+Either way the rest of the queue carries on. A ping's line says where it has
+got to: queued, on the air, awaiting PONG, not sent or aborted.
 
 A chat keying runs the same time-out timer as voice. When one would outlast
 it, the transport sends it as several keyings, each at least 20 s short of the

@@ -1028,11 +1028,10 @@ bool TextMessagingProtocol::hasQueuedTransmissions() const
 
 TextMessagingProtocol::Cancel TextMessagingProtocol::cancelForLocked(const PendingTransmission& pending) const
 {
-    // Replies and pings have no chat line of their own to cancel from.
-    if (pending.reply || pending.isPing || pending.message.kind != MessageKind::Chat || pending.message.id == 0)
-    {
-        return Cancel::None;
-    }
+    // Replies have no line of their own in the chat to cancel from; a
+    // message or a ping of ours does.
+    if (pending.reply || pending.message.id == 0) return Cancel::None;
+    if (!pending.isPing && pending.message.kind != MessageKind::Chat) return Cancel::None;
 
     // Not yet on the air at all: no retry, and no fragment confirmed.
     bool untouched = pending.state == TransmissionState::Queued && pending.retries == 0 && pending.confirmed == 0;

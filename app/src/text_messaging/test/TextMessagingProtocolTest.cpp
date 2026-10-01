@@ -1154,9 +1154,54 @@ void testSentMessagesAreAbortedNotRemoved()
     CHECK(station.observer.lastUpdateFor(delivered)->status == MessageStatus::Acknowledged);
     CHECK(station.protocol.cancelFor(delivered) == TextMessagingProtocol::Cancel::None);
 
-    CHECK(station.protocol.sendPing("W1AW", error));
-    CHECK(station.protocol.outstandingMessageIds().empty());
     CHECK(station.protocol.cancelFor(12345678) == TextMessagingProtocol::Cancel::None);
+}
+
+// A ping is taken back the same way: removed while it waits for its turn,
+// aborted once it is on the air or waiting for the pong.
+void testPingsCanBeRemovedOrAborted()
+{
+    std::string error;
+
+    Station station("VK3ABC");
+    Station far("W1AW");
+    CHECK(station.protocol.sendPing("W1AW", error));
+    int64_t waiting = station.observer.added.back().id;
+    CHECK(station.protocol.cancelFor(waiting) == TextMessagingProtocol::Cancel::Remove);
+    CHECK(station.protocol.outstandingMessageIds() == std::vector<int64_t>{waiting});
+
+    bool keyed = true;
+    CHECK(station.protocol.cancelMessage(waiting, &keyed) == TextMessagingProtocol::Cancel::Remove);
+    CHECK(!keyed);
+    CHECK(station.observer.lastUpdateFor(waiting)->status == MessageStatus::NotSent);
+    CHECK(station.protocol.pendingCount() == 0);
+    station.completeOneTransmission();
+    CHECK(station.transport.transmissions.empty());
+
+    // On the air.
+    CHECK(station.protocol.sendPing("W1AW", error));
+    int64_t onAir = station.observer.added.back().id;
+    station.nowMs += std::max(MAX_TURNAROUND_MILLISECONDS, MAX_RETRY_BACKOFF_MILLISECONDS) + 1;
+    station.protocol.tick();
+    CHECK(station.transport.transmitting);
+    CHECK(station.protocol.cancelFor(onAir) == TextMessagingProtocol::Cancel::Abort);
+    CHECK(station.protocol.cancelMessage(onAir, &keyed) == TextMessagingProtocol::Cancel::Abort);
+    CHECK(keyed);
+    CHECK(station.observer.lastUpdateFor(onAir)->status == MessageStatus::Aborted);
+    station.transport.transmitting = false;
+
+    // Waiting for the pong, which then arrives and changes nothing.
+    CHECK(station.protocol.sendPing("W1AW", error));
+    int64_t answered = station.observer.added.back().id;
+    station.completeOneTransmission();
+    CHECK(station.observer.lastUpdateFor(answered)->status == MessageStatus::AwaitingAck);
+    CHECK(station.protocol.cancelMessage(answered, &keyed) == TextMessagingProtocol::Cancel::Abort);
+    CHECK(!keyed);
+    far.receiveFrom(station.transport);
+    far.completeOneTransmission();
+    station.receiveFrom(far.transport);
+    CHECK(station.observer.lastUpdateFor(answered)->status == MessageStatus::Aborted);
+    CHECK(station.protocol.pendingCount() == 0);
 }
 
 // A station on a frequency where it may not send data transmits nothing at
@@ -2075,6 +2120,7 @@ int main()
     testAbortDropsEverythingOutstanding();
     testOneMessageCanBeRemovedOrAborted();
     testSentMessagesAreAbortedNotRemoved();
+    testPingsCanBeRemovedOrAborted();
     testInhibitingLeavesSentMessagesToTheirAnswers();
     testFragmentsStillToComeReserveTheChannel();
     testReservationFollowsTheBurstsStillToCome();

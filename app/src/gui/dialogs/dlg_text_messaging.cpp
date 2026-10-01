@@ -237,6 +237,24 @@ DeliveryChip deliveryChip(const TextMessage& message, bool waitingForEngage = fa
     return chip;
 }
 
+// Where a ping of ours has got to, for its line in the chat, while that is
+// not plain from the lines around it: a pong or "no response" follows the
+// rest.
+wxString pingState(const TextMessage& message)
+{
+    if (message.direction != MessageDirection::Sent) return "";
+
+    switch (message.status)
+    {
+        case MessageStatus::Queued: return _("queued");
+        case MessageStatus::Transmitting: return _("on the air");
+        case MessageStatus::AwaitingAck: return _("awaiting PONG");
+        case MessageStatus::NotSent: return _("not sent");
+        case MessageStatus::Aborted: return _("aborted");
+        default: return "";
+    }
+}
+
 wxString statusChip(const TextMessage& message, bool waitingForEngage, bool lit)
 {
     DeliveryChip chip = deliveryChip(message, waitingForEngage, lit);
@@ -684,8 +702,10 @@ void TextMessagingDialog::renderChat(bool keepPlace)
 
         if (message.kind == MessageKind::System)
         {
+            wxString state = pingState(message);
+            if (!state.empty()) state = " &middot; " + state;
             html += "<table width=\"100%\"><tr><td align=\"center\"><font size=\"-2\" color=\"" +
-                    colors.subdued + "\">" + escapeHtml(message.text) + " &middot; " +
+                    colors.subdued + "\">" + escapeHtml(message.text) + state + " &middot; " +
                     formatTime(message.timestamp) + "</font></td></tr></table>";
             continue;
         }
@@ -1185,7 +1205,8 @@ void TextMessagingDialog::OnChatContextMenu(wxContextMenuEvent& event)
     if (index >= 0)
     {
         const TextMessage& message = m_messages[(size_t)index];
-        if (message.direction == MessageDirection::Sent && message.kind == MessageKind::Chat)
+        // Our own messages and pings; the protocol says which can be stopped.
+        if (message.direction == MessageDirection::Sent)
         {
             cancel = TextMessagingSession::instance().protocol().cancelFor(message.id);
             if (cancel != TextMessagingProtocol::Cancel::None) m_menuMessageId = message.id;
@@ -1212,12 +1233,16 @@ void TextMessagingDialog::OnMenuCancelMessage(wxCommandEvent&)
 {
     if (m_menuMessageId == 0) return;
 
+    bool ping = std::any_of(m_messages.begin(), m_messages.end(), [this](const TextMessage& message)
+                            { return message.id == m_menuMessageId && message.kind == MessageKind::System; });
+
     bool onAir = false;
     auto done = TextMessagingSession::instance().protocol().cancelMessage(m_menuMessageId, &onAir);
     if (done == TextMessagingProtocol::Cancel::None)
     {
         // Delivered, or given up on, while the menu was open.
-        setStatus(_("That message is no longer waiting to be sent."));
+        setStatus(ping ? _("That ping is no longer waiting to be answered.")
+                       : _("That message is no longer waiting to be sent."));
         return;
     }
 
@@ -1227,8 +1252,14 @@ void TextMessagingDialog::OnMenuCancelMessage(wxCommandEvent&)
     MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
     if (onAir && frame != nullptr) frame->chatStopKeying();
 
-    setStatus(done == TextMessagingProtocol::Cancel::Remove ? _("Message removed from the queue.")
-                                                            : _("Message aborted."));
+    if (done == TextMessagingProtocol::Cancel::Remove)
+    {
+        setStatus(ping ? _("Ping removed from the queue.") : _("Message removed from the queue."));
+    }
+    else
+    {
+        setStatus(ping ? _("Ping aborted.") : _("Message aborted."));
+    }
     if (uiLogEnabled())
     {
         log_info("UI: message id=%d %s%s", (int)m_menuMessageId,

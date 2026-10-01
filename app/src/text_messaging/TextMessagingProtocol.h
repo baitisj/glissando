@@ -179,11 +179,12 @@ public:
     // and engaging will not send it.
     bool isMessageQueued(int64_t messageId) const;
 
-    // What the operator can do with a chat message of ours that is still
-    // outstanding. One waiting for its first turn on the air can be removed
-    // from the queue, and is then never sent. One on the air, waiting for
-    // its acknowledgement or waiting to be retried can be aborted. None for
-    // anything else: delivered, failed, already stopped, or not ours.
+    // What the operator can do with a chat message or ping of ours that is
+    // still outstanding. One waiting for its first turn on the air can be
+    // removed from the queue, and is then never sent. One on the air,
+    // waiting for its acknowledgement or pong, or waiting to be retried can
+    // be aborted. None for anything else: delivered, failed, already
+    // stopped, or not ours.
     enum class Cancel
     {
         None,
@@ -198,7 +199,7 @@ public:
     // which this cannot do. Whatever else was queued carries on.
     Cancel cancelMessage(int64_t messageId, bool* onAirOut = nullptr);
 
-    // The chat messages still outstanding, by message store id.
+    // The chat messages and pings still outstanding, by message store id.
     std::vector<int64_t> outstandingMessageIds() const;
 
 private:
