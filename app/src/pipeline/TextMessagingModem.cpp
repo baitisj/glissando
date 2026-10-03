@@ -315,10 +315,9 @@ bool TextMessagingModem::modulate(const std::vector<OutgoingBurst>& bursts,
         int cwWpm = Glissando::CW_DEFAULT_WPM;
         {
             std::lock_guard<std::mutex> lock(glissandoMutex_);
-            // A reply goes back in the tempo its station was heard in, which
-            // is the tempo that station waits for it in; see AnswerTempo.h.
-            int answerGear = stationGears_.answerTempo(bursts, steadyMs());
-            settings.gear = answerGear != 0 ? answerGear : transmitGearLocked();
+            // Replies too go in our own tempo, the one chosen for this
+            // station's power and path, not the asker's; see AnswerTempo.h.
+            settings.gear = transmitGearLocked();
             settings.scale = glissando_.scale;
             settings.tuningOffsetHz = glissando_.tuningOffsetHz;
             chords = glissando_.chords;
@@ -697,13 +696,13 @@ AirTiming TextMessagingModem::airTiming() const
         chords = glissando_.chords;
         closingSeconds = closingSecondsLocked(gear, steadyMs());
 
-        // An answer comes back in the tempo we asked in, since a station
-        // answers in the tempo it heard the asker in (see AnswerTempo.h).
-        // A station on an older build answers in its own tempo instead, so
-        // the waits also cover every tempo heard lately. They used to cover
-        // every tempo the receiver listens for, Adagio included, and at
-        // Presto an unanswered ping held the queue for 111 s and gave up
-        // after 120 s.
+        // An answer comes back in whatever tempo its station sends at (see
+        // AnswerTempo.h), so the waits cover our own tempo and every tempo
+        // heard lately. They used to cover every tempo the receiver listens
+        // for, Adagio included, and at Presto an unanswered ping held the
+        // queue for 111 s and gave up after 120 s. A station not heard
+        // lately that answers slower than that is covered by its opening
+        // chord: hearing it freezes the timers until its keying ends.
         std::vector<int> answering = stationGears_.recentTempos(steadyMs());
         answering.push_back(gear);
         for (int g : answering)

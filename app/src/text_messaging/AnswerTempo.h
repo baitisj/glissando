@@ -1,15 +1,15 @@
 //=========================================================================
 // Name:            AnswerTempo.h
 // Purpose:         Remembers the tempo each station was last heard in, so
-//                  a reply goes back in the tempo it was asked in and the
-//                  waits for an answer need only cover tempos in use.
+//                  the waits for an answer need only cover tempos in use.
 //
-// Written for Glissando. Before this a station answered in whatever tempo
-// it sent at, so a station waiting on an answer had to allow for the
-// slowest tempo it listens for: at Presto an unanswered ping held the
-// queue for 111 s and gave up after 120 s, for an answer that at Presto
-// would have been heard within 30 s. Answering in the asker's tempo makes
-// the wait the asker's own, and the path has just shown it carries it.
+// Written for Glissando. Every station answers in the tempo it has chosen
+// to send at: a QRP station on a slow tempo is heard where it would not be
+// at a fast station's tempo (Jeff, 2026-10-03). So an answer can come back
+// in any tempo its station sends at. The waits used to allow for the
+// slowest tempo the receiver listens for, and at Presto an unanswered ping
+// held the queue for 111 s and gave up after 120 s; now they allow for the
+// tempos actually heard lately.
 //=========================================================================
 
 #ifndef TEXT_MESSAGING__ANSWER_TEMPO_H
@@ -34,13 +34,6 @@ public:
     explicit StationTempos(uint64_t lifetimeMs) : lifetimeMs_(lifetimeMs) {}
 
     void heard(const std::string& callsign, int tempo, uint64_t nowMs);
-
-    // The tempo a keying should go out in if it opens with a reply (an
-    // acknowledgement, partial acknowledgement or pong): the one its
-    // station was last heard in. Anything riding behind the reply goes in
-    // the same keying and so the same tempo. Zero for a keying that opens
-    // with anything else, or a reply to a station not heard lately.
-    int answerTempo(const std::vector<OutgoingBurst>& keying, uint64_t nowMs) const;
 
     // Every tempo heard from anybody lately, each once.
     std::vector<int> recentTempos(uint64_t nowMs) const;
