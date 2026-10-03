@@ -241,8 +241,12 @@ right click offers `Clear Messages`, which keeps only messages still being
 sent, and, on a message or ping of yours still outstanding, `Remove from
 Queue` if it has not been on the air yet or `Abort` once it has (on the air
 now, waiting for its acknowledgement or pong, or waiting to be retried).
-Either way the rest of the queue carries on. A ping's line says where it has
-got to: queued, on the air, awaiting PONG, not sent or aborted.
+Either way the rest of the queue carries on. `Re-send`, on any message of
+yours that has left the queue (delivered, unacknowledged, aborted, not sent
+or still going), queues the same text again to the same station, or as a
+broadcast if it was one, as a new message at the back of the queue. A ping's
+line says where it has got to: queued, on the air, awaiting PONG, not sent
+or aborted.
 
 The right-click menu also offers `Woah!`, for when you can hear somebody the
 receiver has missed. Nothing keys, acknowledgements and pongs included, until

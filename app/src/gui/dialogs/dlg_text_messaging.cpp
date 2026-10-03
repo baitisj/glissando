@@ -91,6 +91,7 @@ enum
     ID_MENU_ABORT_MESSAGE,
     ID_MENU_CLEAR_MESSAGES,
     ID_MENU_WOAH,
+    ID_MENU_RESEND,
     ID_MENU_TEMPO,     // back to the tempo the console picks
     ID_MENU_TEMPO_LAST = ID_MENU_TEMPO + Glissando::MAX_GEAR, // ID_MENU_TEMPO + each gear
     ID_PING,
@@ -322,6 +323,7 @@ TextMessagingDialog::TextMessagingDialog(wxWindow* parent, wxWindowID id, const 
     Connect(ID_MENU_CLEAR_MESSAGES, wxEVT_COMMAND_MENU_SELECTED,
             wxCommandEventHandler(TextMessagingDialog::OnMenuClearMessages));
     Connect(ID_MENU_WOAH, wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TextMessagingDialog::OnMenuWoah));
+    Connect(ID_MENU_RESEND, wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TextMessagingDialog::OnMenuResend));
     Connect(ID_MENU_TEMPO, ID_MENU_TEMPO_LAST, wxEVT_COMMAND_MENU_SELECTED,
             wxCommandEventHandler(TextMessagingDialog::OnMenuTempo));
     Connect(ID_AUTO_REPLY, wxEVT_TOGGLEBUTTON,
@@ -1013,22 +1015,39 @@ void TextMessagingDialog::addStation()
 
 void TextMessagingDialog::send(const std::string& destination)
 {
-    std::string text = m_txtEntry->GetValue().ToStdString();
-    std::string error;
+    if (queueText(m_txtEntry->GetValue().ToStdString(), destination)) m_txtEntry->Clear();
+}
 
-    if (TextMessagingSession::instance().protocol().sendMessage(text, destination, error))
-    {
-        m_txtEntry->Clear();
-        setStatus(destination.empty()
-                      ? _("Broadcast queued.")
-                      : wxString::Format(_("Message to %s queued."),
-                                         wxString::FromUTF8(destination)),
-                  StatusKind::Queued);
-    }
-    else
+// Queues a message and says so, or why not.
+bool TextMessagingDialog::queueText(const std::string& text, const std::string& destination)
+{
+    std::string error;
+    if (!TextMessagingSession::instance().protocol().sendMessage(text, destination, error))
     {
         setStatus(wxString::FromUTF8(error));
+        return false;
     }
+
+    setStatus(destination.empty()
+                  ? _("Broadcast queued.")
+                  : wxString::Format(_("Message to %s queued."), wxString::FromUTF8(destination)),
+              StatusKind::Queued);
+    return true;
+}
+
+// The same text to the same station, or to everybody, as a new message at
+// the back of the queue.
+void TextMessagingDialog::OnMenuResend(wxCommandEvent&)
+{
+    if (m_menuResend.id == 0) return;
+
+    std::string destination = m_menuResend.broadcast ? std::string() : m_menuResend.destCallsign;
+    bool queued = queueText(m_menuResend.text, destination);
+    if (uiLogEnabled())
+    {
+        log_info("UI: message id=%d re-sent%s", (int)m_menuResend.id, queued ? "" : ", refused");
+    }
+    updateTransmitControls();
 }
 
 void TextMessagingDialog::OnSend(wxCommandEvent&)
@@ -1247,6 +1266,7 @@ void TextMessagingDialog::OnChatContextMenu(wxContextMenuEvent& event)
                     : messageAt(m_chatWindow->ScreenToClient(screen));
 
     m_menuMessageId = 0;
+    m_menuResend = TextMessage();
     TextMessagingProtocol::Cancel cancel = TextMessagingProtocol::Cancel::None;
     if (index >= 0)
     {
@@ -1256,6 +1276,13 @@ void TextMessagingDialog::OnChatContextMenu(wxContextMenuEvent& event)
         {
             cancel = TextMessagingSession::instance().protocol().cancelFor(message.id);
             if (cancel != TextMessagingProtocol::Cancel::None) m_menuMessageId = message.id;
+
+            // Any chat message of ours that has left the queue can go again,
+            // however it got on: delivered, given up on, or still going.
+            if (message.kind == MessageKind::Chat && cancel != TextMessagingProtocol::Cancel::Remove)
+            {
+                m_menuResend = message;
+            }
         }
     }
 
@@ -1289,8 +1316,9 @@ void TextMessagingDialog::OnChatContextMenu(wxContextMenuEvent& event)
     else if (cancel == TextMessagingProtocol::Cancel::Abort)
     {
         menu.Append(ID_MENU_ABORT_MESSAGE, _("Abort"));
-        menu.AppendSeparator();
     }
+    if (m_menuResend.id != 0) menu.Append(ID_MENU_RESEND, _("Re-send"));
+    if (cancel == TextMessagingProtocol::Cancel::Abort || m_menuResend.id != 0) menu.AppendSeparator();
     menu.Append(ID_MENU_CLEAR_MESSAGES, _("Clear Messages"))->Enable(!m_messages.empty());
 
     PopupMenu(&menu);
