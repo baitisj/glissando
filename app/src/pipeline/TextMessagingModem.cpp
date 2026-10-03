@@ -343,6 +343,10 @@ bool TextMessagingModem::modulate(const std::vector<OutgoingBurst>& bursts,
         {
             linkBursts.push_back({burst.mode == BurstMode::Text, burst.frame});
         }
+        {
+            std::lock_guard<std::mutex> lock(glissandoMutex_);
+            noteKeyingLocked(bursts, steadyMs());
+        }
         std::vector<Glissando::Payload> payloads = Glissando::segmentBursts(linkBursts, gear.voices);
 
         // The keying opens with E4 and D5 for 0.6 s at every tempo and in
@@ -824,6 +828,58 @@ double TextMessagingModem::closingSecondsLocked(int gear, uint64_t nowMs) const
 {
     if (cwTailDueLocked(nowMs)) return Glissando::cwTailSeconds(glissando_.cwText, glissando_.cwWpm);
     return glissando_.tail == GlissandoConfig::Tail::Off ? 0.0 : Glissando::chordSeconds(gear);
+}
+
+// A station we sent to in the last quarter hour is one we expect to hear
+// from; the few most recent are worth a guess each.
+static constexpr uint64_t WORKING_MILLISECONDS = 15 * 60 * 1000;
+static constexpr size_t WORKING_GUESSES = 3;
+
+std::vector<Glissando::KnownBits> TextMessagingModem::expectedFrames(const std::string& ownCallsign,
+                                                                     const std::vector<std::string>& workingWith)
+{
+    std::vector<Glissando::KnownBits> known;
+    if (FrameCodec::normalizeCallsign(ownCallsign).empty()) return known;
+
+    uint8_t bytes[FrameCodec::EXPECTED_START_BYTES];
+    uint8_t masks[FrameCodec::EXPECTED_START_BYTES];
+    for (const std::string& station : workingWith)
+    {
+        if (FrameCodec::normalizeCallsign(station).empty()) continue;
+        FrameCodec::expectedFrameStart(ownCallsign, station, bytes, masks);
+        known.push_back(Glissando::firstSegmentKnownBits(bytes, masks, FrameCodec::EXPECTED_START_BYTES));
+    }
+    FrameCodec::expectedFrameStart(ownCallsign, std::string(), bytes, masks);
+    known.push_back(Glissando::firstSegmentKnownBits(bytes, masks, FrameCodec::EXPECTED_START_BYTES));
+    return known;
+}
+
+void TextMessagingModem::noteKeyingLocked(const std::vector<OutgoingBurst>& bursts, uint64_t nowMs)
+{
+    for (const OutgoingBurst& burst : bursts)
+    {
+        Frame frame;
+        if (FrameCodec::decode(burst.frame.data(), (int)burst.frame.size(), frame))
+            ownCallsign_ = frame.originCallsign;
+        std::string station = FrameCodec::normalizeCallsign(burst.destination);
+        if (!station.empty()) working_[station] = nowMs;
+    }
+
+    std::vector<std::pair<uint64_t, std::string>> recent;
+    for (auto it = working_.begin(); it != working_.end();)
+    {
+        if (nowMs - it->second > WORKING_MILLISECONDS)
+        {
+            it = working_.erase(it);
+            continue;
+        }
+        recent.push_back({it->second, it->first});
+        ++it;
+    }
+    std::sort(recent.begin(), recent.end(), std::greater<std::pair<uint64_t, std::string>>());
+    std::vector<std::string> workingWith;
+    for (size_t i = 0; i < recent.size() && i < WORKING_GUESSES; i++) workingWith.push_back(recent[i].second);
+    glissandoRx_->setKnownBits(expectedFrames(ownCallsign_, workingWith));
 }
 
 std::string TextMessagingModem::cwTailText(const std::string& format, const std::string& callsign)

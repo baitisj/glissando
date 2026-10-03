@@ -348,4 +348,32 @@ bool FrameCodec::decode(const uint8_t* data, int length, Frame& frameOut)
     return true;
 }
 
+void FrameCodec::expectedFrameStart(const std::string& ownCallsign, const std::string& fromCallsign,
+                                    uint8_t* bytesOut, uint8_t* masksOut)
+{
+    static_assert(EXPECTED_START_BYTES == OFFSET_AIR_ID, "the expected start runs up to the message ID");
+    std::memset(bytesOut, 0, EXPECTED_START_BYTES);
+    std::memset(masksOut, 0, EXPECTED_START_BYTES);
+
+    // Type byte: the bits no frame type uses are zero. The more-follows bit
+    // is anybody's guess.
+    const FrameType types[] = {FrameType::Ping, FrameType::PingAck, FrameType::Message,
+                               FrameType::MessageAck, FrameType::Broadcast, FrameType::MessagePartialAck};
+    uint8_t used = TYPE_MORE_FOLLOWS;
+    for (FrameType type : types) used |= (uint8_t)type;
+    masksOut[OFFSET_TYPE] = (uint8_t)~used;
+
+    uint32_t crc = callsignCrc24(ownCallsign);
+    bytesOut[OFFSET_DEST_CRC] = (uint8_t)(crc >> 16);
+    bytesOut[OFFSET_DEST_CRC + 1] = (uint8_t)(crc >> 8);
+    bytesOut[OFFSET_DEST_CRC + 2] = (uint8_t)crc;
+    std::memset(&masksOut[OFFSET_DEST_CRC], 0xFF, 3);
+
+    if (!normalizeCallsign(fromCallsign).empty())
+    {
+        packCallsign(fromCallsign, &bytesOut[OFFSET_ORIGIN_CALLSIGN]);
+        std::memset(&masksOut[OFFSET_ORIGIN_CALLSIGN], 0xFF, PACKED_CALLSIGN_BYTES);
+    }
+}
+
 } // namespace TextMessaging

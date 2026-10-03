@@ -50,6 +50,14 @@ std::vector<Payload> segmentBursts(const std::vector<LinkBurst>& bursts, int voi
 // Number of Glissando frames segmentBursts() would produce.
 int framesForBursts(const std::vector<LinkBurst>& bursts, int voices);
 
+// The bits a receiver can count on in the first segment of a burst that
+// runs to more than one segment, given what it expects of the burst's first
+// bytes: bits set in masks[i] are known to equal those bits of bytes[i]
+// (count at most SEGMENT_DATA_BYTES). The segment index (0) and last flag
+// (clear) are known too; the burst mode is not. For
+// StreamingReceiver::setKnownBits().
+KnownBits firstSegmentKnownBits(const uint8_t* bytes, const uint8_t* masks, int count);
+
 // What Reassembler::add() made of one payload, for showing reception as it
 // happens rather than only when a burst completes.
 struct SegmentProgress

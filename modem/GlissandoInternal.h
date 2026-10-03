@@ -120,14 +120,18 @@ struct VoiceDecode
 // then for each of the best `candidates` sync peaks: refine, soft
 // demodulation, Viterbi and CRC, and channel sounding once a CRC passes.
 VoiceDecode receiveVoice(const ComplexSignal& z, const GearInfo& gear, const VoiceTemplates& voice,
-                         long long searchFrom, long long searchTo, double maxOffsetHz, int candidates);
+                         long long searchFrom, long long searchTo, double maxOffsetHz, int candidates,
+                         const std::vector<KnownBits>& knownBits = std::vector<KnownBits>());
 
 // The same, listening for several scales at once: `voices` holds the
 // templates of one voice in each scale (same gear and voice). The best
 // `candidates` sync peaks are taken from all of them together, so this
-// decodes no more candidates than a one-scale search.
+// decodes no more candidates than a one-scale search. knownBits are the
+// receiver's guesses (ModemSettings::knownBits), tried after the zero
+// padding guesses.
 VoiceDecode receiveVoice(const ComplexSignal& z, const GearInfo& gear, const std::vector<const VoiceTemplates*>& voices,
-                         long long searchFrom, long long searchTo, double maxOffsetHz, int candidates);
+                         long long searchFrom, long long searchTo, double maxOffsetHz, int candidates,
+                         const std::vector<KnownBits>& knownBits = std::vector<KnownBits>());
 
 } // namespace detail
 } // namespace Glissando

@@ -1036,14 +1036,16 @@ static bool allZero(const Payload& payload)
 }
 
 VoiceDecode receiveVoice(const ComplexSignal& z, const GearInfo& gear, const VoiceTemplates& voice,
-                         long long searchFrom, long long searchTo, double maxOffsetHz, int candidates)
+                         long long searchFrom, long long searchTo, double maxOffsetHz, int candidates,
+                         const std::vector<KnownBits>& knownBits)
 {
     return receiveVoice(z, gear, std::vector<const VoiceTemplates*>{&voice}, searchFrom, searchTo, maxOffsetHz,
-                        candidates);
+                        candidates, knownBits);
 }
 
 VoiceDecode receiveVoice(const ComplexSignal& z, const GearInfo& gear, const std::vector<const VoiceTemplates*>& voices,
-                         long long searchFrom, long long searchTo, double maxOffsetHz, int candidates)
+                         long long searchFrom, long long searchTo, double maxOffsetHz, int candidates,
+                         const std::vector<KnownBits>& knownBits)
 {
     VoiceDecode result;
     std::unique_ptr<Correlations> corr(new Correlations);
@@ -1073,6 +1075,11 @@ VoiceDecode receiveVoice(const ComplexSignal& z, const GearInfo& gear, const std
             {
                 if (ok) break;
                 ok = decodeFrame(llrs, payload, knownZeroBits) && !allZero(payload);
+            }
+            for (const KnownBits& known : knownBits)
+            {
+                if (ok) break;
+                ok = decodeFrame(llrs, payload, known) && !allZero(payload);
             }
         }
 

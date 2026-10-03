@@ -80,6 +80,11 @@ double signalWidthHz(Scale scale, int gear);
 // 77 bits, one per element (0 or 1), first bit first as in the prototype.
 using Payload = std::array<uint8_t, PAYLOAD_BITS>;
 
+// What a receiver expects some of a frame's payload bits to be: 0 or 1 where
+// it knows, -1 where it does not. See ModemSettings::knownBits.
+using KnownBits = std::array<int8_t, PAYLOAD_BITS>;
+KnownBits noKnownBits();
+
 struct ModemSettings
 {
     int gear = 3;
@@ -94,6 +99,14 @@ struct ModemSettings
     // Added to every note, in Hz, on transmit and on receive: the audio
     // equivalent of moving the tuning dial.
     double tuningOffsetHz = 0.0;
+
+    // Receive only: payloads the receiver has reason to expect, such as the
+    // start of a reply from the station it is working (FT8 decoders call
+    // this a priori decoding). A frame that fails to decode is tried again
+    // on each guess in turn, with the decoder holding the known bits fixed;
+    // a right guess needs less signal, a wrong one fails the CRC. Each
+    // guess is another chance for noise to pass the CRC, so keep them few.
+    std::vector<KnownBits> knownBits;
 };
 
 // One transmission: gearInfo(gear).voices payloads (one per voice), peak

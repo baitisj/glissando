@@ -91,6 +91,24 @@ std::vector<Payload> segmentBursts(const std::vector<LinkBurst>& bursts, int voi
     return payloads;
 }
 
+KnownBits firstSegmentKnownBits(const uint8_t* bytes, const uint8_t* masks, int count)
+{
+    KnownBits known = noKnownBits();
+    // Header: mode (unknown), index 0 in three bits, last segment clear.
+    for (int bit = 1; bit < SEGMENT_HEADER_BITS; bit++) known[(size_t)bit] = 0;
+    count = std::min(std::max(count, 0), SEGMENT_DATA_BYTES);
+    for (int i = 0; i < count; i++)
+    {
+        for (int bit = 0; bit < 8; bit++)
+        {
+            uint8_t weight = (uint8_t)(0x80 >> bit);
+            if (masks[i] & weight)
+                known[(size_t)(SEGMENT_HEADER_BITS + 8 * i + bit)] = (bytes[i] & weight) ? 1 : 0;
+        }
+    }
+    return known;
+}
+
 int framesForBursts(const std::vector<LinkBurst>& bursts, int voices)
 {
     int segments = 0;

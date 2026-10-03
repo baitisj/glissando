@@ -47,6 +47,11 @@ public:
     // audio is kept.
     void configure(const std::vector<int>& gears, Scale scale, double tuningOffsetHz, bool anyScale = false);
 
+    // Payloads worth guessing at when a frame fails to decode
+    // (ModemSettings::knownBits). Takes effect at the next search; safe from
+    // any thread.
+    void setKnownBits(const std::vector<KnownBits>& knownBits);
+
     // Called on the worker thread for every CRC-valid frame.
     void setDecodeCallback(DecodeCallback callback);
 

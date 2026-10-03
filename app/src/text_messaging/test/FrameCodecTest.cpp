@@ -345,9 +345,69 @@ void testDecodeRejections()
 
 } // namespace
 
+// Every frame type W1AW can send VK3ABC/P starts with what VK3ABC/P expects
+// of a frame from W1AW; a frame from anyone else, or to anyone else, does
+// not.
+void testExpectedFrameStart()
+{
+    const int n = FrameCodec::EXPECTED_START_BYTES;
+    uint8_t fromW1aw[n], fromW1awMask[n], anybody[n], anybodyMask[n];
+    FrameCodec::expectedFrameStart("vk3abc/p", "W1AW", fromW1aw, fromW1awMask);
+    FrameCodec::expectedFrameStart("VK3ABC/P", "", anybody, anybodyMask);
+
+    auto matches = [n](const std::vector<uint8_t>& frame, const uint8_t* bytes, const uint8_t* masks) {
+        for (int i = 0; i < n; i++)
+            if ((frame[(size_t)i] ^ bytes[i]) & masks[i]) return false;
+        return true;
+    };
+
+    const FrameType types[] = {FrameType::Ping, FrameType::PingAck, FrameType::Message,
+                               FrameType::MessageAck, FrameType::Broadcast, FrameType::MessagePartialAck};
+    for (FrameType type : types)
+    {
+        for (uint8_t following : {0, 1, 3})
+        {
+            Frame frame;
+            frame.type = type;
+            frame.destinationCrc = FrameCodec::callsignCrc24("VK3ABC/P");
+            frame.originCallsign = "W1AW";
+            frame.airId = 0x1234;
+            frame.fragmentIndex = 0;
+            frame.fragmentCount = 1;
+            frame.burstsFollowing = following;
+            const bool signalling = FrameCodec::isSignallingFrameType(type);
+            frame.payload = signalling ? std::vector<uint8_t>{1} : std::vector<uint8_t>{1, 2, 3};
+            std::vector<uint8_t> encoded =
+                FrameCodec::encode(frame, signalling ? SIGNALLING_FRAME_BYTES : TEXT_FRAME_BYTES);
+            CHECK(!encoded.empty());
+            if (encoded.empty()) continue;
+            CHECK(matches(encoded, fromW1aw, fromW1awMask));
+            CHECK(matches(encoded, anybody, anybodyMask));
+
+            frame.originCallsign = "W1AX";
+            encoded = FrameCodec::encode(frame, signalling ? SIGNALLING_FRAME_BYTES : TEXT_FRAME_BYTES);
+            CHECK(!matches(encoded, fromW1aw, fromW1awMask));
+            CHECK(matches(encoded, anybody, anybodyMask));
+
+            frame.destinationCrc = FrameCodec::callsignCrc24("VK3ABD");
+            encoded = FrameCodec::encode(frame, signalling ? SIGNALLING_FRAME_BYTES : TEXT_FRAME_BYTES);
+            CHECK(!matches(encoded, anybody, anybodyMask));
+        }
+    }
+
+    // Everything but the type byte's used bits is known with a sender, and
+    // the callsign is not known without one.
+    int knownBits = 0;
+    for (int i = 0; i < n; i++)
+        for (int bit = 0; bit < 8; bit++) knownBits += (fromW1awMask[i] >> bit) & 1;
+    CHECK(knownBits == 9 * 8 + 3);
+    for (int i = 4; i < n; i++) CHECK(anybodyMask[i] == 0);
+}
+
 int main()
 {
     testCallsignEncoding();
+    testExpectedFrameStart();
     testRoundTrip();
     testBurstsFollowing();
     testPartialAcknowledgement();
