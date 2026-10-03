@@ -163,6 +163,7 @@ private:
     void OnChatContextMenu(wxContextMenuEvent& event);
     void OnMenuCancelMessage(wxCommandEvent& event);
     void OnMenuWoah(wxCommandEvent& event);
+    void OnMenuTempo(wxCommandEvent& event);
     void OnMenuClearMessages(wxCommandEvent& event);
     void OnAddStationText(wxCommandEvent& event);
     void OnAddStation(wxCommandEvent& event);
@@ -203,6 +204,8 @@ private:
         int64_t remainingMs = 0;
         bool channelBusy = false; // held still, and dimmed
         int fillPixels = -1;      // as last drawn
+        int gear = 0;             // the tempo it will key at; 0 if not Glissando
+        bool tempoChosen = false; // the operator moved it to that tempo
     };
     std::map<int64_t, QueueBar> m_queueBars;
     std::vector<wxString> m_queueBarImages;     // on the page now

@@ -305,6 +305,7 @@ struct QueuedWait
     int64_t messageId = 0;
     int64_t waitMs = 0;       // from now until it should key; zero if due
     bool channelBusy = false; // somebody else has the channel: nothing counts down
+    int gear = 0;             // the tempo the operator chose for it; 0 for the one set now
 };
 
 enum class MessageDirection
@@ -377,6 +378,7 @@ struct OutgoingBurst
 {
     BurstMode mode = BurstMode::Text;
     std::vector<uint8_t> frame;
+    int gear = 0; // the Glissando tempo the operator chose for it; 0 for the one set now
 };
 
 // A station we have decoded something from, shown in the heard stations list.

@@ -1097,6 +1097,12 @@ double MainFrame::chatMessageAirSeconds(size_t textBytes)
     return textMessagingModem().glissandoMessageSeconds(textBytes);
 }
 
+int MainFrame::chatTransmitGear()
+{
+    if (data2gChatActive_.load() || !textMessagingModem().glissandoConfig().enabled) return 0;
+    return textMessagingModem().glissandoStatus().transmitGear;
+}
+
 int MainFrame::chatTimeOutSeconds()
 {
     // With the app's timer off, the rig's own is still likely there, and

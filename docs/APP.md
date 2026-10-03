@@ -256,7 +256,14 @@ TextMessagingProtocol). It is an estimate and errs long, so it can jump ahead
 when an answer arrives early, and it fills again if a new hold lengthens the
 wait. While somebody else has the channel the bar stops and dims, since
 nobody can say when that keying ends. With the console disengaged the chip
-reads ENGAGE TO SEND instead.
+reads ENGAGE TO SEND instead. On Glissando the chip also names the tempo the
+message will key at, QUEUED · PRESTO for example, which follows the console
+and Auto shift until you choose one for it. Right-click it and pick from
+`Change Tempo to...` to send just that message at another tempo, say a slow
+one for a station that is hard to hear, or pick `Console's Tempo` to let it
+follow the console again. Its retries keep the tempo it went out at. A
+message at a tempo of its own keys by itself, never riding behind an
+acknowledgement, and nothing queued behind it rides there instead.
 
 A chat keying runs the same time-out timer as voice. When one would outlast
 it, the transport sends it as several keyings, each at least 20 s short of the

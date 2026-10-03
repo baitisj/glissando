@@ -1130,7 +1130,12 @@ uint64_t TextMessagingProtocol::airTimeLocked(const PendingTransmission& pending
     {
         if ((pending.confirmed & (1u << index)) == 0) bursts++;
     }
-    return bursts * (uint64_t)timing_.textFragmentAirMs;
+    uint64_t airMs = bursts * (uint64_t)timing_.textFragmentAirMs;
+    if (pending.gear != 0 && transport_ != nullptr)
+    {
+        airMs = (uint64_t)std::llround((double)airMs * transport_->airTimeScale(pending.gear));
+    }
+    return airMs;
 }
 
 std::vector<QueuedWait> TextMessagingProtocol::queuedWaits() const
@@ -1174,6 +1179,7 @@ std::vector<QueuedWait> TextMessagingProtocol::queuedWaits() const
             wait.messageId = pending.message.id;
             wait.waitMs = (int64_t)(start - nowMs);
             wait.channelBusy = channelBusy_;
+            wait.gear = pending.gear;
             waits.push_back(wait);
         }
 
@@ -1182,6 +1188,21 @@ std::vector<QueuedWait> TextMessagingProtocol::queuedWaits() const
     }
 
     return waits;
+}
+
+bool TextMessagingProtocol::setMessageTempo(int64_t messageId, int gear)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (PendingTransmission& pending : outbox_)
+    {
+        if (pending.message.id != messageId) continue;
+        if (pending.isPing || pending.message.kind != MessageKind::Chat) return false;
+        if (cancelForLocked(pending) != Cancel::Remove) return false;
+
+        pending.gear = gear;
+        return true;
+    }
+    return false;
 }
 
 // When the transmitter may next be used. Beyond the plain turnaround, a
@@ -1490,6 +1511,9 @@ TextMessagingProtocol::PendingTransmission* TextMessagingProtocol::riderLocked(s
         PendingTransmission& candidate = outbox_[i];
         if (candidate.reply || candidate.state != TransmissionState::Queued) continue;
         if (nowMs < candidate.notBeforeMs) continue;
+        // A keying has one tempo, the reply's, so a message moved to a
+        // tempo of its own keys on its own, and nothing jumps ahead of it.
+        if (candidate.gear != 0) return nullptr;
 
         return &candidate;
     }
@@ -1504,8 +1528,10 @@ std::vector<OutgoingBurst> TextMessagingProtocol::keyingBurstsLocked(
     const std::vector<const PendingTransmission*>& entries) const
 {
     std::vector<std::pair<BurstMode, const Frame*>> order;
+    int gear = 0;
     for (const PendingTransmission* entry : entries)
     {
+        if (gear == 0) gear = entry->gear;
         for (size_t index = 0; index < entry->frames.size(); index++)
         {
             if ((entry->confirmed & (1u << index)) != 0) continue;
@@ -1527,7 +1553,7 @@ std::vector<OutgoingBurst> TextMessagingProtocol::keyingBurstsLocked(
             frame, mode == BurstMode::Signalling ? SIGNALLING_FRAME_BYTES : TEXT_FRAME_BYTES);
         if (encoded.empty()) return {};
 
-        keying.push_back({mode, encoded});
+        keying.push_back({mode, encoded, gear});
     }
 
     return keying;

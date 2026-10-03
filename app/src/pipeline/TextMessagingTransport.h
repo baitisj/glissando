@@ -77,6 +77,7 @@ public:
     virtual bool transmit(const std::vector<TextMessaging::OutgoingBurst>& bursts) override;
     virtual bool isTransmitting() const override;
     virtual bool isChannelBusy() const override;
+    virtual double airTimeScale(int gear) const override;
     virtual void poll() override;
 
     // Drops anything queued and unkeys. Used when audio stops.

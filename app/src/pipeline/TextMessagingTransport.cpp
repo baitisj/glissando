@@ -251,6 +251,11 @@ bool TextMessagingTransport::isChannelBusy() const
     return modem_ != nullptr && modem_->isReceiving();
 }
 
+double TextMessagingTransport::airTimeScale(int gear) const
+{
+    return modem_ != nullptr ? modem_->airTimeScale(gear) : 1.0;
+}
+
 void TextMessagingTransport::poll()
 {
     // The protocol freezes on the channel being busy but has no logging of its

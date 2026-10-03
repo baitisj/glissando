@@ -344,6 +344,10 @@ public:
     // is not known (codec2 modes, or Data2G carrying chat).
     double chatMessageAirSeconds(size_t textBytes);
 
+    // The Glissando tempo a chat keying would go out at now, from the
+    // console or Auto shift; 0 when chat goes over codec2 or Data2G.
+    int chatTransmitGear();
+
     // The keying length past which the time-out timer cuts in: the app's,
     // or 180 s, the usual setting on a rig, when the app's is off.
     int chatTimeOutSeconds();

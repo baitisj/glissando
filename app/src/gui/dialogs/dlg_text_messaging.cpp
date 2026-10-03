@@ -53,6 +53,7 @@
 #include "main.h"
 #include "gui/glissando/ChaoticaControls.h"
 #include "gui/glissando/ChaoticaTheme.h"
+#include "gui/glissando/GlissandoConsole.h"
 #include "text_messaging/DeliveryChip.h"
 #include "text_messaging/FrameCodec.h"
 #include "text_messaging/HeardStationList.h"
@@ -72,7 +73,7 @@ constexpr int REFRESH_INTERVAL_MS = 1000;
 constexpr int BLINK_INTERVAL_MS = 125;
 
 // The countdown bar on a queued message's chip, in pixels before scaling.
-constexpr int QUEUE_BAR_WIDTH = 96;
+constexpr int QUEUE_BAR_WIDTH = 112;
 
 // A press and release on the chat log further apart than this is a drag to
 // select text, not a click on a message.
@@ -90,6 +91,8 @@ enum
     ID_MENU_ABORT_MESSAGE,
     ID_MENU_CLEAR_MESSAGES,
     ID_MENU_WOAH,
+    ID_MENU_TEMPO,     // back to the tempo the console picks
+    ID_MENU_TEMPO_LAST = ID_MENU_TEMPO + Glissando::MAX_GEAR, // ID_MENU_TEMPO + each gear
     ID_PING,
     ID_SEND,
     ID_AUTO_REPLY,
@@ -319,6 +322,8 @@ TextMessagingDialog::TextMessagingDialog(wxWindow* parent, wxWindowID id, const 
     Connect(ID_MENU_CLEAR_MESSAGES, wxEVT_COMMAND_MENU_SELECTED,
             wxCommandEventHandler(TextMessagingDialog::OnMenuClearMessages));
     Connect(ID_MENU_WOAH, wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TextMessagingDialog::OnMenuWoah));
+    Connect(ID_MENU_TEMPO, ID_MENU_TEMPO_LAST, wxEVT_COMMAND_MENU_SELECTED,
+            wxCommandEventHandler(TextMessagingDialog::OnMenuTempo));
     Connect(ID_AUTO_REPLY, wxEVT_TOGGLEBUTTON,
             wxCommandEventHandler(TextMessagingDialog::OnAutoReplyToggled));
     Connect(ID_STATION_LIST, wxEVT_COMMAND_LIST_ITEM_SELECTED,
@@ -1247,6 +1252,25 @@ void TextMessagingDialog::OnChatContextMenu(wxContextMenuEvent& event)
     if (cancel == TextMessagingProtocol::Cancel::Remove)
     {
         menu.Append(ID_MENU_REMOVE_MESSAGE, _("Remove from Queue"));
+
+        // A message with a countdown chip can go out at a tempo of its own.
+        MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+        int current = frame != nullptr ? frame->chatTransmitGear() : 0;
+        auto bar = m_queueBars.find(m_menuMessageId);
+        if (current != 0 && bar != m_queueBars.end())
+        {
+            wxMenu* tempos = new wxMenu;
+            for (int gear = Glissando::MIN_GEAR; gear <= Glissando::MAX_GEAR; gear++)
+            {
+                tempos->AppendCheckItem(ID_MENU_TEMPO + gear, GlissandoConsole::gearLabel(gear))
+                    ->Check(bar->second.tempoChosen && bar->second.gear == gear);
+            }
+            tempos->AppendSeparator();
+            tempos->AppendCheckItem(ID_MENU_TEMPO, wxString::Format(_("Console's Tempo (%s)"),
+                                                                    GlissandoConsole::gearLabel(current)))
+                ->Check(!bar->second.tempoChosen);
+            menu.AppendSubMenu(tempos, _("Change Tempo to..."));
+        }
         menu.AppendSeparator();
     }
     else if (cancel == TextMessagingProtocol::Cancel::Abort)
@@ -1307,6 +1331,25 @@ void TextMessagingDialog::OnMenuWoah(wxCommandEvent&)
     setStatus(wxString::Format(_("Woah! Holding the transmitter for %d s."), seconds), StatusKind::Queued);
     updateQueueBars();
     if (uiLogEnabled()) log_info("UI: woah, transmitter held for %d s", seconds);
+}
+
+// Moves a queued message to the tempo picked, or back to the console's.
+void TextMessagingDialog::OnMenuTempo(wxCommandEvent& event)
+{
+    if (m_menuMessageId == 0) return;
+
+    int gear = event.GetId() - ID_MENU_TEMPO;
+    if (!TextMessagingSession::instance().protocol().setMessageTempo(m_menuMessageId, gear))
+    {
+        setStatus(_("That message is no longer waiting to be sent."));
+        return;
+    }
+
+    setStatus(gear != 0 ? wxString::Format(_("Message will go out at %s."), GlissandoConsole::gearLabel(gear))
+                        : wxString(_("Message will go out at the console's tempo.")),
+              StatusKind::Queued);
+    updateQueueBars();
+    if (uiLogEnabled()) log_info("UI: message id=%d tempo %d", (int)m_menuMessageId, gear);
 }
 
 // Clears the log for good, here and in the message store. Messages still
@@ -1414,6 +1457,8 @@ void TextMessagingDialog::OnBlinkTimer(wxTimerEvent&)
 void TextMessagingDialog::updateQueueBars()
 {
     std::vector<QueuedWait> waits = TextMessagingSession::instance().protocol().queuedWaits();
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    int current = frame != nullptr ? frame->chatTransmitGear() : 0;
 
     std::map<int64_t, QueueBar> bars;
     bool changed = waits.size() != m_queueBars.size();
@@ -1430,8 +1475,18 @@ void TextMessagingDialog::updateQueueBars()
         int fill = bar.totalMs > 0
                        ? (int)std::lround((double)QUEUE_BAR_WIDTH * (double)bar.remainingMs / (double)bar.totalMs)
                        : 0;
-        if (fresh || fill != bar.fillPixels || bar.channelBusy != old->second.channelBusy) changed = true;
+        // The tempo it keys at: its own, or whatever the console or Auto
+        // shift picks by then, shown as it stands now.
+        int gear = current == 0 ? 0 : wait.gear != 0 ? wait.gear : current;
+        bool chosen = current != 0 && wait.gear != 0;
+        if (fresh || fill != bar.fillPixels || bar.channelBusy != old->second.channelBusy || gear != bar.gear ||
+            chosen != bar.tempoChosen)
+        {
+            changed = true;
+        }
         bar.fillPixels = fill;
+        bar.gear = gear;
+        bar.tempoChosen = chosen;
         bars[wait.messageId] = bar;
     }
 
@@ -1450,7 +1505,11 @@ wxString TextMessagingDialog::queueBarChip(const TextMessage& message)
     const wxColour filled = bar.channelBusy ? Chaotica::Colour::Dim : Chaotica::Colour::Chrome;
     const wxColour lightText = Chaotica::Colour::Bone;
     const wxColour darkText = Chaotica::Colour::Void;
-    const wxString label = _("QUEUED");
+    // With the tempo it will key at, in the console's words.
+    const wxString label = bar.gear != 0
+                               ? wxString::Format("%s %s %s", _("QUEUED"), wxString(wxUniChar(0x00B7)),
+                                                  GlissandoConsole::gearLabel(bar.gear).Upper())
+                               : wxString(_("QUEUED"));
 
     wxFont font = Chaotica::font(Chaotica::FontRole::Caption);
     double scale = GetDPIScaleFactor();
