@@ -43,7 +43,14 @@ CodedFrame encodeFrame(const Payload& payload);
 // Soft decoding (fec.decode_frame). llrs are in the order encodeFrame()
 // emits bits, positive meaning 0 is the more likely bit. Returns true when
 // the CRC matches; the payload is filled in either way.
-bool decodeFrame(const FrameLlrs& llrs, Payload& payloadOut);
+//
+// knownZeroTailBits says the last that many payload bits are known to be
+// zero, so the decoder never considers a 1 there. Known bits are free
+// information: GlissandoLink pads a burst's last segment with zero bytes, and
+// with 64 of them known the code alone needs about 2 dB less signal (BPSK
+// in AWGN, as prototype/fec.py). A wrong guess almost always fails the CRC;
+// see PADDING_HYPOTHESES in GlissandoDemod.cpp for how the receiver uses it.
+bool decodeFrame(const FrameLlrs& llrs, Payload& payloadOut, int knownZeroTailBits = 0);
 
 } // namespace Glissando
 
