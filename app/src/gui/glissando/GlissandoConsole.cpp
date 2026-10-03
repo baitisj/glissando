@@ -526,9 +526,13 @@ void GlissandoConsole::showPreferences()
                            available ? entry.tooltip : _("Disengage first: this can't change while audio runs.")});
     }
 
-    ShowChoices(preferencesButton_, choices, [this, entries](int index) {
-        host_->glissandoOpenSetup(entries[index].setup);
-    });
+    // Lit while its column is down and while the setup dialog it opens is
+    // up; those dialogs are modal, so closed comes once they have gone.
+    preferencesButton_->SetChecked(true);
+    ShowChoices(
+        preferencesButton_, choices,
+        [this, entries](int index) { host_->glissandoOpenSetup(entries[index].setup); },
+        [this]() { preferencesButton_->SetChecked(false); });
 }
 
 void GlissandoConsole::selectGear(int gear)

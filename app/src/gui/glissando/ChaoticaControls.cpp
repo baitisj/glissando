@@ -667,10 +667,12 @@ namespace
 class ChoicePopup : public wxPopupWindow, public wxEventFilter
 {
 public:
-    ChoicePopup(wxWindow* anchor, const std::vector<Choice>& choices, std::function<void(int)> chosen)
+    ChoicePopup(wxWindow* anchor, const std::vector<Choice>& choices, std::function<void(int)> chosen,
+                std::function<void()> closed)
         : wxPopupWindow(anchor, wxBORDER_NONE)
         , anchor_(anchor)
         , chosen_(std::move(chosen))
+        , closed_(std::move(closed))
     {
         SetBackgroundColour(Colour::PlateEdge);
         auto* panel = new wxPanel(this);
@@ -750,20 +752,25 @@ private:
 
         // Called back once the column has gone, so a dialog it opens comes
         // up over the console rather than under a closing popup.
-        if (index >= 0) anchor_->CallAfter([chosen = chosen_, index]() { chosen(index); });
+        anchor_->CallAfter([chosen = chosen_, closed = closed_, index]() {
+            if (index >= 0) chosen(index);
+            if (closed) closed();
+        });
         CallAfter([this]() { Destroy(); });
     }
 
     wxWindow* anchor_;
     std::function<void(int)> chosen_;
+    std::function<void()> closed_;
     bool closing_ = false;
 };
 
 } // namespace
 
-void ShowChoices(wxWindow* anchor, const std::vector<Choice>& choices, std::function<void(int)> chosen)
+void ShowChoices(wxWindow* anchor, const std::vector<Choice>& choices, std::function<void(int)> chosen,
+                 std::function<void()> closed)
 {
-    auto* popup = new ChoicePopup(anchor, choices, std::move(chosen));
+    auto* popup = new ChoicePopup(anchor, choices, std::move(chosen), std::move(closed));
     wxPoint below = anchor->ClientToScreen(wxPoint(0, anchor->GetSize().GetHeight() + 2));
     popup->Position(below, wxSize(0, 0));
     popup->Show();
