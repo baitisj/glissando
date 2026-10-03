@@ -135,8 +135,8 @@ GlissandoScope::GlissandoScope(wxWindow* parent, wxWindowID id)
     , lastTransmitting_(0.0)
     , lastQueued_(0.0)
     , gatheringHeroes_(true)
-    , printingHeroes_(true)
-    , printingLine_(-1)
+    , rowsSinceStamp_(1 << 20)
+    , rowsGathering_(0)
     , shipSerial_(0)
 {
     SetBackgroundStyle(wxBG_STYLE_PAINT);
@@ -198,6 +198,7 @@ void GlissandoScope::clear()
     // Decoded frames stay: they are placed by frequency and time, not by
     // pixel.
     std::fill(history_.begin(), history_.end(), 0);
+    std::fill(ships_.begin(), ships_.end(), 0);
     Refresh();
 }
 
@@ -276,40 +277,56 @@ void GlissandoScope::advanceSent(double now)
     }
 }
 
-void GlissandoScope::printShips(unsigned char* row)
+void GlissandoScope::printShips()
 {
-    if (printingLine_ < 0)
+    rowsSinceStamp_ = std::min(rowsSinceStamp_ + 1, 1 << 20);
+    rowsGathering_ = gatheringHz_.empty() ? 0 : rowsGathering_ + 1;
+    if (gatheringHz_.empty() || historyWidth_ <= 0 || historyNyquistHz_ <= 0.0) return;
+
+    Sprite ship = gatheringHeroes_ ? sprite(ROCKET) : (shipSerial_ + 1) % 2 ? sprite(SQUID) : sprite(CRAB);
+    if (transmitting_)
     {
-        // The next row of ships: the notes sung since the last one started.
-        // Once we have let go of the transmitter, whatever was left over.
+        // Notes for a whole ship's height of rows, and a gap since the last.
+        if (rowsGathering_ < ship.height || rowsSinceStamp_ < ship.height + SHIP_GAP_ROWS) return;
+    }
+    else if (rowsSinceStamp_ < ship.height)
+    {
+        // We have stopped sending with notes left over, too soon after the
+        // last row for a row of its own: those notes already have a ship.
+        for (double hz : stampedHz_)
+        {
+            gatheringHz_.erase(std::remove(gatheringHz_.begin(), gatheringHz_.end(), hz), gatheringHz_.end());
+        }
         if (gatheringHz_.empty()) return;
-        printingHz_.swap(gatheringHz_);
-        gatheringHz_.clear();
-        printingHeroes_ = gatheringHeroes_;
-        printingLine_ = 0;
-        shipSerial_++;
     }
 
-    Sprite ship = printingHeroes_ ? sprite(ROCKET) : shipSerial_ % 2 ? sprite(SQUID) : sprite(CRAB);
-    if (printingLine_ < ship.height && historyWidth_ > 0 && historyNyquistHz_ > 0.0)
+    // Laid over the newest rows, back to when its notes began, rather than
+    // printed a line a row from now on: that way a ship stands where its
+    // notes were sung, however slowly the trace scrolls. One pixel to a
+    // spectrum bin, centred on its note.
+    int width = ship.width();
+    double binsPerHz = (historyWidth_ - 1) / historyNyquistHz_;
+    for (int r = 0; r < ship.height && r < historyRows_; r++)
     {
-        // One pixel of the ship to a spectrum bin, centred on its note.
-        const char* line = ship.lines[ship.height - 1 - printingLine_];
-        int width = ship.width();
-        double binsPerHz = (historyWidth_ - 1) / historyNyquistHz_;
-        for (double hz : printingHz_)
+        const char* line = ship.lines[r];
+        unsigned char* row = ships_.data() + (size_t)r * historyWidth_;
+        for (double hz : gatheringHz_)
         {
             int first = (int)std::lround(hz * binsPerHz) - width / 2;
             for (int i = 0; i < width; i++)
             {
                 int b = first + i;
                 if (line[i] == '.' || b < 0 || b >= historyWidth_) continue;
-                row[b] = line[i] == 'r' ? 150 : 255;
+                row[b] = std::max<unsigned char>(row[b], line[i] == 'r' ? 150 : 255);
             }
         }
     }
 
-    if (++printingLine_ >= ship.height + SHIP_GAP_ROWS) printingLine_ = -1;
+    stampedHz_.swap(gatheringHz_);
+    gatheringHz_.clear();
+    rowsSinceStamp_ = 0;
+    rowsGathering_ = 0;
+    shipSerial_++;
 }
 
 void GlissandoScope::setLens(bool on)
@@ -366,6 +383,7 @@ void GlissandoScope::sizeHistory()
     int rows = std::max(traceHeight_, (int)std::ceil(lensSpanSeconds() * scanRate_ * 1.1) + 2);
     if (rows == historyRows_ && history_.size() == (size_t)historyWidth_ * rows) return;
     history_.resize((size_t)historyWidth_ * rows, 0);
+    ships_.resize((size_t)historyWidth_ * rows, 0);
     rowSeconds_.resize((size_t)rows, 0.0);
     historyRows_ = rows;
 }
@@ -452,6 +470,7 @@ void GlissandoScope::addRow()
         historyWidth_ = (int)spectrum_.size();
         historyNyquistHz_ = nyquist;
         history_.assign((size_t)historyWidth_ * historyRows_, 0);
+        ships_.assign((size_t)historyWidth_ * historyRows_, 0);
     }
 
     // Scroll everything down one row.
@@ -459,6 +478,9 @@ void GlissandoScope::addRow()
     {
         std::memmove(history_.data() + historyWidth_, history_.data(),
                      (size_t)historyWidth_ * (historyRows_ - 1));
+        std::memmove(ships_.data() + historyWidth_, ships_.data(), (size_t)historyWidth_ * (historyRows_ - 1));
+        std::fill(ships_.begin(), ships_.begin() + historyWidth_, 0);
+        printShips();
     }
     std::move_backward(rowSeconds_.begin(), rowSeconds_.end() - 1, rowSeconds_.end());
     rowSeconds_[0] = steadySeconds();
@@ -474,9 +496,8 @@ void GlissandoScope::addRow()
     unsigned char* row = history_.data();
     if (!have)
     {
-        // Nothing to show while we transmit, bar our own ships.
+        // Nothing to show while we transmit; our ships are in ships_.
         std::fill(row, row + historyWidth_, 0);
-        printShips(row);
         return;
     }
 
@@ -497,10 +518,6 @@ void GlissandoScope::addRow()
         // A little gamma so weak signals show without the noise turning grey.
         row[b] = (unsigned char)std::lround(255.0 * std::pow(level, 1.6));
     }
-
-    // A row of ships still printing when we let go of the transmitter is
-    // finished over what we hear.
-    printShips(row);
 }
 
 void GlissandoScope::OnDoubleClick(wxMouseEvent& event)
@@ -893,7 +910,7 @@ void GlissandoScope::renderTrace(wxImage& image)
     unsigned char* rgb = image.GetData();
     const int w = traceWidth_;
     const int bins = historyWidth_;
-    if (bins <= 0 || history_.empty())
+    if (bins <= 0 || history_.empty() || ships_.size() != history_.size())
     {
         for (size_t i = 0; i < (size_t)w * traceHeight_; i++)
         {
@@ -925,6 +942,7 @@ void GlissandoScope::renderTrace(wxImage& image)
     }
 
     std::vector<unsigned> line((size_t)bins + 1, 0u);
+    std::vector<unsigned> shipLine((size_t)bins + 1, 0u);
     auto putLine = [&](int y) {
         unsigned char* out = rgb + 3 * (size_t)y * w;
         for (int x = 0; x < w; x++, out += 3)
@@ -935,6 +953,12 @@ void GlissandoScope::renderTrace(wxImage& image)
             {
                 unsigned f = std::min(256u, fracs[(size_t)x]);
                 v = (line[(size_t)b0] * (256 - f) + line[(size_t)b0 + 1] * f) >> 8;
+                unsigned s = (shipLine[(size_t)b0] * (256 - f) + shipLine[(size_t)b0 + 1] * f) >> 8;
+                // Our ships sit behind the waterfall: they show through
+                // the dark and a faint noise floor, and anything heard
+                // half as bright as the ship hides it.
+                unsigned cover = std::min(255u, 2 * v);
+                v = std::max(v, s * (255 - cover) / 255);
             }
             out[0] = (unsigned char)(8 + v * 224 / 255);
             out[1] = (unsigned char)(9 + v * 227 / 255);
@@ -942,18 +966,25 @@ void GlissandoScope::renderTrace(wxImage& image)
         }
     };
     auto rowAt = [&](int row) { return history_.data() + (size_t)row * bins; };
+    auto shipsAt = [&](int row) { return ships_.data() + (size_t)row * bins; };
 
     bool throughLens = lens_ && !rowSeconds_.empty() && rowSeconds_[0] > 0.0;
     double newest = throughLens ? rowSeconds_[0] : 0.0;
     for (int y = 0; y < traceHeight_; y++)
     {
         std::fill(line.begin(), line.end(), 0u);
+        std::fill(shipLine.begin(), shipLine.end(), 0u);
         if (!throughLens)
         {
             if (y < historyRows_)
             {
                 const unsigned char* src = rowAt(y);
-                for (int b = 0; b < bins; b++) line[(size_t)b] = src[b];
+                const unsigned char* ships = shipsAt(y);
+                for (int b = 0; b < bins; b++)
+                {
+                    line[(size_t)b] = src[b];
+                    shipLine[(size_t)b] = ships[b];
+                }
             }
             putLine(y);
             continue;
@@ -976,7 +1007,13 @@ void GlissandoScope::renderTrace(wxImage& image)
             unsigned f = (unsigned)std::lround((r - a) * 256.0);
             const unsigned char* ra = rowAt(a);
             const unsigned char* rb = rowAt(b);
-            for (int k = 0; k < bins; k++) line[(size_t)k] = (ra[k] * (256 - f) + rb[k] * f) >> 8;
+            const unsigned char* sa = shipsAt(a);
+            const unsigned char* sb = shipsAt(b);
+            for (int k = 0; k < bins; k++)
+            {
+                line[(size_t)k] = (ra[k] * (256 - f) + rb[k] * f) >> 8;
+                shipLine[(size_t)k] = (sa[k] * (256 - f) + sb[k] * f) >> 8;
+            }
             putLine(y);
             continue;
         }
@@ -986,7 +1023,12 @@ void GlissandoScope::renderTrace(wxImage& image)
         for (int row = a; row <= b; row++)
         {
             const unsigned char* src = rowAt(row);
-            for (int k = 0; k < bins; k++) line[(size_t)k] = std::max<unsigned>(line[(size_t)k], src[k]);
+            const unsigned char* ships = shipsAt(row);
+            for (int k = 0; k < bins; k++)
+            {
+                line[(size_t)k] = std::max<unsigned>(line[(size_t)k], src[k]);
+                shipLine[(size_t)k] = std::max<unsigned>(shipLine[(size_t)k], ships[k]);
+            }
         }
         putLine(y);
     }
