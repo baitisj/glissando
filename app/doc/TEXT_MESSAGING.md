@@ -1,7 +1,8 @@
 # Text Chat
 
-Glissando's keyboard chat lives in the chat window, which opens at launch
-(the console's **Transmission log** button brings it back if it was closed).
+Glissando's keyboard chat lives in the COMMS window, which opens at launch if
+it was open when the app last closed (the console's **Comms** button brings it
+back, and flashes red while it is closed and a message has come in).
 It is inspired by FreeDATA's chat feature but does not share its protocol: two
 stations both need Glissando to talk to each other. The source tree calls it
 text messaging (`src/text_messaging/`, `TextMessagingDialog`); only what the
@@ -171,7 +172,7 @@ does not know the operating frequency: enable rig control, or set the
 frequency from the console. The segments are the emission rules; staying within the
 privileges of your licence class is still up to you.
 
-Where it may not transmit, the chat window says so above the status line, and
+Where it may not transmit, the COMMS window says so above the status line, and
 the send and Ping buttons are disabled. Messages, broadcasts and pings are
 refused; nothing is acknowledged or answered automatically; and anything
 waiting to go out is discarded and marked `NOT SENT`. Receiving carries on, and

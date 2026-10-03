@@ -65,6 +65,7 @@ struct GlissandoTelemetry
     bool showSwr = false;           // the meter reads the radio's SWR rather than the signal
     bool swrKnown = false;          // a reading has come back since keying
     double swr = 0.0;
+    bool chatUnread = false;        // a message has come in since the COMMS window was last open
 };
 
 // The setup dialogs the console's Preferences button leads to.
@@ -129,6 +130,12 @@ public:
     virtual ~GlissandoConsole();
 
     GlissandoConsoleSettings settings() const { return settings_; }
+
+    // Shows or hides the GLISSANDO title card across the top. With resize,
+    // the console changes height by the card's rather than the scope
+    // taking up the room; without, as when it opens at its saved size, the
+    // scope does.
+    void showMarquee(bool show, bool resize);
 
     // Human names for the tempos and scales, shared with the rest of the UI.
     static wxString gearLabel(int gear);

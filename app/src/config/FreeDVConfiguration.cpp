@@ -82,6 +82,9 @@ FreeDVConfiguration::FreeDVConfiguration()
     , glissandoScanRateDeci("/Glissando/ScanRateDeci", 40)
     , glissandoScopeLens("/Glissando/ScopeLens", true)
     , glissandoTransmitShips("/Glissando/TransmitShips", true)
+    , glissandoShowMarquee("/Glissando/ShowMarquee", true)
+    , glissandoChatOpen("/Glissando/ChatOpen", true)
+    , glissandoSnoopOpen("/Glissando/SnoopOpen", true)
     , glissandoWindowLeft("/Glissando/WindowLeft", -1)
     , glissandoWindowTop("/Glissando/WindowTop", -1)
     , glissandoWindowWidth("/Glissando/WindowWidth", 1040)
@@ -168,6 +171,9 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     load_(config, glissandoScanRateDeci);
     load_(config, glissandoScopeLens);
     load_(config, glissandoTransmitShips);
+    load_(config, glissandoShowMarquee);
+    load_(config, glissandoChatOpen);
+    load_(config, glissandoSnoopOpen);
     load_(config, glissandoWindowLeft);
     load_(config, glissandoWindowTop);
     load_(config, glissandoWindowWidth);
@@ -248,6 +254,9 @@ void FreeDVConfiguration::save(wxConfigBase* config)
     save_(config, glissandoScanRateDeci);
     save_(config, glissandoScopeLens);
     save_(config, glissandoTransmitShips);
+    save_(config, glissandoShowMarquee);
+    save_(config, glissandoChatOpen);
+    save_(config, glissandoSnoopOpen);
     save_(config, glissandoWindowLeft);
     save_(config, glissandoWindowTop);
     save_(config, glissandoWindowWidth);

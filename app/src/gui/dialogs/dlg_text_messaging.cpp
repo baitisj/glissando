@@ -572,7 +572,7 @@ void TextMessagingDialog::buildControls()
 
     topSizer->Add(stationPlate, 0, wxEXPAND | wxRIGHT, 6);
 
-    Panel* logPlate = new Panel(this, _("Transmission log"));
+    Panel* logPlate = new Panel(this, _("Comms"));
     m_chatWindow = new wxHtmlWindow(logPlate, wxID_ANY, wxDefaultPosition, wxDefaultSize,
                                     wxHW_SCROLLBAR_AUTO | wxBORDER_NONE);
     m_chatWindow->SetBackgroundColour(Colour::Void);
@@ -1371,7 +1371,7 @@ void TextMessagingDialog::OnMenuClearMessages(wxCommandEvent&)
 {
     if (m_messages.empty()) return;
 
-    wxMessageDialog confirm(this, _("Clear every message from the transmission log? "
+    wxMessageDialog confirm(this, _("Clear every message from COMMS? "
                                     "Messages still being sent are kept."),
                             _("Clear Messages"), wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
     if (confirm.ShowModal() != wxID_YES) return;
@@ -1741,6 +1741,12 @@ void TextMessagingDialog::onMessageAdded(const TextMessage& message)
                          !copy.destCallsign.empty() &&
                          copy.destCallsign == TextMessagingSession::instance().protocol().myCallsign();
         if (callingUs && selectedCallsign().empty()) selectStation(copy.originCallsign, false);
+
+        // Somebody's message, to us or to all, landing in a closed window.
+        if (copy.kind == MessageKind::Chat && copy.direction == MessageDirection::Received && !IsShown())
+        {
+            if (MainFrame* frame = dynamic_cast<MainFrame*>(GetParent())) frame->noteChatUnread();
+        }
 
         if (uiLogEnabled())
         {

@@ -123,6 +123,7 @@ void MainFrame::openGlissandoConsole()
         if (position.x < 0 || position.y < 0) position.SetPosition(wxDefaultPosition);
 
         m_glissandoConsole = new GlissandoConsole(this, this, loadGlissandoSettings_(), position);
+        m_glissandoConsole->showMarquee(config.glissandoShowMarquee, false);
         applyGlissandoIcon(m_glissandoConsole);
         m_glissandoConsole->SetTitle(_("Glissando ") + wxString::FromUTF8(GetFreeDVVersion().c_str()));
         applyGlissandoToModem_(true);
@@ -154,6 +155,10 @@ void MainFrame::glissandoConsoleClosed(const wxRect& lastPosition)
     config.glissandoWindowTop = lastPosition.y;
     config.glissandoWindowWidth = lastPosition.width;
     config.glissandoWindowHeight = lastPosition.height;
+
+    // The COMMS and snooping windows open next time only if they are open now.
+    config.glissandoChatOpen = glissandoChatShown();
+    config.glissandoSnoopOpen = glissandoSnoopShown();
 
     m_glissandoConsole = nullptr;
     applyGlissandoToModem_(false);
@@ -239,6 +244,8 @@ GlissandoTelemetry MainFrame::glissandoTelemetry()
                              (m_RxRunning && m_textMessagingTransport != nullptr &&
                               m_textMessagingTransport->isTransmitting());
     telemetry.audioRunning = m_RxRunning;
+    if (glissandoChatShown()) m_chatUnread = false;
+    telemetry.chatUnread = m_chatUnread;
     telemetry.engageToSend =
         chatWaitsForEngage() && TextMessaging::TextMessagingSession::instance().protocol().hasQueuedTransmissions();
 

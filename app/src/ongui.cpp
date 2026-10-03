@@ -95,18 +95,20 @@ void MainFrame::OnToolsEasySetupUI(wxUpdateUIEvent& event)
 //-------------------------------------------------------------------------
 // OnToolsTextMessaging()
 //-------------------------------------------------------------------------
+void MainFrame::createChatWindow()
+{
+    if (m_textMessagingDialog != nullptr) return;
+    m_textMessagingDialog = new TextMessagingDialog(this);
+    applyGlissandoIcon(m_textMessagingDialog);
+}
+
 void MainFrame::OnToolsTextMessaging(wxCommandEvent&)
 {
-    if (m_textMessagingDialog == nullptr)
-    {
-        m_textMessagingDialog = new TextMessagingDialog(this);
-        applyGlissandoIcon(m_textMessagingDialog);
-    }
+    createChatWindow();
 
     // Picks up history, the current callsign and anything heard while the
     // window was closed.
     m_textMessagingDialog->refreshFromSession();
-    m_textMessagingDialog->SetTitle(_("Glissando Chat"));
     m_textMessagingDialog->Show();
     m_textMessagingDialog->Iconize(false);
     m_textMessagingDialog->Raise();
@@ -161,6 +163,10 @@ void MainFrame::OnToolsOptions(wxCommandEvent& event)
 
         // The text chat preferences may have changed.
         applyChatModem_();
+        if (m_glissandoConsole != nullptr)
+        {
+            m_glissandoConsole->showMarquee(wxGetApp().appConfiguration.glissandoShowMarquee, true);
+        }
         updateTextChatTransmitPermission_();
     
         // Show/hide frequency box based on CAT control configuration.

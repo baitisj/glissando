@@ -38,6 +38,12 @@ constexpr double SEARCH_HALF_WIDTH_HZ = 25.0;
 
 constexpr int REFRESH_MILLISECONDS = 250;
 
+// The title card across the top, the gap above it, and the smallest the
+// console can be with it.
+constexpr int MARQUEE_HEIGHT = 92;
+constexpr int MARQUEE_MARGIN = 6;
+const wxSize MINIMUM_SIZE(1060, 770);
+
 // The telemetry meter's two faces. Signal reads red where a frame is only just
 // copyable; SWR reads red above 2.5:1, short of the 3:1 Preferences can abort at.
 Chaotica::Meter::Scale signalScale()
@@ -72,10 +78,10 @@ class Marquee : public wxPanel
 {
 public:
     explicit Marquee(wxWindow* parent)
-        : wxPanel(parent, wxID_ANY, wxDefaultPosition, wxSize(-1, 92))
+        : wxPanel(parent, wxID_ANY, wxDefaultPosition, wxSize(-1, MARQUEE_HEIGHT))
     {
         SetBackgroundStyle(wxBG_STYLE_PAINT);
-        SetMinSize(wxSize(-1, 92));
+        SetMinSize(wxSize(-1, MARQUEE_HEIGHT));
         Bind(wxEVT_PAINT, &Marquee::OnPaint, this);
         Bind(wxEVT_SIZE, [this](wxSizeEvent& event) { Refresh(); event.Skip(); });
     }
@@ -223,6 +229,23 @@ GlissandoConsole::~GlissandoConsole()
     timer_.Stop();
 }
 
+void GlissandoConsole::showMarquee(bool show, bool resize)
+{
+    if (marquee_->IsShown() == show) return;
+    marquee_->Show(show);
+
+    // The console grows or shrinks by the title's height, so the scope
+    // keeps its size; a maximised console just lays itself out again.
+    int height = MARQUEE_HEIGHT + MARQUEE_MARGIN;
+    SetMinSize(wxSize(MINIMUM_SIZE.x, MINIMUM_SIZE.y - (show ? 0 : height)));
+    if (resize && !IsMaximized() && !IsFullScreen())
+    {
+        wxSize size = GetSize();
+        SetSize(size.x, size.y + (show ? height : -height));
+    }
+    Layout();
+}
+
 void GlissandoConsole::buildControls()
 {
     auto* page = new wxPanel(this);
@@ -231,7 +254,7 @@ void GlissandoConsole::buildControls()
 
     auto* marquee = new Marquee(page);
     marquee_ = marquee;
-    pageSizer->Add(marquee_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 6);
+    pageSizer->Add(marquee_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, MARQUEE_MARGIN);
 
     // --- Middle: the visi-scope, and the tuning and telemetry column.
     auto* middle = row();
@@ -372,8 +395,9 @@ void GlissandoConsole::buildControls()
     auto* switches = new wxBoxSizer(wxVERTICAL);
     engageButton_ = new Button(commandPlate, wxID_ANY, _("Engage"), true, wxSize(COLUMN, engageHeight));
     engageButton_->SetToolTip(_("Start or stop the audio."));
-    chatButton_ = new Button(commandPlate, wxID_ANY, _("Transmission log"), true, wxSize(COLUMN, ROW));
-    chatButton_->SetToolTip(_("Open or close the chat window."));
+    chatButton_ = new Button(commandPlate, wxID_ANY, _("Comms"), true, wxSize(COLUMN, ROW));
+    chatButton_->SetToolTip(_("Open or close the COMMS window, where chat is sent and read. "
+                              "Flashes red while it is closed and a message has come in."));
     preferencesButton_ = new Button(commandPlate, wxID_ANY, _("Preferences"), false, wxSize(COLUMN, ROW));
     preferencesButton_->SetToolTip(_("Options, sound cards, rig control and audio filters."));
     switches->AddSpacer(engageTop);
@@ -410,7 +434,7 @@ void GlissandoConsole::buildControls()
     auto* frameSizer = new wxBoxSizer(wxVERTICAL);
     frameSizer->Add(page, 1, wxEXPAND);
     SetSizer(frameSizer);
-    SetMinSize(wxSize(1060, 770));
+    SetMinSize(MINIMUM_SIZE);
     Layout();
 
     // --- Events.
@@ -684,6 +708,10 @@ void GlissandoConsole::refreshTelemetry()
     // Both windows can be opened or closed from elsewhere too.
     chatButton_->SetChecked(host_->glissandoChatShown());
     snoopButton_->SetChecked(host_->glissandoSnoopShown());
+
+    // A message waiting in a closed COMMS window: the button flashes red,
+    // in step with ENGAGE TO SEND, until the window is opened.
+    chatButton_->SetAlarm(t.chatUnread && Chaotica::blinkLit());
 }
 
 // Much of the world holds 30 m to 500 Hz (the IARU Region 1 band plan, which
