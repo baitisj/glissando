@@ -251,6 +251,22 @@ bool TextMessagingTransport::isChannelBusy() const
     return modem_ != nullptr && modem_->isReceiving();
 }
 
+double TextMessagingTransport::keyingProgress() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!keyed_.load(std::memory_order_acquire) || samples_.empty()) return -1.0;
+
+    // What has gone into the transmit queue, less what is still waiting in it.
+    size_t waiting = (size_t)std::max(textMessagingTxQueue().numUsed(), 0);
+    size_t played = queued_ > waiting ? queued_ - waiting : 0;
+    return std::min(1.0, (double)played / (double)samples_.size());
+}
+
+double TextMessagingTransport::airTimeScale(int gear) const
+{
+    return modem_ != nullptr ? modem_->airTimeScale(gear) : 1.0;
+}
+
 void TextMessagingTransport::poll()
 {
     // The protocol freezes on the channel being busy but has no logging of its

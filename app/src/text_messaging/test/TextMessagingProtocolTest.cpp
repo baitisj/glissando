@@ -73,10 +73,12 @@ public:
 
         transmissions.emplace_back();
         modes.emplace_back();
+        gears.emplace_back();
         for (const OutgoingBurst& burst : bursts)
         {
             transmissions.back().push_back(burst.frame);
             modes.back().push_back(burst.mode);
+            gears.back().push_back(burst.gear);
         }
         transmitting = true;
         return true;
@@ -84,9 +86,11 @@ public:
 
     bool isTransmitting() const override { return transmitting || voiceActive; }
     bool isChannelBusy() const override { return channelBusy; }
+    double airTimeScale(int gear) const override { return gear == 1 ? 8.0 : 1.0; }
 
     std::vector<std::vector<std::vector<uint8_t>>> transmissions; // frames, per keying
     std::vector<std::vector<BurstMode>> modes;                    // and their modes
+    std::vector<std::vector<int>> gears;                          // and tempos
     bool transmitting = false;
     bool voiceActive = false;
     bool channelBusy = false;
@@ -2203,6 +2207,96 @@ void testQueuedWaitsCountDown()
     CHECK(waits.size() == 1 && waits[0].channelBusy);
 }
 
+// "Woah!": the operator hears somebody the receiver missed. Nothing keys,
+// a reply included, until a frame's air time has passed, and each press
+// adds another.
+void testWoahHoldsTheQueue()
+{
+    Station sender("W1AW");
+    Station receiver("VK3ABC");
+    AirTiming timing = sender.protocol.airTiming();
+    timing.frameAirMs = 60 * 1000; // well past every turnaround
+    sender.protocol.setAirTiming(timing);
+    receiver.protocol.setAirTiming(timing);
+    uint64_t frame = (uint64_t)timing.frameAirMs;
+
+    std::string error;
+    CHECK(sender.protocol.sendMessage("one", "VK3ABC", error));
+    CHECK(sender.protocol.holdTransmissions() == frame);
+    CHECK(sender.protocol.holdTransmissions() == 2 * frame);
+    std::vector<QueuedWait> waits = sender.protocol.queuedWaits();
+    CHECK(waits.size() == 1 && waits[0].waitMs == (int64_t)(2 * frame));
+
+    // The turnarounds alone would have let it go by now.
+    sender.nowMs += 2 * frame - 1;
+    sender.protocol.tick();
+    CHECK(sender.transport.transmissions.empty());
+    sender.nowMs += 1;
+    sender.protocol.tick();
+    CHECK(sender.transport.transmissions.size() == 1);
+    sender.transport.transmitting = false;
+    sender.protocol.tick();
+
+    // The acknowledgement waits too.
+    receiver.receiveFrom(sender.transport);
+    CHECK(receiver.protocol.holdTransmissions() == frame);
+    receiver.nowMs += frame - 1;
+    receiver.protocol.tick();
+    CHECK(receiver.transport.transmissions.empty());
+    receiver.nowMs += 1;
+    receiver.protocol.tick();
+    CHECK(receiver.transport.transmissions.size() == 1);
+}
+
+// A queued message moved to a tempo of its own: its bursts say so, the
+// countdowns behind it allow for the longer air time, it keys on its own
+// rather than behind a reply, and once on the air it can no longer move.
+void testQueuedMessageTakesATempoOfItsOwn()
+{
+    Station sender("W1AW");
+    Station receiver("VK3ABC");
+    AirTiming timing = sender.protocol.airTiming();
+
+    std::string error;
+    CHECK(receiver.protocol.sendMessage("mine", "W1AW", error));
+    int64_t mine = receiver.observer.added[0].id;
+    CHECK(receiver.protocol.sendMessage("after", "", error));
+    std::vector<QueuedWait> waits = receiver.protocol.queuedWaits();
+    CHECK(waits.size() == 2 && waits[0].gear == 0);
+    int64_t gap = waits[1].waitMs - waits[0].waitMs;
+
+    CHECK(receiver.protocol.setMessageTempo(mine, 1));
+    waits = receiver.protocol.queuedWaits();
+    CHECK(waits.size() == 2 && waits[0].gear == 1 && waits[1].gear == 0);
+    CHECK(waits[1].waitMs - waits[0].waitMs == gap + 7 * (int64_t)timing.textFragmentAirMs);
+    CHECK(!receiver.protocol.setMessageTempo(12345, 2)); // not ours
+    CHECK(receiver.protocol.setMessageTempo(mine, 0));
+    CHECK(receiver.protocol.queuedWaits()[0].gear == 0);
+    CHECK(receiver.protocol.setMessageTempo(mine, 1));
+
+    // The acknowledgement it would have ridden behind goes alone, at the
+    // tempo set now, and the broadcast behind it does not ride instead.
+    CHECK(sender.protocol.sendMessage("first", "VK3ABC", error));
+    sender.completeOneTransmission();
+    receiver.receiveFrom(sender.transport);
+    receiver.completeOneTransmission();
+    CHECK(receiver.transport.transmissions.size() == 1);
+    CHECK(receiver.transport.modes.back().size() == 1 &&
+          receiver.transport.modes.back()[0] == BurstMode::Signalling);
+    CHECK(receiver.transport.gears.back()[0] == 0);
+
+    // Then it keys at its own.
+    for (int i = 0; i < 20 && receiver.transport.transmissions.size() < 2; i++)
+    {
+        receiver.nowMs += 5000;
+        receiver.protocol.tick();
+    }
+    CHECK(receiver.transport.transmissions.size() == 2);
+    CHECK(receiver.transport.gears.back().size() == 1 && receiver.transport.gears.back()[0] == 1);
+    CHECK(decodeOne(receiver.transport.transmissions.back()[0]).type == FrameType::Message);
+    CHECK(!receiver.protocol.setMessageTempo(mine, 3));
+}
+
 int main()
 {
     testAddressedMessageIsAcknowledged();
@@ -2228,6 +2322,8 @@ int main()
     testAirTimingCountsTheChords();
     testReplyWindowEndsAtTheAnswersChord();
     testQueuedWaitsCountDown();
+    testWoahHoldsTheQueue();
+    testQueuedMessageTakesATempoOfItsOwn();
     testPingWaitsForAnAnswerAtASlowerTempo();
     testAutoReplyCanBeDisabled();
     testAckWaitDoesNotBlockTheQueue();

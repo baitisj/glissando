@@ -238,6 +238,7 @@ struct AirTiming
     int replyWindowMs = REPLY_WINDOW_MILLISECONDS;
     int turnaroundJitterMs = TURNAROUND_JITTER_MILLISECONDS;
     int textFragmentAirMs = TEXT_FRAGMENT_AIR_MILLISECONDS;
+    int frameAirMs = TEXT_FRAGMENT_AIR_MILLISECONDS; // one of the modem's frames, for "Woah!"
     int signallingFollowedReservationMs = SIGNALLING_FOLLOWED_RESERVATION_MILLISECONDS;
     int maxChannelBusyMs = MAX_CHANNEL_BUSY_MILLISECONDS;
     int ackTimeoutMs = ACK_TIMEOUT_MILLISECONDS;
@@ -304,6 +305,7 @@ struct QueuedWait
     int64_t messageId = 0;
     int64_t waitMs = 0;       // from now until it should key; zero if due
     bool channelBusy = false; // somebody else has the channel: nothing counts down
+    int gear = 0;             // the tempo the operator chose for it; 0 for the one set now
 };
 
 enum class MessageDirection
@@ -376,6 +378,7 @@ struct OutgoingBurst
 {
     BurstMode mode = BurstMode::Text;
     std::vector<uint8_t> frame;
+    int gear = 0; // the Glissando tempo the operator chose for it; 0 for the one set now
 };
 
 // A station we have decoded something from, shown in the heard stations list.
