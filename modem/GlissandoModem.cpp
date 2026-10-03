@@ -297,6 +297,13 @@ std::array<int, SYMBOLS_PER_FRAME> payloadMelody(const Payload& payload)
     return detail::frameNotes(encodeFrame(payload));
 }
 
+KnownBits noKnownBits()
+{
+    KnownBits known;
+    known.fill(-1);
+    return known;
+}
+
 bool isMotifSymbol(int symbol)
 {
     for (int start : detail::MOTIF_START)
@@ -329,7 +336,7 @@ std::vector<Decode> receive(const float* audio, size_t numSamples, const ModemSe
             hypotheses.push_back(held.back().get());
         }
         detail::VoiceDecode result =
-            detail::receiveVoice(z, gear, hypotheses, searchFrom, searchTo, maxOffsetHz, candidates);
+            detail::receiveVoice(z, gear, hypotheses, searchFrom, searchTo, maxOffsetHz, candidates, settings.knownBits);
         decodes[(size_t)voice] = result.decode;
         decodes[(size_t)voice].voice = voice;
         decodes[(size_t)voice].scale = scales[(size_t)result.hypothesis];

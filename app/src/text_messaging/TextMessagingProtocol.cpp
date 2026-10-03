@@ -1527,7 +1527,7 @@ TextMessagingProtocol::PendingTransmission* TextMessagingProtocol::riderLocked(s
 std::vector<OutgoingBurst> TextMessagingProtocol::keyingBurstsLocked(
     const std::vector<const PendingTransmission*>& entries) const
 {
-    std::vector<std::pair<BurstMode, const Frame*>> order;
+    std::vector<std::pair<const PendingTransmission*, const Frame*>> order;
     int gear = 0;
     for (const PendingTransmission* entry : entries)
     {
@@ -1535,14 +1535,14 @@ std::vector<OutgoingBurst> TextMessagingProtocol::keyingBurstsLocked(
         for (size_t index = 0; index < entry->frames.size(); index++)
         {
             if ((entry->confirmed & (1u << index)) != 0) continue;
-            order.push_back({entry->mode, &entry->frames[index]});
+            order.push_back({entry, &entry->frames[index]});
         }
     }
 
     std::vector<OutgoingBurst> keying;
     for (size_t position = 0; position < order.size(); position++)
     {
-        BurstMode mode = order[position].first;
+        BurstMode mode = order[position].first->mode;
         Frame frame = *order[position].second;
         frame.burstsFollowing = (uint8_t)(order.size() - 1 - position);
 
@@ -1553,7 +1553,7 @@ std::vector<OutgoingBurst> TextMessagingProtocol::keyingBurstsLocked(
             frame, mode == BurstMode::Signalling ? SIGNALLING_FRAME_BYTES : TEXT_FRAME_BYTES);
         if (encoded.empty()) return {};
 
-        keying.push_back({mode, encoded, gear});
+        keying.push_back({mode, encoded, gear, order[position].first->destination});
     }
 
     return keying;

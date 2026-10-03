@@ -379,6 +379,7 @@ struct OutgoingBurst
     BurstMode mode = BurstMode::Text;
     std::vector<uint8_t> frame;
     int gear = 0; // the Glissando tempo the operator chose for it; 0 for the one set now
+    std::string destination; // the station it is addressed to; empty for a broadcast
 };
 
 // A station we have decoded something from, shown in the heard stations list.

@@ -108,6 +108,9 @@ struct StreamingReceiver::Impl
     std::mutex callbackMutex;
     DecodeCallback callback;
 
+    std::mutex knownBitsMutex;
+    std::vector<KnownBits> knownBits;
+
     std::atomic<long long> samplesPushed{0};
     std::atomic<long long> lastFrameEnd{-1};
 
@@ -162,6 +165,12 @@ void StreamingReceiver::configure(const std::vector<int>& gears, Scale scale, do
     impl_->anyScale = anyScale;
     impl_->configChanged = true;
     impl_->wake.notify_one();
+}
+
+void StreamingReceiver::setKnownBits(const std::vector<KnownBits>& knownBits)
+{
+    std::lock_guard<std::mutex> lock(impl_->knownBitsMutex);
+    impl_->knownBits = knownBits;
 }
 
 void StreamingReceiver::setDecodeCallback(DecodeCallback callback)
@@ -439,6 +448,12 @@ void StreamingReceiver::Impl::search(GearState& state, unsigned generation)
     detail::ComplexSignal z;
     detail::analyticSignal(history.data() + (windowStart - historyStart), (size_t)(windowEnd - windowStart), z);
 
+    std::vector<KnownBits> known;
+    {
+        std::lock_guard<std::mutex> lock(knownBitsMutex);
+        known = knownBits;
+    }
+
     std::vector<StreamDecode> found;
     bool haveReport = false;
     bool reportDecoded = false;
@@ -454,7 +469,8 @@ void StreamingReceiver::Impl::search(GearState& state, unsigned generation)
             hypotheses.push_back(held.back().get());
         }
         detail::VoiceDecode result = detail::receiveVoice(z, info, hypotheses, first - 2 * geo.step - windowStart,
-                                                          first + geo.hop - windowStart, MAX_OFFSET_HZ, CANDIDATES);
+                                                          first + geo.hop - windowStart, MAX_OFFSET_HZ, CANDIDATES,
+                                                          known);
         if (!result.haveCandidate) continue;
 
         long long start = windowStart + result.decode.startSample;

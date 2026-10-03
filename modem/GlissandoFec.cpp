@@ -101,6 +101,14 @@ CodedFrame encodeFrame(const Payload& payload)
 
 bool decodeFrame(const FrameLlrs& llrs, Payload& payloadOut, int knownZeroTailBits)
 {
+    KnownBits known = noKnownBits();
+    int count = std::max(0, std::min(knownZeroTailBits, PAYLOAD_BITS));
+    for (int i = PAYLOAD_BITS - count; i < PAYLOAD_BITS; i++) known[i] = 0;
+    return decodeFrame(llrs, payloadOut, known);
+}
+
+bool decodeFrame(const FrameLlrs& llrs, Payload& payloadOut, const KnownBits& known)
+{
     double deinterleaved[FRAME_BITS];
     for (int i = 0; i < FRAME_BITS; i++) deinterleaved[INTERLEAVE[i]] = llrs[i];
 
@@ -130,18 +138,16 @@ bool decodeFrame(const FrameLlrs& llrs, Payload& payloadOut, int knownZeroTailBi
     for (int s = 0; s < NUM_STATES; s++) metric[s] = -1e18;
     metric[0] = 0.0;
 
-    // Steps whose input bit is known to be zero: a state ns is entered with
-    // input ns & 1, so at those steps no odd state can be reached.
-    int knownFrom = PAYLOAD_BITS - std::max(0, std::min(knownZeroTailBits, PAYLOAD_BITS));
-
     for (int t = 0; t < STEPS; t++)
     {
         double l0 = deinterleaved[2 * t];
         double l1 = deinterleaved[2 * t + 1];
-        bool inputKnownZero = t >= knownFrom && t < PAYLOAD_BITS;
+        // A state ns is entered with input ns & 1, so where the input bit is
+        // known, states with the other low bit cannot be reached.
+        int knownInput = t < PAYLOAD_BITS ? known[t] : -1;
         for (int ns = 0; ns < NUM_STATES; ns++)
         {
-            if (inputKnownZero && (ns & 1))
+            if (knownInput >= 0 && (ns & 1) != knownInput)
             {
                 nextMetric[ns] = -1e18;
                 decisions[t][ns] = 0;

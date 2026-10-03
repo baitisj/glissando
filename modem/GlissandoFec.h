@@ -52,6 +52,10 @@ CodedFrame encodeFrame(const Payload& payload);
 // see PADDING_HYPOTHESES in GlissandoDemod.cpp for how the receiver uses it.
 bool decodeFrame(const FrameLlrs& llrs, Payload& payloadOut, int knownZeroTailBits = 0);
 
+// The same with any payload bits known (KnownBits: -1 for unknown): the
+// decoder never considers the other value of a known bit.
+bool decodeFrame(const FrameLlrs& llrs, Payload& payloadOut, const KnownBits& known);
+
 } // namespace Glissando
 
 #endif // GLISSANDO__GLISSANDO_FEC_H

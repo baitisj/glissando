@@ -39,6 +39,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -154,6 +155,13 @@ public:
     // The CW tail's text: format with every <MYCALL> replaced by callsign.
     // Empty when the format names the callsign and none is set.
     static std::string cwTailText(const std::string& format, const std::string& callsign);
+
+    // The guesses the Glissando receiver tries on a frame that fails to
+    // decode: the first segment of a frame from each station in workingWith
+    // (most likely first) to ownCallsign, then of one to ownCallsign from
+    // anybody. See Glissando::ModemSettings::knownBits.
+    static std::vector<Glissando::KnownBits> expectedFrames(const std::string& ownCallsign,
+                                                           const std::vector<std::string>& workingWith);
 
     void setGlissando(const GlissandoConfig& config);
     GlissandoConfig glissandoConfig() const;
@@ -273,6 +281,10 @@ private:
     // last frame: its closing chord or CW tail.
     double farEndTailSecondsLocked(int gear) const;
 
+    // Remembers who we are and who we are working from a keying we send, and
+    // tells the receiver what the replies will start with.
+    void noteKeyingLocked(const std::vector<TextMessaging::OutgoingBurst>& bursts, uint64_t nowMs);
+
     mutable std::mutex glissandoMutex_;
     GlissandoConfig glissando_;
     GlissandoStatus glissandoStatus_;
@@ -280,6 +292,8 @@ private:
     std::vector<GlissandoHeard> glissandoHeard_;
     std::vector<GlissandoSent> glissandoSent_;
     TextMessaging::StationTempos stationGears_; // the gear each station was last heard in
+    std::string ownCallsign_;                   // as our last keying sent it
+    std::map<std::string, uint64_t> working_;   // stations we sent to, and when (steady clock)
     std::unique_ptr<Glissando::StreamingReceiver> glissandoRx_;
 
     // Hears the chord that opens a Glissando transmission, a frame and more

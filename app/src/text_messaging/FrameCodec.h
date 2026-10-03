@@ -106,6 +106,17 @@ public:
     // fragment. Message text rides DATAC4 and carries the full header.
     static bool isSignallingFrameType(FrameType type);
     static int headerBytes(FrameType type);
+
+    // What a station can count on in the opening bytes of a frame addressed
+    // to it: bits set in masksOut[i] are known to equal those of bytesOut[i].
+    // The type byte's bits that no frame type sets, the destination CRC
+    // (ownCallsign's), and with a non-empty fromCallsign the sender's packed
+    // callsign. Fills EXPECTED_START_BYTES bytes. A receiver hands these to
+    // its decoder as guesses, so a reply from the station it is working
+    // decodes on less signal (FT8 calls it a priori decoding).
+    static constexpr int EXPECTED_START_BYTES = 1 + 3 + PACKED_CALLSIGN_BYTES; // type, destination CRC, origin
+    static void expectedFrameStart(const std::string& ownCallsign, const std::string& fromCallsign,
+                                   uint8_t* bytesOut, uint8_t* masksOut);
 };
 
 } // namespace TextMessaging

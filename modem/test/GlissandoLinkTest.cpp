@@ -246,9 +246,37 @@ void testProgress()
 
 } // namespace
 
+// What firstSegmentKnownBits() says of a burst's first segment is what
+// segmentBursts() sends, in either mode, and only the known bits are set.
+void testFirstSegmentKnownBits()
+{
+    Random rng(5);
+    for (bool text : {false, true})
+    {
+        LinkBurst burst = makeBurst(text, text ? TEXT_BYTES : SIGNALLING_BYTES, rng);
+        uint8_t masks[SEGMENT_DATA_BYTES];
+        for (uint8_t& m : masks) m = (uint8_t)(rng.next() & 0xFF);
+        KnownBits known = firstSegmentKnownBits(burst.bytes.data(), masks, SEGMENT_DATA_BYTES);
+        Payload first = segmentBursts({burst}, 1)[0];
+        int count = 0;
+        for (int i = 0; i < PAYLOAD_BITS; i++)
+        {
+            if (known[(size_t)i] < 0) continue;
+            count++;
+            CHECK(known[(size_t)i] == first[(size_t)i]);
+        }
+        int expected = SEGMENT_HEADER_BITS - 1;
+        for (uint8_t m : masks)
+            for (int bit = 0; bit < 8; bit++) expected += (m >> bit) & 1;
+        CHECK(count == expected);
+        CHECK(known[0] == -1);
+    }
+}
+
 int main()
 {
     testRoundTrip();
+    testFirstSegmentKnownBits();
     testTrailingZeros();
     testDuetFiller();
     testOutOfOrder();

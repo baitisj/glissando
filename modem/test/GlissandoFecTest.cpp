@@ -148,6 +148,47 @@ void testKnownZeroTail()
     CHECK(wrongPasses <= 1);
 }
 
+// Known bits of either value: the start of a reply whose sender and
+// addressee the receiver knows. Right, they rescue noisy frames; wrong, they
+// fail the CRC.
+void testKnownBits()
+{
+    Random rng(13);
+    Payload expected = rng.payload();
+    KnownBits known = noKnownBits();
+    for (int i = 1; i < 72; i++) known[(size_t)i] = (int8_t)expected[(size_t)i];
+
+    int plain = 0;
+    int helped = 0;
+    const double sigma = std::sqrt(1.0 / (2.0 * std::pow(10.0, -4.0 / 10.0)));
+    for (int trial = 0; trial < 200; trial++)
+    {
+        Payload payload = rng.payload();
+        for (int i = 1; i < 72; i++) payload[(size_t)i] = expected[(size_t)i];
+        CodedFrame coded = encodeFrame(payload);
+        FrameLlrs noisy;
+        for (int i = 0; i < FRAME_BITS; i++)
+        {
+            double y = (coded[i] ? -1.0 : 1.0) + sigma * rng.gaussian();
+            noisy[i] = (float)(2.0 * y / (sigma * sigma));
+        }
+        Payload decoded{};
+        if (decodeFrame(noisy, decoded) && decoded == payload) plain++;
+        if (decodeFrame(noisy, decoded, known) && decoded == payload) helped++;
+    }
+    printf("71 bits known, noisy: %d/200 decoded plain, %d/200 with them known\n", plain, helped);
+    CHECK(helped >= plain + 100);
+
+    int wrongPasses = 0;
+    for (int trial = 0; trial < 200; trial++)
+    {
+        Payload payload = rng.payload();
+        Payload decoded{};
+        if (decodeFrame(cleanLlrs(encodeFrame(payload), 4.0f), decoded, known)) wrongPasses++;
+    }
+    CHECK(wrongPasses <= 1);
+}
+
 } // namespace
 
 int main()
@@ -155,6 +196,7 @@ int main()
     testAgainstPrototype();
     testDecode();
     testKnownZeroTail();
+    testKnownBits();
     if (failures == 0) printf("glissando FEC tests passed\n");
     return failures == 0 ? 0 : 1;
 }
