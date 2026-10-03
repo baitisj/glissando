@@ -6,6 +6,8 @@
 
 #include "GlissandoFec.h"
 
+#include <algorithm>
+
 namespace Glissando
 {
 
@@ -97,7 +99,7 @@ CodedFrame encodeFrame(const Payload& payload)
     return frame;
 }
 
-bool decodeFrame(const FrameLlrs& llrs, Payload& payloadOut)
+bool decodeFrame(const FrameLlrs& llrs, Payload& payloadOut, int knownZeroTailBits)
 {
     double deinterleaved[FRAME_BITS];
     for (int i = 0; i < FRAME_BITS; i++) deinterleaved[INTERLEAVE[i]] = llrs[i];
@@ -128,12 +130,23 @@ bool decodeFrame(const FrameLlrs& llrs, Payload& payloadOut)
     for (int s = 0; s < NUM_STATES; s++) metric[s] = -1e18;
     metric[0] = 0.0;
 
+    // Steps whose input bit is known to be zero: a state ns is entered with
+    // input ns & 1, so at those steps no odd state can be reached.
+    int knownFrom = PAYLOAD_BITS - std::max(0, std::min(knownZeroTailBits, PAYLOAD_BITS));
+
     for (int t = 0; t < STEPS; t++)
     {
         double l0 = deinterleaved[2 * t];
         double l1 = deinterleaved[2 * t + 1];
+        bool inputKnownZero = t >= knownFrom && t < PAYLOAD_BITS;
         for (int ns = 0; ns < NUM_STATES; ns++)
         {
+            if (inputKnownZero && (ns & 1))
+            {
+                nextMetric[ns] = -1e18;
+                decisions[t][ns] = 0;
+                continue;
+            }
             double c0 = metric[prevState[ns][0]] + 0.5 * (prevSign[ns][0][0] * l0 + prevSign[ns][0][1] * l1);
             double c1 = metric[prevState[ns][1]] + 0.5 * (prevSign[ns][1][0] * l0 + prevSign[ns][1][1] * l1);
             bool pickSecond = c1 > c0;

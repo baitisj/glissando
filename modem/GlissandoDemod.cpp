@@ -64,6 +64,17 @@ constexpr double MIN_SYNC_SCORE = 1.5;
 // (half of them measure below 1) or silence.
 constexpr double MIN_ES_OVER_N0 = 1.0;
 
+// A frame that fails to decode is tried again on the guess that it ends in
+// zero padding, longest guess first. GlissandoLink pads a burst's last
+// segment out with zero bytes, and told which bits are zero the decoder
+// needs less signal: at Presto in AWGN the 50 % point drops 0.8 dB for a
+// frame with 64 bits of padding (one byte of data in the segment) and
+// 0.45 dB for 48. Nothing changes on the air, so this works with every
+// sender. Each guess is another chance for noise to pass the CRC (noise
+// alone, 10000 Presto searches: one false decode, none without the guesses),
+// so there are only two; a guess of 32 bits bought only 0.2 dB.
+constexpr int PADDING_HYPOTHESES[] = {64, 48};
+
 // ---------------------------------------------------------------- helpers
 
 // sum a[n] * conj(b[n]). Eight independent partial sums let the compiler
@@ -1054,7 +1065,16 @@ VoiceDecode receiveVoice(const ComplexSignal& z, const GearInfo& gear, const std
         // Too weak to decode by a wide margin: no Viterbi, so no chance of
         // a CRC passing by luck (see MIN_ES_OVER_N0).
         Payload payload{};
-        bool ok = esOverN0 >= MIN_ES_OVER_N0 && decodeFrame(llrs, payload) && !allZero(payload);
+        bool ok = false;
+        if (esOverN0 >= MIN_ES_OVER_N0)
+        {
+            ok = decodeFrame(llrs, payload) && !allZero(payload);
+            for (int knownZeroBits : PADDING_HYPOTHESES)
+            {
+                if (ok) break;
+                ok = decodeFrame(llrs, payload, knownZeroBits) && !allZero(payload);
+            }
+        }
 
         if (!result.haveCandidate)
         {

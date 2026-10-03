@@ -4,6 +4,7 @@
 //                  to the prototype (prototype/fec.py).
 //=========================================================================
 
+#include <cmath>
 #include <cstring>
 #include <string>
 
@@ -96,12 +97,64 @@ void testDecode()
     CHECK(passes <= 1);
 }
 
+// A frame ending in zero padding, as a burst's last segment does: told
+// which bits are zero, the decoder copes with noise that defeats it
+// otherwise; told wrongly, it fails the CRC rather than inventing a payload.
+void testKnownZeroTail()
+{
+    Random rng(11);
+    int plain = 0;
+    int partly = 0;
+    int known = 0;
+    for (int trial = 0; trial < 200; trial++)
+    {
+        Payload payload = rng.payload();
+        for (int i = PAYLOAD_BITS - 64; i < PAYLOAD_BITS; i++) payload[i] = 0;
+        CodedFrame coded = encodeFrame(payload);
+
+        // About 0 dB Es/N0 per coded bit in BPSK terms, where the code alone
+        // decodes well under half the frames (prototype/fec.py measures 50 %
+        // at -2.7 dB plain and -4.8 dB with 64 known bits).
+        const double sigma = std::sqrt(1.0 / (2.0 * std::pow(10.0, -4.0 / 10.0)));
+        FrameLlrs noisy;
+        for (int i = 0; i < FRAME_BITS; i++)
+        {
+            double y = (coded[i] ? -1.0 : 1.0) + sigma * rng.gaussian();
+            noisy[i] = (float)(2.0 * y / (sigma * sigma));
+        }
+
+        Payload decoded{};
+        if (decodeFrame(noisy, decoded) && decoded == payload) plain++;
+        if (decodeFrame(noisy, decoded, 64) && decoded == payload) known++;
+        // Fewer known bits than there are is still a right guess.
+        if (decodeFrame(noisy, decoded, 32) && decoded == payload) partly++;
+    }
+    printf("64 zero bits, noisy: %d/200 decoded plain, %d/200 knowing 32 of them, %d/200 knowing all\n", plain,
+           partly, known);
+    CHECK(partly >= plain);
+    CHECK(known >= plain + 40);
+
+    // Clean frames whose tail is not zero: a wrong guess must not decode.
+    int wrongPasses = 0;
+    for (int trial = 0; trial < 200; trial++)
+    {
+        Payload payload = rng.payload();
+        payload[PAYLOAD_BITS - 1] = 1;
+        Payload decoded{};
+        if (decodeFrame(cleanLlrs(encodeFrame(payload), 4.0f), decoded, 64)) wrongPasses++;
+        // The guess changes nothing for a frame it does not cover.
+        CHECK(decodeFrame(cleanLlrs(encodeFrame(payload), 4.0f), decoded, 0) && decoded == payload);
+    }
+    CHECK(wrongPasses <= 1);
+}
+
 } // namespace
 
 int main()
 {
     testAgainstPrototype();
     testDecode();
+    testKnownZeroTail();
     if (failures == 0) printf("glissando FEC tests passed\n");
     return failures == 0 ? 0 : 1;
 }
