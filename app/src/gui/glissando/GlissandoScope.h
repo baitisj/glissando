@@ -171,9 +171,9 @@ private:
     // the notes sung for the next row of ships.
     void advanceSent(double now);
 
-    // Paints the next line of the row of ships being printed, if any, into
-    // the newest row of history.
-    void printShips(unsigned char* row);
+    // Once a row of ships is due, stamps it whole into ships_ over the rows
+    // its notes were sung in, newest at the top.
+    void printShips();
 
     SpectrumSource source_;
     wxTimer timer_;
@@ -193,6 +193,9 @@ private:
     // retuning or widening the view keeps it. It holds more rows than the
     // trace is tall when the lens squeezes them in.
     std::vector<unsigned char> history_;
+    // Our own ships, laid out like history_ and scrolled with it, but kept
+    // apart so the waterfall can be drawn over them.
+    std::vector<unsigned char> ships_;
     int historyWidth_;              // bins per row
     double historyNyquistHz_;
     int historyRows_;
@@ -228,14 +231,13 @@ private:
     double lastTransmitting_;
     double lastQueued_;             // when addSent() was last handed a frame
 
-    // Ships are printed a line per row of history, bottom line first, so
-    // they scroll into view the right way up. The notes sung while one row
-    // of ships prints make up the next.
+    // The notes sung since the last row of ships make up the next, stamped
+    // a ship's height plus a gap later, or as soon as we stop sending.
     std::vector<double> gatheringHz_;
     bool gatheringHeroes_;
-    std::vector<double> printingHz_;
-    bool printingHeroes_;
-    int printingLine_;              // lines printed of the current row; -1 none
+    std::vector<double> stampedHz_;  // the notes of the last row of ships
+    int rowsSinceStamp_;
+    int rowsGathering_;              // rows since the first of gatheringHz_
     int shipSerial_;
 };
 
