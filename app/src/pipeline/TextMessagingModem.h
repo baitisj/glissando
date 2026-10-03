@@ -224,6 +224,10 @@ public:
     // goes over the codec2 modes, whose messages are all well under a minute.
     double glissandoMessageSeconds(size_t textBytes) const;
 
+    // How many times longer a burst takes at the given tempo than at the
+    // one modulate() would pick now; 1 when chat goes over the codec2 modes.
+    double airTimeScale(int gear) const;
+
 private:
     struct Demodulator
     {

@@ -75,6 +75,15 @@ public:
     // protocol freezes on it: nothing starts, and no acknowledgement timer
     // runs down, until the channel is clear again.
     virtual bool isChannelBusy() const { return false; }
+
+    // How many times longer a burst takes at the given Glissando tempo than
+    // at the one set now, for a message the operator moved to another
+    // tempo; see AirTiming, which is sized to the tempo set now.
+    virtual double airTimeScale(int gear) const
+    {
+        (void)gear;
+        return 1.0;
+    }
 };
 
 // Implemented by the dialog. Callbacks arrive on whichever thread drove the
@@ -132,6 +141,13 @@ public:
     // keying itself.
     void abortTransmission();
 
+    // "Woah!": the operator hears somebody the receiver has missed. Nothing
+    // keys, replies included, until one more of the modem's frames could
+    // have gone by, added to any such hold still running, so each press
+    // buys more. A keying already on the air carries on. Returns how long the
+    // hold now has to run.
+    uint64_t holdTransmissions();
+
     // Replaces the clocks the protocol reads. Milliseconds must be monotonic
     // (timeouts) and the wall clock is what the chat window timestamps with.
     void setClocks(std::function<uint64_t()> monotonicMs, std::function<std::time_t()> wallClock);
@@ -186,6 +202,12 @@ public:
     // answer arriving early shortens and a busy channel holds still.
     std::vector<QueuedWait> queuedWaits() const;
 
+    // Sends a chat message waiting for its first turn on the air at the
+    // given Glissando tempo, whatever the console or Auto shift picks, or
+    // with 0 at whichever tempo is set when it keys. Its retries keep it.
+    // False if the message is not waiting for its first turn.
+    bool setMessageTempo(int64_t messageId, int gear);
+
     // What the operator can do with a chat message or ping of ours that is
     // still outstanding. One waiting for its first turn on the air can be
     // removed from the queue, and is then never sent. One on the air,
@@ -239,6 +261,7 @@ private:
         uint64_t deadlineMs = 0;
         uint64_t sentAtMs = 0;   // end of our burst, for the reply window
         uint64_t notBeforeMs = 0; // retry backoff; nothing to do with the far end
+        int gear = 0;            // the tempo the operator chose; 0 for the one set now
         TransmissionState state = TransmissionState::Queued;
     };
 
@@ -336,6 +359,7 @@ private:
 
     uint64_t quietUntilMs_;           // turnarounds: nothing keys before this
     uint64_t ownTrafficQuietUntilMs_; // the answered station's turn: no keying of our own
+    uint64_t operatorHoldUntilMs_;    // "Woah!": nothing keys before this
     uint32_t jitterState_;
 
     // How long listeners may go on treating the channel as ours after the

@@ -317,7 +317,17 @@ bool TextMessagingModem::modulate(const std::vector<OutgoingBurst>& bursts,
             std::lock_guard<std::mutex> lock(glissandoMutex_);
             // Replies too go in our own tempo, the one chosen for this
             // station's power and path, not the asker's; see AnswerTempo.h.
+            // A message the operator moved to a tempo of its own goes in
+            // that one; it keys alone, so the keying has only the one.
             settings.gear = transmitGearLocked();
+            for (const OutgoingBurst& burst : bursts)
+            {
+                if (burst.gear >= Glissando::MIN_GEAR && burst.gear <= Glissando::MAX_GEAR)
+                {
+                    settings.gear = burst.gear;
+                    break;
+                }
+            }
             settings.scale = glissando_.scale;
             settings.tuningOffsetHz = glissando_.tuningOffsetHz;
             chords = glissando_.chords;
@@ -733,6 +743,24 @@ AirTiming TextMessagingModem::airTiming() const
                                       chords ? Glissando::OPENING_CHORD_SECONDS : 0.0,
                                       replyChord, closingSeconds,
                                       chords ? replyChord + CHORD_HEARD_SECONDS : 0.0);
+}
+
+double TextMessagingModem::airTimeScale(int gear) const
+{
+    if (!glissandoOn_.load(std::memory_order_acquire)) return 1.0;
+
+    int current = 0;
+    {
+        std::lock_guard<std::mutex> lock(glissandoMutex_);
+        current = transmitGearLocked();
+    }
+
+    // A duet carries two payloads per frame.
+    auto secondsPerPayload = [](int g) {
+        const Glissando::GearInfo& info = Glissando::gearInfo(g);
+        return info.frameSeconds() / info.voices;
+    };
+    return secondsPerPayload(gear) / secondsPerPayload(current);
 }
 
 double TextMessagingModem::glissandoMessageSeconds(size_t textBytes) const

@@ -77,10 +77,15 @@ public:
     virtual bool transmit(const std::vector<TextMessaging::OutgoingBurst>& bursts) override;
     virtual bool isTransmitting() const override;
     virtual bool isChannelBusy() const override;
+    virtual double airTimeScale(int gear) const override;
     virtual void poll() override;
 
     // Drops anything queued and unkeys. Used when audio stops.
     void abort();
+
+    // How much of the transmission on the air has been played, from 0 to 1,
+    // across every keying it was split into; negative when nothing is.
+    double keyingProgress() const;
 
 private:
     void unkey();
