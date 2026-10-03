@@ -124,6 +124,7 @@ private:
     void updateSelectionControls();
     void addStation();
     void send(const std::string& destination);
+    bool queueText(const std::string& text, const std::string& destination);
     void appendMessage(const TextMessaging::TextMessage& message);
     void updateTransmitControls();
     void setColumnIfChanged(long item, int column, const wxString& text);
@@ -164,6 +165,7 @@ private:
     void OnChatContextMenu(wxContextMenuEvent& event);
     void OnMenuCancelMessage(wxCommandEvent& event);
     void OnMenuWoah(wxCommandEvent& event);
+    void OnMenuResend(wxCommandEvent& event);
     void OnMenuTempo(wxCommandEvent& event);
     void OnMenuClearMessages(wxCommandEvent& event);
     void OnAddStationText(wxCommandEvent& event);
@@ -234,6 +236,7 @@ private:
     // The message the chat log's menu was opened on, by store id; 0 when it
     // offered nothing to remove or abort.
     int64_t m_menuMessageId = 0;
+    TextMessaging::TextMessage m_menuResend; // the message Re-send would copy; id 0 for none
 
     std::vector<TextMessaging::TextMessage> m_messages;
 };
