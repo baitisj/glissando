@@ -35,6 +35,7 @@
 #ifndef __FDV_TEXT_MESSAGING_DIALOG__
 #define __FDV_TEXT_MESSAGING_DIALOG__
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -111,6 +112,8 @@ private:
     // redraw that changes no message, only how a chip looks.
     void renderChat(bool keepPlace = false);
     void updateEngageChips();
+    void updateQueueBars();
+    wxString queueBarChip(const TextMessaging::TextMessage& message);
     void refreshStations();
     std::string selectedCallsign() const;
     long stationItem(const std::string& callsign) const;
@@ -189,6 +192,21 @@ private:
     // SEND and flashes red, in step with the Engage button.
     bool m_waitingForEngage = false;
     bool m_engageChipLit = false;
+
+    // Otherwise it counts down: a bar the length of the wait it had when it
+    // joined the queue, shrinking to nothing as its turn comes. Drawn as a
+    // picture the chat page loads from memory, one name per redraw.
+    struct QueueBar
+    {
+        int64_t totalMs = 0;     // the longest wait it has been given
+        int64_t remainingMs = 0;
+        bool channelBusy = false; // held still, and dimmed
+        int fillPixels = -1;      // as last drawn
+    };
+    std::map<int64_t, QueueBar> m_queueBars;
+    std::vector<wxString> m_queueBarImages;     // on the page now
+    std::vector<wxString> m_newQueueBarImages;  // for the page being built
+    unsigned m_queueBarGeneration = 0;
 
     // Remembered so the one second timer only touches the controls when the
     // transmitter's state, or whether it may be used, actually changes,

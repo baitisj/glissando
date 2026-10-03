@@ -108,6 +108,7 @@ TextMessagingProtocol::TextMessagingProtocol(MessageStore& store, HeardStationLi
     , ownTrafficQuietUntilMs_(0)
     , jitterState_(1)
     , keyingHeldUntilMs_(0)
+    , keyingEndsMs_(0)
     , answeredHoldUntilMs_(0)
     , channelBusy_(false)
     , channelBusySinceMs_(0)
@@ -1107,6 +1108,71 @@ bool TextMessagingProtocol::isMessageQueued(int64_t messageId) const
                        { return pending.state == TransmissionState::Queued && pending.message.id == messageId; });
 }
 
+// The air time of an entry's next keying: a burst per frame not yet
+// confirmed. Each is counted as long as a text fragment, which a reply is
+// not, and a keying's chords are counted once per burst; a little long,
+// which is the side to err on for a countdown.
+uint64_t TextMessagingProtocol::airTimeLocked(const PendingTransmission& pending) const
+{
+    uint64_t bursts = 0;
+    for (size_t index = 0; index < pending.frames.size(); index++)
+    {
+        if ((pending.confirmed & (1u << index)) == 0) bursts++;
+    }
+    return bursts * (uint64_t)timing_.textFragmentAirMs;
+}
+
+std::vector<QueuedWait> TextMessagingProtocol::queuedWaits() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::vector<QueuedWait> waits;
+    uint64_t nowMs = monotonicMs_();
+    uint64_t turnaround = (uint64_t)timing_.turnaroundAfterTxMs;
+    uint64_t window = (uint64_t)timing_.replyWindowMs;
+
+    // The keying on the air, and after it the turnaround and, if it asked
+    // anything or answered anybody, the far end's turn.
+    uint64_t at = nowMs;
+    bool onAir = false;
+    bool owesTurn = false;
+    for (const PendingTransmission& pending : outbox_)
+    {
+        if (pending.state != TransmissionState::Transmitting) continue;
+        onAir = true;
+        if (pending.expectsAck || pending.reply) owesTurn = true;
+    }
+    if (onAir)
+    {
+        uint64_t end = std::max(nowMs, keyingEndsMs_);
+        at = end + turnaround + (owesTurn ? window : 0);
+    }
+    at = std::max(at, quietUntilLocked(false));
+
+    // Then the queue in order, each entry its air time and the far end's
+    // turn after it. A reply goes ahead of our own traffic, which then gives
+    // the answered station its turn.
+    for (const PendingTransmission& pending : outbox_)
+    {
+        if (pending.state != TransmissionState::Queued) continue;
+
+        uint64_t start = std::max(at, pending.notBeforeMs);
+        if (!pending.reply && !pending.isPing && pending.message.kind == MessageKind::Chat)
+        {
+            QueuedWait wait;
+            wait.messageId = pending.message.id;
+            wait.waitMs = (int64_t)(start - nowMs);
+            wait.channelBusy = channelBusy_;
+            waits.push_back(wait);
+        }
+
+        at = start + airTimeLocked(pending) + turnaround +
+             (pending.expectsAck || pending.reply ? window : 0);
+    }
+
+    return waits;
+}
+
 // When the transmitter may next be used. Beyond the plain turnaround, a
 // message we have sent and not yet had answered buys the far end room to
 // answer it: it waits out its own turnaround first and then sends a whole
@@ -1332,6 +1398,9 @@ void TextMessagingProtocol::serviceOutboxLocked(uint64_t nowMs, bool frozen,
                             ? nowMs + (uint64_t)timing_.textFragmentAirMs +
                                   (uint64_t)timing_.signallingFollowedReservationMs
                             : 0;
+
+                    keyingEndsMs_ = nowMs;
+                    for (PendingTransmission* entry : entries) keyingEndsMs_ += airTimeLocked(*entry);
 
                     for (PendingTransmission* entry : entries)
                     {

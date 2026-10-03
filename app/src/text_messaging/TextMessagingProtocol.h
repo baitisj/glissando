@@ -179,6 +179,13 @@ public:
     // and engaging will not send it.
     bool isMessageQueued(int64_t messageId) const;
 
+    // How long each chat message waiting for its first turn on the air has
+    // still to wait, in queue order: the keying on the air and the far end's
+    // turn after it, the turnarounds and holds now running, and the air time
+    // and answer window of everything ahead of it. An estimate, which an
+    // answer arriving early shortens and a busy channel holds still.
+    std::vector<QueuedWait> queuedWaits() const;
+
     // What the operator can do with a chat message or ping of ours that is
     // still outstanding. One waiting for its first turn on the air can be
     // removed from the queue, and is then never sent. One on the air,
@@ -302,6 +309,7 @@ private:
     // shortens a wait that is already running.
     void deferTransmissionLocked(uint64_t fromMs, int baseMs, int jitterMs);
     uint64_t quietUntilLocked(bool forReply) const;
+    uint64_t airTimeLocked(const PendingTransmission& pending) const;
     bool channelFrozenLocked(uint64_t nowMs);
     void holdTimersLocked(uint64_t pausedMs);
     uint32_t randomDelayLocked(int maxMs);
@@ -335,6 +343,10 @@ private:
     // A reply with something behind it tells them more follows, and one that
     // then loses what follows reserves for two fragments after the reply.
     uint64_t keyingHeldUntilMs_;
+
+    // When the keying now on the air should end, from its air time; for
+    // queuedWaits().
+    uint64_t keyingEndsMs_;
 
     // Our own traffic waits for the station a reply with something behind
     // it answered, for as long as keyingHeldUntilMs_ says it may still be

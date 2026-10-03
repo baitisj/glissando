@@ -2160,6 +2160,49 @@ void testSendRequiresCallsign()
 
 } // namespace
 
+// The countdown on a queued message's chip: each waits for everything
+// ahead of it, ticks down while that goes on the air, and says when the
+// channel is somebody else's.
+void testQueuedWaitsCountDown()
+{
+    Station sender("W1AW");
+    std::string error;
+    CHECK(sender.protocol.sendMessage("one", "K1ABC", error));
+    CHECK(sender.protocol.sendMessage("two", "", error));
+    CHECK(sender.protocol.sendPing("K1ABC", error));
+    AirTiming timing = sender.protocol.airTiming();
+
+    std::vector<QueuedWait> waits = sender.protocol.queuedWaits();
+    CHECK(waits.size() == 2); // the ping has no chip
+    CHECK(waits[0].messageId == sender.observer.added[0].id);
+    CHECK(waits[1].messageId == sender.observer.added[1].id);
+    CHECK(!waits[0].channelBusy);
+    // "one" asks for an acknowledgement, so "two" waits for its air time,
+    // the turnaround and the far end's turn.
+    CHECK(waits[1].waitMs - waits[0].waitMs >=
+          (int64_t)timing.textFragmentAirMs + timing.turnaroundAfterTxMs + timing.replyWindowMs);
+
+    // "one" goes on the air; "two" counts down with it.
+    sender.nowMs += std::max(MAX_TURNAROUND_MILLISECONDS, MAX_RETRY_BACKOFF_MILLISECONDS) + 1;
+    sender.protocol.tick();
+    CHECK(sender.transport.transmitting);
+    waits = sender.protocol.queuedWaits();
+    CHECK(waits.size() == 1);
+    CHECK(waits[0].messageId == sender.observer.added[1].id);
+    int64_t onAir = waits[0].waitMs;
+    CHECK(onAir >= (int64_t)timing.textFragmentAirMs + timing.turnaroundAfterTxMs + timing.replyWindowMs);
+    sender.nowMs += 1000;
+    sender.protocol.tick();
+    waits = sender.protocol.queuedWaits();
+    CHECK(waits.size() == 1 && waits[0].waitMs == onAir - 1000);
+
+    // Somebody else on the channel.
+    sender.transport.channelBusy = true;
+    sender.protocol.tick();
+    waits = sender.protocol.queuedWaits();
+    CHECK(waits.size() == 1 && waits[0].channelBusy);
+}
+
 int main()
 {
     testAddressedMessageIsAcknowledged();
@@ -2184,6 +2227,7 @@ int main()
     testAirTimingWaitsForTheSlowestAnswer();
     testAirTimingCountsTheChords();
     testReplyWindowEndsAtTheAnswersChord();
+    testQueuedWaitsCountDown();
     testPingWaitsForAnAnswerAtASlowerTempo();
     testAutoReplyCanBeDisabled();
     testAckWaitDoesNotBlockTheQueue();
