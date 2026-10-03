@@ -106,6 +106,7 @@ TextMessagingProtocol::TextMessagingProtocol(MessageStore& store, HeardStationLi
     , nextAirId_(randomAirId())
     , quietUntilMs_(0)
     , ownTrafficQuietUntilMs_(0)
+    , operatorHoldUntilMs_(0)
     , jitterState_(1)
     , keyingHeldUntilMs_(0)
     , keyingEndsMs_(0)
@@ -199,6 +200,15 @@ void TextMessagingProtocol::abortTransmission()
     deliver(events);
 }
 
+uint64_t TextMessagingProtocol::holdTransmissions()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    uint64_t nowMs = monotonicMs_();
+    operatorHoldUntilMs_ = std::max(nowMs, operatorHoldUntilMs_) + (uint64_t)timing_.frameAirMs;
+    return operatorHoldUntilMs_ - nowMs;
+}
+
 // Everything waiting for the transmitter, dropped. A chat line says it was
 // not sent; an acknowledgement or pong has no line and simply goes.
 void TextMessagingProtocol::discardQueuedLocked(std::vector<PendingEvent>& events)
@@ -244,6 +254,7 @@ AirTiming AirTiming::forFrameSeconds(double frameSeconds, int bytesPerFrame,
     double chordsAir = chordSeconds + closingChordSeconds;
     double signallingAir = frames(SIGNALLING_FRAME_BYTES) * frameSeconds + chordsAir;
     double textAir = frames(TEXT_FRAME_BYTES) * frameSeconds + chordsAir;
+    timing.frameAirMs = ms(frameSeconds);
 
     // The far end hears a burst of ours only once its first frame has been
     // decoded, a frame and a search after it began (after the opening
@@ -1192,7 +1203,9 @@ std::vector<QueuedWait> TextMessagingProtocol::queuedWaits() const
 // channel: those are for keyings of our own.
 uint64_t TextMessagingProtocol::quietUntilLocked(bool forReply) const
 {
-    uint64_t quietUntil = quietUntilMs_;
+    // The operator's "Woah!" holds everything, replies too: whoever they
+    // can hear would be stomped on by an acknowledgement just the same.
+    uint64_t quietUntil = std::max(quietUntilMs_, operatorHoldUntilMs_);
     if (forReply) return quietUntil;
 
     if (ownTrafficQuietUntilMs_ > quietUntil) quietUntil = ownTrafficQuietUntilMs_;

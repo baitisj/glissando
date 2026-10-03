@@ -2203,6 +2203,47 @@ void testQueuedWaitsCountDown()
     CHECK(waits.size() == 1 && waits[0].channelBusy);
 }
 
+// "Woah!": the operator hears somebody the receiver missed. Nothing keys,
+// a reply included, until a frame's air time has passed, and each press
+// adds another.
+void testWoahHoldsTheQueue()
+{
+    Station sender("W1AW");
+    Station receiver("VK3ABC");
+    AirTiming timing = sender.protocol.airTiming();
+    timing.frameAirMs = 60 * 1000; // well past every turnaround
+    sender.protocol.setAirTiming(timing);
+    receiver.protocol.setAirTiming(timing);
+    uint64_t frame = (uint64_t)timing.frameAirMs;
+
+    std::string error;
+    CHECK(sender.protocol.sendMessage("one", "VK3ABC", error));
+    CHECK(sender.protocol.holdTransmissions() == frame);
+    CHECK(sender.protocol.holdTransmissions() == 2 * frame);
+    std::vector<QueuedWait> waits = sender.protocol.queuedWaits();
+    CHECK(waits.size() == 1 && waits[0].waitMs == (int64_t)(2 * frame));
+
+    // The turnarounds alone would have let it go by now.
+    sender.nowMs += 2 * frame - 1;
+    sender.protocol.tick();
+    CHECK(sender.transport.transmissions.empty());
+    sender.nowMs += 1;
+    sender.protocol.tick();
+    CHECK(sender.transport.transmissions.size() == 1);
+    sender.transport.transmitting = false;
+    sender.protocol.tick();
+
+    // The acknowledgement waits too.
+    receiver.receiveFrom(sender.transport);
+    CHECK(receiver.protocol.holdTransmissions() == frame);
+    receiver.nowMs += frame - 1;
+    receiver.protocol.tick();
+    CHECK(receiver.transport.transmissions.empty());
+    receiver.nowMs += 1;
+    receiver.protocol.tick();
+    CHECK(receiver.transport.transmissions.size() == 1);
+}
+
 int main()
 {
     testAddressedMessageIsAcknowledged();
@@ -2228,6 +2269,7 @@ int main()
     testAirTimingCountsTheChords();
     testReplyWindowEndsAtTheAnswersChord();
     testQueuedWaitsCountDown();
+    testWoahHoldsTheQueue();
     testPingWaitsForAnAnswerAtASlowerTempo();
     testAutoReplyCanBeDisabled();
     testAckWaitDoesNotBlockTheQueue();

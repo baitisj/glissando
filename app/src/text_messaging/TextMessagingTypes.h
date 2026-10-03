@@ -238,6 +238,7 @@ struct AirTiming
     int replyWindowMs = REPLY_WINDOW_MILLISECONDS;
     int turnaroundJitterMs = TURNAROUND_JITTER_MILLISECONDS;
     int textFragmentAirMs = TEXT_FRAGMENT_AIR_MILLISECONDS;
+    int frameAirMs = TEXT_FRAGMENT_AIR_MILLISECONDS; // one of the modem's frames, for "Woah!"
     int signallingFollowedReservationMs = SIGNALLING_FOLLOWED_RESERVATION_MILLISECONDS;
     int maxChannelBusyMs = MAX_CHANNEL_BUSY_MILLISECONDS;
     int ackTimeoutMs = ACK_TIMEOUT_MILLISECONDS;

@@ -89,6 +89,7 @@ enum
     ID_MENU_REMOVE_MESSAGE,
     ID_MENU_ABORT_MESSAGE,
     ID_MENU_CLEAR_MESSAGES,
+    ID_MENU_WOAH,
     ID_PING,
     ID_SEND,
     ID_AUTO_REPLY,
@@ -317,6 +318,7 @@ TextMessagingDialog::TextMessagingDialog(wxWindow* parent, wxWindowID id, const 
             wxCommandEventHandler(TextMessagingDialog::OnMenuCancelMessage));
     Connect(ID_MENU_CLEAR_MESSAGES, wxEVT_COMMAND_MENU_SELECTED,
             wxCommandEventHandler(TextMessagingDialog::OnMenuClearMessages));
+    Connect(ID_MENU_WOAH, wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TextMessagingDialog::OnMenuWoah));
     Connect(ID_AUTO_REPLY, wxEVT_TOGGLEBUTTON,
             wxCommandEventHandler(TextMessagingDialog::OnAutoReplyToggled));
     Connect(ID_STATION_LIST, wxEVT_COMMAND_LIST_ITEM_SELECTED,
@@ -1240,6 +1242,8 @@ void TextMessagingDialog::OnChatContextMenu(wxContextMenuEvent& event)
     }
 
     wxMenu menu;
+    menu.Append(ID_MENU_WOAH, _("Woah!"));
+    menu.AppendSeparator();
     if (cancel == TextMessagingProtocol::Cancel::Remove)
     {
         menu.Append(ID_MENU_REMOVE_MESSAGE, _("Remove from Queue"));
@@ -1292,6 +1296,17 @@ void TextMessagingDialog::OnMenuCancelMessage(wxCommandEvent&)
                  done == TextMessagingProtocol::Cancel::Remove ? "removed from queue" : "aborted",
                  onAir ? " on the air" : "");
     }
+}
+
+// The operator hears somebody the receiver has missed: hold the
+// transmitter a frame longer, and the queue's countdowns with it.
+void TextMessagingDialog::OnMenuWoah(wxCommandEvent&)
+{
+    uint64_t heldMs = TextMessagingSession::instance().protocol().holdTransmissions();
+    int seconds = (int)((heldMs + 999) / 1000);
+    setStatus(wxString::Format(_("Woah! Holding the transmitter for %d s."), seconds), StatusKind::Queued);
+    updateQueueBars();
+    if (uiLogEnabled()) log_info("UI: woah, transmitter held for %d s", seconds);
 }
 
 // Clears the log for good, here and in the message store. Messages still

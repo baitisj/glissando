@@ -162,6 +162,7 @@ private:
     void OnChatLeftUp(wxMouseEvent& event);
     void OnChatContextMenu(wxContextMenuEvent& event);
     void OnMenuCancelMessage(wxCommandEvent& event);
+    void OnMenuWoah(wxCommandEvent& event);
     void OnMenuClearMessages(wxCommandEvent& event);
     void OnAddStationText(wxCommandEvent& event);
     void OnAddStation(wxCommandEvent& event);

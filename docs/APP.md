@@ -239,6 +239,13 @@ now, waiting for its acknowledgement or pong, or waiting to be retried).
 Either way the rest of the queue carries on. A ping's line says where it has
 got to: queued, on the air, awaiting PONG, not sent or aborted.
 
+The right-click menu also offers `Woah!`, for when you can hear somebody the
+receiver has missed. Nothing keys, acknowledgements and pongs included, until
+one more modem frame at your tempo could have gone by (about 7 s at Presto,
+55 s at Adagio). Each press adds another frame to whatever hold is still
+running, and the countdown bars fill to match. A keying already on the air
+carries on; that is what `Abort` is for.
+
 A message waiting for its first turn on the air shows a countdown bar on its
 chip, with QUEUED across it in lettering that turns dark where the bar is
 filled and light where it is empty. The bar starts full at the wait the

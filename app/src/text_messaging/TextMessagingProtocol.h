@@ -132,6 +132,13 @@ public:
     // keying itself.
     void abortTransmission();
 
+    // "Woah!": the operator hears somebody the receiver has missed. Nothing
+    // keys, replies included, until one more of the modem's frames could
+    // have gone by, added to any such hold still running, so each press
+    // buys more. A keying already on the air carries on. Returns how long the
+    // hold now has to run.
+    uint64_t holdTransmissions();
+
     // Replaces the clocks the protocol reads. Milliseconds must be monotonic
     // (timeouts) and the wall clock is what the chat window timestamps with.
     void setClocks(std::function<uint64_t()> monotonicMs, std::function<std::time_t()> wallClock);
@@ -336,6 +343,7 @@ private:
 
     uint64_t quietUntilMs_;           // turnarounds: nothing keys before this
     uint64_t ownTrafficQuietUntilMs_; // the answered station's turn: no keying of our own
+    uint64_t operatorHoldUntilMs_;    // "Woah!": nothing keys before this
     uint32_t jitterState_;
 
     // How long listeners may go on treating the channel as ours after the
