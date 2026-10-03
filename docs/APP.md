@@ -175,14 +175,18 @@ codec2 defaults are unchanged, and `AirTiming::forFrameSeconds()` sizes them
 to the tempo being sent. Carrier sense only sees a Glissando burst once its
 first frame decodes, so the waits for the far end are sized to whole bursts.
 
-A pong, acknowledgement or partial acknowledgement goes back in the tempo
-its station was last heard in, along with anything riding behind it in the
-same keying, so a station waiting on an answer waits for one in its own
-tempo. The waits also cover every tempo heard from anybody in the last 15
-minutes, for a station on a build that answers in its own tempo. Before
-this they covered every tempo the receiver listens for: at Presto an
-unanswered ping held the queue for about 2 minutes and gave up after 2.2;
-now it holds it for 39 s and gives up after 55 s.
+A pong, acknowledgement or partial acknowledgement goes out in the tempo
+the answering station sends at, the one chosen on its console or by Auto
+shift, like the rest of its traffic. A QRP station on a slow tempo is then
+heard answering a fast one, where at the fast station's tempo it might not
+be. So a station waiting on an answer allows for its own tempo and every
+tempo heard from anybody in the last 15 minutes. Before this the waits
+covered every tempo the receiver listens for: at Presto an unanswered ping
+held the queue for about 2 minutes and gave up after 2.2. A slower answer
+from a station not heard lately is caught by its opening chord, which
+freezes the timers until its keying ends; below about −14 dB, where the
+chord goes unheard, the ping may give up first, and the pong still shows
+in the log when it arrives.
 
 A pong or acknowledgement with a message of ours riding behind it tells
 every listener that more follows, and a listener that then loses the message
