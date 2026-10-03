@@ -171,6 +171,53 @@ bool TextMessagingProtocol::autoReplyEnabled() const
     return autoReplyEnabled_;
 }
 
+bool TextMessagingProtocol::stationAutoAcks(const std::string& callsign) const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return noAutoAckStations_.count(FrameCodec::normalizeCallsign(callsign)) == 0;
+}
+
+bool TextMessagingProtocol::expectsAckFromLocked(const std::string& destination) const
+{
+    return !destination.empty() && noAutoAckStations_.count(destination) == 0;
+}
+
+// What a station just said about its Auto acknowledge. A change is worth a
+// line in the log, since it changes what our messages to it do, and messages
+// to it that have not gone out yet follow it: they wait for an
+// acknowledgement, or do not, from their next keying. One already waiting
+// keeps waiting, and ends as sent rather than retrying if its wait runs out
+// while the station says it will not answer.
+void TextMessagingProtocol::noteStationAutoAckLocked(const std::string& station, bool autoAck,
+                                                     std::vector<PendingEvent>& events)
+{
+    std::string callsign = FrameCodec::normalizeCallsign(station);
+    if (callsign.empty()) return;
+
+    bool wasAutoAck = noAutoAckStations_.count(callsign) == 0;
+    if (wasAutoAck == autoAck) return;
+
+    if (autoAck)
+    {
+        noAutoAckStations_.erase(callsign);
+        addSystemMessageLocked(callsign + " : Auto ACK on, messages to it retry again",
+                               callsign, events);
+    }
+    else
+    {
+        noAutoAckStations_.insert(callsign);
+        addSystemMessageLocked(callsign + " : Auto ACK off, messages to it go once without retries",
+                               callsign, events);
+    }
+
+    for (PendingTransmission& pending : outbox_)
+    {
+        if (pending.isPing || pending.reply || pending.mode != BurstMode::Text) continue;
+        if (pending.destination != callsign || pending.state != TransmissionState::Queued) continue;
+        pending.expectsAck = autoAck;
+    }
+}
+
 void TextMessagingProtocol::setTransmitInhibited(const std::string& reason)
 {
     std::vector<PendingEvent> events;
@@ -428,7 +475,7 @@ bool TextMessagingProtocol::queueMessageLocked(const std::string& text,
     // appears in the chat window as something that was sent.
     PendingTransmission pending;
     pending.mode = BurstMode::Text;
-    pending.expectsAck = !broadcast;
+    pending.expectsAck = expectsAckFromLocked(normalizedDestination);
     pending.isPing = false;
     pending.destination = normalizedDestination;
     pending.state = TransmissionState::Queued;
@@ -750,6 +797,25 @@ void TextMessagingProtocol::onFrameReceived(const Frame& frame, float snr)
         // Whoever the frame is for, its sender holds the channel for the rest
         // of its keying.
         reserveChannelForKeyingLocked(frame, monotonicMs_());
+
+        // Messages, broadcasts and pings say whether their sender acknowledges
+        // by itself. An acknowledgement or a pong to us is that station doing so.
+        switch (frame.type)
+        {
+            case FrameType::Message:
+            case FrameType::Broadcast:
+            case FrameType::Ping:
+                noteStationAutoAckLocked(frame.originCallsign, frame.senderAutoAck, events);
+                break;
+            case FrameType::MessageAck:
+            case FrameType::MessagePartialAck:
+            case FrameType::PingAck:
+                if (isAddressedToMeLocked(frame))
+                {
+                    noteStationAutoAckLocked(frame.originCallsign, true, events);
+                }
+                break;
+        }
 
         switch (frame.type)
         {
@@ -1471,6 +1537,15 @@ bool TextMessagingProtocol::retryOrFailLocked(size_t index, uint64_t nowMs,
 {
     PendingTransmission& waiting = outbox_[index];
 
+    // It went out; the station has since said it will not answer, so another
+    // try would only get the same silence.
+    if (!waiting.isPing && !expectsAckFromLocked(waiting.destination))
+    {
+        updateStatusLocked(waiting, MessageStatus::Sent, events);
+        outbox_.erase(outbox_.begin() + (std::ptrdiff_t)index);
+        return true;
+    }
+
     if (!waiting.isPing && waiting.retries < MAX_MESSAGE_RETRIES)
     {
         waiting.retries++;
@@ -1482,7 +1557,10 @@ bool TextMessagingProtocol::retryOrFailLocked(size_t index, uint64_t nowMs,
 
     if (waiting.isPing)
     {
-        addSystemMessageLocked(waiting.destination + " : no response to PING",
+        addSystemMessageLocked(waiting.destination +
+                                   (expectsAckFromLocked(waiting.destination)
+                                        ? " : no response to PING"
+                                        : " : no response to PING (its Auto ACK is off)"),
                                waiting.destination, events);
     }
 
@@ -1545,6 +1623,7 @@ std::vector<OutgoingBurst> TextMessagingProtocol::keyingBurstsLocked(
         BurstMode mode = order[position].first->mode;
         Frame frame = *order[position].second;
         frame.burstsFollowing = (uint8_t)(order.size() - 1 - position);
+        frame.senderAutoAck = autoReplyEnabled_;
 
         // Every frame encoded when it was queued, and a keying holds at most a
         // reply and one message, so the count after any fragment still fits:

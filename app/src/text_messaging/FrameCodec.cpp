@@ -94,6 +94,11 @@ static_assert(((uint8_t)FrameType::Ping & TYPE_MORE_FOLLOWS) == 0 &&
                   ((uint8_t)FrameType::Broadcast & TYPE_MORE_FOLLOWS) == 0 &&
                   ((uint8_t)FrameType::MessagePartialAck & TYPE_MORE_FOLLOWS) == 0,
               "a frame type value collides with the more-follows bit");
+static_assert((((uint8_t)FrameType::Ping | (uint8_t)FrameType::PingAck | (uint8_t)FrameType::Message |
+                (uint8_t)FrameType::MessageAck | (uint8_t)FrameType::Broadcast |
+                (uint8_t)FrameType::MessagePartialAck) &
+               TYPE_NO_AUTO_ACK) == 0,
+              "a frame type value collides with the no-auto-ACK bit");
 
 static_assert(OFFSET_AIR_ID == OFFSET_ORIGIN_CALLSIGN + PACKED_CALLSIGN_BYTES,
               "packed callsign does not fit its header field");
@@ -206,9 +211,19 @@ std::string FrameCodec::unpackCallsign(const uint8_t* in)
     return result;
 }
 
+FrameType FrameCodec::frameType(uint8_t type, bool* noAutoAckOut)
+{
+    // Only messages and broadcasts carry the flag in their type.
+    uint8_t base = (uint8_t)(type & ~TYPE_NO_AUTO_ACK);
+    bool flagged = (type & TYPE_NO_AUTO_ACK) != 0 &&
+                   (base == (uint8_t)FrameType::Message || base == (uint8_t)FrameType::Broadcast);
+    if (noAutoAckOut != nullptr) *noAutoAckOut = flagged;
+    return (FrameType)(flagged ? base : type);
+}
+
 bool FrameCodec::isKnownFrameType(uint8_t type)
 {
-    switch ((FrameType)type)
+    switch (frameType(type))
     {
         case FrameType::Ping:
         case FrameType::PingAck:
@@ -249,9 +264,19 @@ std::vector<uint8_t> FrameCodec::encode(const Frame& frame, int frameBytes)
     const int header = headerBytes(frame.type);
     const bool signalling = isSignallingFrameType(frame.type);
 
+    // A ping's first payload byte is its flags, sent only when there is
+    // something to say, so a ping from a station with Auto acknowledge on is
+    // the same as one from a build before the flag.
+    std::vector<uint8_t> payload = frame.payload;
+    if (frame.type == FrameType::Ping && !frame.senderAutoAck)
+    {
+        if (payload.empty()) payload.push_back(0);
+        payload[0] |= PING_FLAG_NO_AUTO_ACK;
+    }
+
     if (frameBytes < header) return {};
-    if (frame.payload.size() > 255) return {};
-    if ((int)frame.payload.size() > frameBytes - header) return {};
+    if (payload.size() > 255) return {};
+    if ((int)payload.size() > frameBytes - header) return {};
     if (normalizeCallsign(frame.originCallsign).empty()) return {};
 
     // A signalling frame has nowhere to put the fragment fields, so it may
@@ -272,6 +297,7 @@ std::vector<uint8_t> FrameCodec::encode(const Frame& frame, int frameBytes)
 
     out[OFFSET_TYPE] = (uint8_t)frame.type;
     if (signalling && frame.burstsFollowing > 0) out[OFFSET_TYPE] |= TYPE_MORE_FOLLOWS;
+    if (!signalling && !frame.senderAutoAck) out[OFFSET_TYPE] |= TYPE_NO_AUTO_ACK;
     out[OFFSET_DEST_CRC] = (uint8_t)(frame.destinationCrc >> 16);
     out[OFFSET_DEST_CRC + 1] = (uint8_t)(frame.destinationCrc >> 8);
     out[OFFSET_DEST_CRC + 2] = (uint8_t)frame.destinationCrc;
@@ -286,11 +312,11 @@ std::vector<uint8_t> FrameCodec::encode(const Frame& frame, int frameBytes)
         out[OFFSET_FRAGMENT_COUNT] = frame.fragmentCount;
     }
 
-    out[payloadLengthOffset(frame.type)] = (uint8_t)frame.payload.size();
+    out[payloadLengthOffset(frame.type)] = (uint8_t)payload.size();
 
-    if (!frame.payload.empty())
+    if (!payload.empty())
     {
-        std::memcpy(&out[header], frame.payload.data(), frame.payload.size());
+        std::memcpy(&out[header], payload.data(), payload.size());
     }
 
     return out;
@@ -306,7 +332,8 @@ bool FrameCodec::decode(const uint8_t* data, int length, Frame& frameOut)
     const uint8_t typeValue = data[OFFSET_TYPE] & TYPE_VALUE_MASK;
     if (!isKnownFrameType(typeValue)) return false;
 
-    FrameType type = (FrameType)typeValue;
+    bool noAutoAck = false;
+    FrameType type = frameType(typeValue, &noAutoAck);
     const int header = headerBytes(type);
     const bool signalling = isSignallingFrameType(type);
     if (length < header) return false;
@@ -344,6 +371,11 @@ bool FrameCodec::decode(const uint8_t* data, int length, Frame& frameOut)
     frameOut.fragmentCount = fragmentCount;
     frameOut.burstsFollowing = burstsFollowing;
     frameOut.payload.assign(&data[header], &data[header] + payloadLength);
+    if (type == FrameType::Ping)
+    {
+        noAutoAck = !frameOut.payload.empty() && (frameOut.payload[0] & PING_FLAG_NO_AUTO_ACK) != 0;
+    }
+    frameOut.senderAutoAck = !noAutoAck;
 
     return true;
 }
@@ -359,7 +391,7 @@ void FrameCodec::expectedFrameStart(const std::string& ownCallsign, const std::s
     // is anybody's guess.
     const FrameType types[] = {FrameType::Ping, FrameType::PingAck, FrameType::Message,
                                FrameType::MessageAck, FrameType::Broadcast, FrameType::MessagePartialAck};
-    uint8_t used = TYPE_MORE_FOLLOWS;
+    uint8_t used = TYPE_MORE_FOLLOWS | TYPE_NO_AUTO_ACK;
     for (FrameType type : types) used |= (uint8_t)type;
     masksOut[OFFSET_TYPE] = (uint8_t)~used;
 

@@ -616,7 +616,8 @@ void TextMessagingDialog::buildControls()
     m_chkAutoReply = new Button(transmitPlate, ID_AUTO_REPLY, _("Auto acknowledge"), true, wxSize(190, 30));
     m_chkAutoReply->SetChecked(TextMessagingSession::instance().protocol().autoReplyEnabled());
     m_chkAutoReply->SetToolTip(
-        _("When lit, this station transmits on its own to confirm messages and answer pings."));
+        _("When lit, this station transmits on its own to confirm messages and answer pings. "
+          "When dark, its messages and pings say so, and other stations send to it once without retrying."));
     bottomSizer->Add(m_chkAutoReply, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 10);
 
     m_txtStatus = new WrappingText(transmitPlate);
@@ -1441,7 +1442,9 @@ void TextMessagingDialog::OnAutoReplyToggled(wxCommandEvent& event)
 
     if (!m_chkAutoReply->IsChecked())
     {
-        setStatus(_("This station will no longer transmit on its own."));
+        setStatus(_("This station will no longer transmit on its own. Other stations will send to it "
+                    "once, without retries. Glissando 0.3 and older cannot read its messages until "
+                    "this is lit again."));
     }
     else
     {

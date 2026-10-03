@@ -81,6 +81,16 @@ constexpr int TEXT_FRAME_BYTES = 54;       // DATAC4: 448 bits - CRC16
 // carries how many, in the high nibble of its fragment index byte; a
 // signalling frame has no spare byte and carries only whether any do, in the
 // top bit of its type byte. See FrameCodec for the layout.
+//
+// A station with Auto acknowledge off says so, so that others do not retry
+// to it: its messages and broadcasts go with TYPE_NO_AUTO_ACK added to their
+// type, and its pings carry PING_FLAG_NO_AUTO_ACK in a payload byte. A station
+// with it on sends exactly what builds before the flag sent, and that is
+// what anything without the flag means. Builds before the flag ignore a
+// ping's payload, but drop a message or broadcast of a type they do not
+// know, so they cannot read a station that has Auto acknowledge off.
+constexpr uint8_t TYPE_NO_AUTO_ACK = 0x08;
+constexpr uint8_t PING_FLAG_NO_AUTO_ACK = 0x01;
 constexpr int SIGNALLING_HEADER_BYTES = 13;
 constexpr int TEXT_HEADER_BYTES = 15;
 constexpr int TEXT_BYTES_PER_FRAGMENT = TEXT_FRAME_BYTES - TEXT_HEADER_BYTES;

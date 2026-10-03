@@ -547,6 +547,158 @@ void testAutoReplyCanBeDisabled()
     CHECK(receiver.protocol.pendingCount() == 0);
 }
 
+// A station with Auto acknowledge off says so on everything it sends, and a
+// message to it goes once: no acknowledgement is coming, so it ends as sent
+// rather than retrying and failing. Hearing it say otherwise turns retries
+// back on.
+bool hasSystemLine(const RecordingObserver& observer, const std::string& text)
+{
+    for (const TextMessage& message : observer.added)
+    {
+        if (message.kind == MessageKind::System && message.text.find(text) != std::string::npos)
+            return true;
+    }
+    return false;
+}
+
+void testStationWithAutoAckOffIsNotRetried()
+{
+    Station sender("W1AW");
+    Station receiver("VK3ABC");
+    receiver.protocol.setAutoReplyEnabled(false);
+    CHECK(sender.protocol.stationAutoAcks("VK3ABC"));
+
+    std::string error;
+    CHECK(receiver.protocol.sendMessage("Listening only", "W1AW", error));
+    receiver.completeOneTransmission();
+    CHECK(receiver.transport.transmissions[0][0][0] == (0x20 | TYPE_NO_AUTO_ACK));
+    sender.receiveFrom(receiver.transport);
+    CHECK(!sender.protocol.stationAutoAcks("vk3abc"));
+    CHECK(hasSystemLine(sender.observer, "VK3ABC : Auto ACK off"));
+    sender.completeOneTransmission(); // our acknowledgement of it
+    size_t keyings = sender.transport.transmissions.size();
+
+    CHECK(sender.protocol.sendMessage("Copy that", "VK3ABC", error));
+    int64_t id = sender.observer.added.back().id;
+    sender.completeOneTransmission();
+    CHECK(sender.transport.transmissions.size() == keyings + 1);
+    CHECK(sender.observer.lastUpdateFor(id)->status == MessageStatus::Sent);
+    CHECK(sender.protocol.pendingCount() == 0);
+
+    // Nothing more goes, however long we wait.
+    sender.nowMs += ACK_TIMEOUT_MILLISECONDS * 10;
+    sender.protocol.tick();
+    CHECK(sender.transport.transmissions.size() == keyings + 1);
+    CHECK(!everUpdatedTo(sender.observer, id, MessageStatus::Retrying));
+
+    // Its own messages still get our acknowledgement, and a ping from it
+    // with Auto acknowledge back on turns retries back on.
+    receiver.protocol.setAutoReplyEnabled(true);
+    CHECK(receiver.protocol.sendPing("W1AW", error));
+    receiver.completeOneTransmission();
+    CHECK(decodeOne(receiver.transport.transmissions.back()[0]).senderAutoAck);
+    sender.receiveFrom(receiver.transport);
+    CHECK(sender.protocol.stationAutoAcks("VK3ABC"));
+    CHECK(hasSystemLine(sender.observer, "VK3ABC : Auto ACK on"));
+}
+
+void testPingSaysAutoAckIsOff()
+{
+    Station sender("W1AW");
+    Station receiver("VK3ABC");
+    receiver.protocol.setAutoReplyEnabled(false);
+
+    std::string error;
+    CHECK(receiver.protocol.sendPing("W1AW", error));
+    receiver.completeOneTransmission();
+    const std::vector<uint8_t>& ping = receiver.transport.transmissions[0][0];
+    CHECK(ping[0] == 0x10);
+    CHECK(ping[SIGNALLING_HEADER_BYTES - 1] == 1);
+    CHECK(ping[SIGNALLING_HEADER_BYTES] == PING_FLAG_NO_AUTO_ACK);
+    sender.receiveFrom(receiver.transport);
+    CHECK(!sender.protocol.stationAutoAcks("VK3ABC"));
+
+    // We still answer its ping, and our ping to it says why nothing came back.
+    CHECK(sender.protocol.pendingCount() == 1);
+    sender.completeOneTransmission();
+    CHECK(sender.protocol.sendPing("VK3ABC", error));
+    sender.completeOneTransmission();
+    sender.nowMs += PING_TIMEOUT_MILLISECONDS + 1;
+    sender.protocol.tick();
+    CHECK(hasSystemLine(sender.observer, "no response to PING (its Auto ACK is off)"));
+}
+
+// A message already waiting on its acknowledgement when the station says it
+// will not send one ends as sent when the wait runs out.
+void testWaitingMessageEndsWhenTheStationSaysItWillNotAnswer()
+{
+    Station sender("W1AW");
+    Station receiver("VK3ABC");
+
+    std::string error;
+    CHECK(sender.protocol.sendMessage("Anybody there", "VK3ABC", error));
+    int64_t id = sender.observer.added[0].id;
+    sender.completeOneTransmission();
+    CHECK(sender.observer.lastUpdateFor(id)->status == MessageStatus::AwaitingAck);
+
+    receiver.protocol.setAutoReplyEnabled(false);
+    CHECK(receiver.protocol.sendMessage("CQ CQ", "", error));
+    receiver.completeOneTransmission();
+    CHECK(receiver.transport.transmissions[0][0][0] == (0x22 | TYPE_NO_AUTO_ACK));
+    sender.receiveFrom(receiver.transport);
+
+    sender.nowMs += ACK_TIMEOUT_MILLISECONDS * 4;
+    sender.protocol.tick();
+    CHECK(sender.observer.lastUpdateFor(id)->status == MessageStatus::Sent);
+    CHECK(!everUpdatedTo(sender.observer, id, MessageStatus::Retrying));
+    CHECK(sender.transport.transmissions.size() == 1);
+    CHECK(sender.protocol.pendingCount() == 0);
+}
+
+// An acknowledgement from a station is that station acknowledging by itself,
+// even of a message we sent it expecting none.
+void testAcknowledgementTurnsRetriesBackOn()
+{
+    Station sender("W1AW");
+    Station receiver("VK3ABC");
+    receiver.protocol.setAutoReplyEnabled(false);
+
+    std::string error;
+    CHECK(receiver.protocol.sendMessage("CQ CQ", "", error));
+    receiver.completeOneTransmission();
+    sender.receiveFrom(receiver.transport);
+    CHECK(!sender.protocol.stationAutoAcks("VK3ABC"));
+
+    receiver.protocol.setAutoReplyEnabled(true);
+    CHECK(sender.protocol.sendMessage("Hello", "VK3ABC", error));
+    int64_t id = sender.observer.added.back().id;
+    sender.completeOneTransmission();
+    CHECK(sender.observer.lastUpdateFor(id)->status == MessageStatus::Sent);
+
+    receiver.receiveFrom(sender.transport);
+    receiver.completeOneTransmission();
+    sender.receiveFrom(receiver.transport);
+    CHECK(sender.protocol.stationAutoAcks("VK3ABC"));
+    CHECK(sender.observer.lastUpdateFor(id)->status == MessageStatus::Sent);
+
+    // A message queued while it said no follows what it says by the time
+    // the message goes.
+    receiver.protocol.setAutoReplyEnabled(false);
+    receiver.nowMs = sender.nowMs;
+    CHECK(receiver.protocol.sendMessage("Going quiet", "", error));
+    receiver.completeOneTransmission();
+    sender.receiveFrom(receiver.transport);
+    CHECK(sender.protocol.sendMessage("Still there?", "VK3ABC", error));
+    id = sender.observer.added.back().id;
+
+    receiver.protocol.setAutoReplyEnabled(true);
+    CHECK(receiver.protocol.sendMessage("Back", "", error));
+    receiver.completeOneTransmission();
+    sender.receiveFrom(receiver.transport);
+    sender.completeOneTransmission();
+    CHECK(sender.observer.lastUpdateFor(id)->status == MessageStatus::AwaitingAck);
+}
+
 // A transmission parked on its acknowledgement timer leaves the transmitter
 // idle, so the traffic queued behind it has to keep moving. Before this was
 // fixed, one unanswered message stalled the whole outbox for the entire retry
@@ -2326,6 +2478,10 @@ int main()
     testQueuedMessageTakesATempoOfItsOwn();
     testPingWaitsForAnAnswerAtASlowerTempo();
     testAutoReplyCanBeDisabled();
+    testStationWithAutoAckOffIsNotRetried();
+    testPingSaysAutoAckIsOff();
+    testWaitingMessageEndsWhenTheStationSaysItWillNotAnswer();
+    testAcknowledgementTurnsRetriesBackOn();
     testAckWaitDoesNotBlockTheQueue();
     testTurnaroundKeepsStationsOffEachOther();
     testNextBurstWaitsForTheFarEndToAnswer();
