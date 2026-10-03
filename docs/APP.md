@@ -239,6 +239,18 @@ now, waiting for its acknowledgement or pong, or waiting to be retried).
 Either way the rest of the queue carries on. A ping's line says where it has
 got to: queued, on the air, awaiting PONG, not sent or aborted.
 
+A message waiting for its first turn on the air shows a countdown bar on its
+chip, with QUEUED across it in lettering that turns dark where the bar is
+filled and light where it is empty. The bar starts full at the wait the
+message was first given and runs down to nothing as its turn comes: the
+keying on the air, the far end's turn after it, the turnarounds and holds
+running, and everything queued ahead of it (`queuedWaits()` in
+TextMessagingProtocol). It is an estimate and errs long, so it can jump ahead
+when an answer arrives early, and it fills again if a new hold lengthens the
+wait. While somebody else has the channel the bar stops and dims, since
+nobody can say when that keying ends. With the console disengaged the chip
+reads ENGAGE TO SEND instead.
+
 A chat keying runs the same time-out timer as voice. When one would outlast
 it, the transport sends it as several keyings, each at least 20 s short of the
 limit (clear of the warning the main window gives 15 s before it) and cut only

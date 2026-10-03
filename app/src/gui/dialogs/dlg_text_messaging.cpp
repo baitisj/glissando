@@ -42,6 +42,9 @@
 
 #include <wx/datetime.h>
 #include <wx/dcbuffer.h>
+#include <wx/dcmemory.h>
+#include <wx/filesys.h>
+#include <wx/fs_mem.h>
 #include <wx/graphics.h>
 #include <wx/menu.h>
 #include <wx/msgdlg.h>
@@ -65,7 +68,11 @@ namespace
 constexpr int REFRESH_INTERVAL_MS = 1000;
 
 // Often enough to follow the shared blink, which changes every half second.
+// A queued message's countdown bar moves on the same timer.
 constexpr int BLINK_INTERVAL_MS = 125;
+
+// The countdown bar on a queued message's chip, in pixels before scaling.
+constexpr int QUEUE_BAR_WIDTH = 96;
 
 // A press and release on the chat log further apart than this is a drag to
 // select text, not a click on a message.
@@ -331,6 +338,14 @@ TextMessagingDialog::TextMessagingDialog(wxWindow* parent, wxWindowID id, const 
     m_chatWindow->Bind(wxEVT_LEFT_UP, &TextMessagingDialog::OnChatLeftUp, this);
     m_chatWindow->Bind(wxEVT_CONTEXT_MENU, &TextMessagingDialog::OnChatContextMenu, this);
 
+    // The countdown bars are pictures the chat page loads from memory.
+    static bool memoryFiles = false;
+    if (!memoryFiles)
+    {
+        wxFileSystem::AddHandler(new wxMemoryFSHandler);
+        memoryFiles = true;
+    }
+
     TextMessagingSession::instance().protocol().setObserver(this);
     m_refreshTimer.Start(REFRESH_INTERVAL_MS);
     m_blinkTimer.Start(BLINK_INTERVAL_MS);
@@ -342,6 +357,7 @@ TextMessagingDialog::~TextMessagingDialog()
 {
     m_refreshTimer.Stop();
     m_blinkTimer.Stop();
+    for (const wxString& name : m_queueBarImages) wxMemoryFSHandler::RemoveFile(name);
     TextMessagingSession::instance().protocol().setObserver(nullptr);
 
     m_txtEntry->Disconnect(wxEVT_KEY_DOWN, wxKeyEventHandler(TextMessagingDialog::OnEntryKeyDown),
@@ -687,6 +703,9 @@ void TextMessagingDialog::renderChat(bool keepPlace)
 {
     Palette colors = palette();
 
+    m_queueBarGeneration++;
+    m_newQueueBarImages.clear();
+
     wxString html;
     html.reserve(4096);
     html += "<html><body bgcolor=\"" + colors.page + "\" text=\"" + colors.text + "\">";
@@ -732,7 +751,9 @@ void TextMessagingDialog::renderChat(bool keepPlace)
             // queued by an earlier run never goes, engaged or not.
             bool waits = m_waitingForEngage && message.status == MessageStatus::Queued &&
                          TextMessagingSession::instance().protocol().isMessageQueued(message.id);
-            right = statusChip(message, waits, m_engageChipLit);
+            right = !waits && m_queueBars.count(message.id) != 0
+                        ? queueBarChip(message)
+                        : statusChip(message, waits, m_engageChipLit);
         }
         else if (message.snr != 0.0f && std::isfinite(message.snr))
         {
@@ -769,6 +790,11 @@ void TextMessagingDialog::renderChat(bool keepPlace)
 
     m_chatWindow->Freeze();
     m_chatWindow->SetPage(html);
+
+    // The page has loaded its pictures; the last page's are done with.
+    for (const wxString& name : m_queueBarImages) wxMemoryFSHandler::RemoveFile(name);
+    m_queueBarImages.swap(m_newQueueBarImages);
+    m_newQueueBarImages.clear();
 
     // Keep the newest message in view, the way a chat window should; but a
     // chip flashing must not pull the view off whatever is being read.
@@ -1361,6 +1387,104 @@ void TextMessagingDialog::OnTimer(wxTimerEvent&)
 void TextMessagingDialog::OnBlinkTimer(wxTimerEvent&)
 {
     updateEngageChips();
+    updateQueueBars();
+}
+
+// Each message waiting for its first turn on the air counts down to it. The
+// bar starts full at the wait it was first given and runs down to nothing;
+// a wait that grows, such as a hold that starts while it waits, fills it
+// again. While somebody else has the channel nothing can be said about when
+// it ends, so the bar stops where it is and dims until the channel clears.
+// The chat is redrawn only when a bar moves by a pixel.
+void TextMessagingDialog::updateQueueBars()
+{
+    std::vector<QueuedWait> waits = TextMessagingSession::instance().protocol().queuedWaits();
+
+    std::map<int64_t, QueueBar> bars;
+    bool changed = waits.size() != m_queueBars.size();
+    for (const QueuedWait& wait : waits)
+    {
+        auto old = m_queueBars.find(wait.messageId);
+        bool fresh = old == m_queueBars.end();
+        QueueBar bar = fresh ? QueueBar() : old->second;
+
+        if (fresh || !wait.channelBusy) bar.remainingMs = std::max<int64_t>(0, wait.waitMs);
+        if (bar.remainingMs > bar.totalMs) bar.totalMs = bar.remainingMs;
+        bar.channelBusy = wait.channelBusy;
+
+        int fill = bar.totalMs > 0
+                       ? (int)std::lround((double)QUEUE_BAR_WIDTH * (double)bar.remainingMs / (double)bar.totalMs)
+                       : 0;
+        if (fresh || fill != bar.fillPixels || bar.channelBusy != old->second.channelBusy) changed = true;
+        bar.fillPixels = fill;
+        bars[wait.messageId] = bar;
+    }
+
+    m_queueBars.swap(bars);
+    if (changed && IsShown()) renderChat(true);
+}
+
+// A queued message's chip: the countdown bar with QUEUED across it, in
+// lettering that changes colour where the bar ends, light on the empty
+// part and dark on the filled part, so it reads wherever the bar has got to.
+wxString TextMessagingDialog::queueBarChip(const TextMessage& message)
+{
+    const QueueBar& bar = m_queueBars.at(message.id);
+
+    const wxColour empty(0x4A, 0x48, 0x45);   // the smoke of the other waiting chips
+    const wxColour filled = bar.channelBusy ? Chaotica::Colour::Dim : Chaotica::Colour::Chrome;
+    const wxColour lightText = Chaotica::Colour::Bone;
+    const wxColour darkText = Chaotica::Colour::Void;
+    const wxString label = _("QUEUED");
+
+    wxFont font = Chaotica::font(Chaotica::FontRole::Caption);
+    double scale = GetDPIScaleFactor();
+    int width = (int)std::lround(QUEUE_BAR_WIDTH * scale);
+    int fill = (int)std::lround(bar.fillPixels * scale);
+
+    wxBitmap probe(1, 1);
+    wxMemoryDC measure(probe);
+    measure.SetFont(font);
+    wxSize text = measure.GetTextExtent(label);
+    measure.SelectObject(wxNullBitmap);
+    int height = text.GetHeight() + (int)std::lround(4 * scale);
+
+    wxBitmap bitmap(width, height);
+    {
+        wxMemoryDC dc(bitmap);
+        dc.SetFont(font);
+        dc.SetPen(*wxTRANSPARENT_PEN);
+        dc.SetBrush(wxBrush(empty));
+        dc.DrawRectangle(0, 0, width, height);
+        dc.SetBrush(wxBrush(filled));
+        dc.DrawRectangle(0, 0, fill, height);
+
+        int x = (width - text.GetWidth()) / 2;
+        int y = (height - text.GetHeight()) / 2;
+        if (fill > 0)
+        {
+            dc.SetClippingRegion(0, 0, fill, height);
+            dc.SetTextForeground(darkText);
+            dc.DrawText(label, x, y);
+            dc.DestroyClippingRegion();
+        }
+        if (fill < width)
+        {
+            dc.SetClippingRegion(fill, 0, width - fill, height);
+            dc.SetTextForeground(lightText);
+            dc.DrawText(label, x, y);
+            dc.DestroyClippingRegion();
+        }
+        dc.SelectObject(wxNullBitmap);
+    }
+
+    wxString name = wxString::Format("glissando-queue-%u-%lld.bmp", m_queueBarGeneration,
+                                     (long long)message.id);
+    wxMemoryFSHandler::AddFile(name, bitmap, wxBITMAP_TYPE_BMP);
+    m_newQueueBarImages.push_back(name);
+
+    return wxString::Format("<img src=\"memory:%s\" width=\"%d\" height=\"%d\">", name,
+                            (int)std::lround(width / scale), (int)std::lround(height / scale));
 }
 
 // Redraws the chat only when a queued message's chip changes: when the

@@ -297,6 +297,15 @@ enum class AckWait
     Ping,
 };
 
+// How long a message of ours still waiting for its first turn on the air is
+// expected to wait, for the countdown on its chip in the chat window.
+struct QueuedWait
+{
+    int64_t messageId = 0;
+    int64_t waitMs = 0;       // from now until it should key; zero if due
+    bool channelBusy = false; // somebody else has the channel: nothing counts down
+};
+
 enum class MessageDirection
 {
     Sent,
