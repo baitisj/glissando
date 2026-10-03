@@ -242,9 +242,11 @@ struct Choice
 // Drops a column of plate buttons down from under the anchor, the way a
 // switchboard's patch list folds out. Choosing one closes the column and
 // calls chosen with its index, from the event loop, so chosen may open a
-// dialog; clicking anywhere else closes it without a choice.
+// dialog; clicking anywhere else closes it without a choice. closed, if
+// given, is called last either way: after chosen has returned, so after
+// any modal dialog chosen opened has gone.
 void ShowChoices(wxWindow* anchor, const std::vector<Choice>& choices,
-                 std::function<void(int)> chosen);
+                 std::function<void(int)> chosen, std::function<void()> closed = {});
 
 } // namespace Chaotica
 
