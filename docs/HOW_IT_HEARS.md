@@ -26,6 +26,8 @@ Line references below are to [GlissandoDemod.cpp](../modem/GlissandoDemod.cpp)
 as of September 2026. The function names will stay put longer than the
 line numbers. Lesson 6 leaves the frame decoder for the listener that hears
 the opening chord, in [GlissandoChord.cpp](../modem/GlissandoChord.cpp).
+Lesson 7 returns to it, for the bits a receiver can guess before it
+decodes (October 2026).
 
 ## Lesson 1: a matched filter is a stencil
 
@@ -285,6 +287,86 @@ voice, these checks took the channel from busy all of the time to busy 6%
 of the time, never for more than 7.9 s at once ([CHORDS.md](CHORDS.md)).
 Below about −14 dB the chord is too faint for the lamps to stand out at
 all, and carrier sense falls back on decoded frames.
+
+## Lesson 7: filling in some of the answers before decoding
+
+Lesson 5 ends with a likelihood for every bit of the frame. The
+error-correcting code then picks the most likely 77 payload bits and 14 CRC
+bits. This lesson is about what the receiver can do when it already knows
+some of those bits before it starts.
+
+**A crossword with some squares filled in.** Think of the decoder as solving
+a crossword. The 91 bits are the answers, and the convolutional code is the
+grid of clues: every coded bit the radio hears depends on seven neighbouring
+answer bits, so each answer is cross-checked by several clues. Noise smudges
+some of the clues. If someone fills in some answers for you before you
+start, the smudged clues around them stop being ambiguous, and the
+remaining answers come out right even when the handwriting is worse.
+
+In the decoder, the Viterbi algorithm walks a trellis of 64 states, one step
+per bit, and at every step each path forks two ways: this bit is a 0, or a
+1. Where a bit is known, the decoder simply closes the fork that disagrees
+(`decodeFrame()`, [GlissandoFec.cpp
+L141–L156](../modem/GlissandoFec.cpp#L141-L156)). It no longer needs the
+noisy evidence for those bits, and the code's redundancy all goes to the
+bits still in doubt. FT8 decoders use the same trick and call it *a priori*
+(AP) decoding.
+
+![Two rows of 77 boxes, one per payload bit. In the first frame of AG7SU's reply, all but 6 bits are shaded as guessable: the frame header, three bits of the type byte, your callsign's CRC and AG7SU's packed callsign. In the last frame of a message carrying one byte, the 64 bits of zero padding are shaded](images/known-bits.svg)
+
+*Which payload bits a listener can predict, without anything changing on
+the air. Teal bits are guessed; white bits must be decoded.*
+
+**Where the guesses come from.** Two kinds of bit are predictable:
+
+- **Zero padding.** A message is cut into 9-byte pieces, and the last piece
+  is padded out with zero bytes. If the last frame carries one byte of text,
+  64 of its 77 bits are zeros. The receiver guesses 64 zero bits, then 48
+  (`PADDING_HYPOTHESES`, [GlissandoDemod.cpp
+  L67–L76](../modem/GlissandoDemod.cpp#L67-L76)).
+- **Replies.** Once you have sent something to AG7SU, the first frame of
+  AG7SU's answer must start with a known frame header, your callsign's CRC
+  and AG7SU's packed callsign: 71 of its 77 bits. Your receiver learns your
+  callsign and who you sent to from your own transmissions. It guesses a
+  reply from each of the three stations you sent to most recently in the
+  last 15 minutes, then a frame to you from anybody, which pins 31 bits
+  (`expectedFrames()` in
+  [TextMessagingModem.cpp](../app/src/pipeline/TextMessagingModem.cpp) and
+  `FrameCodec::expectedFrameStart()` in
+  [FrameCodec.cpp](../app/src/text_messaging/FrameCodec.cpp)).
+
+**The CRC is the referee.** A guess is never simply trusted. The receiver
+first decodes the frame with no guesses. Only if the CRC fails does it try
+each guess in turn ([GlissandoDemod.cpp
+L1068–L1083](../modem/GlissandoDemod.cpp#L1068-L1083)). A wrong guess
+forces the decoder onto wrong answers, and the 14-bit CRC rejects the result
+16,383 times in 16,384. That last 1 in 16,384 is the price: every guess is
+another lottery ticket for pure noise to pass the CRC. So the receiver holds
+only a handful of guesses, never tries them on a candidate below the Es/N0
+floor, and the cost stays small. In 10,000 searches of pure noise at Presto
+with guesses installed there was one false decode, about the same as
+without them.
+
+**What it buys.** Measured at Presto in white noise, 200 frames per point,
+as the drop in signal needed to decode half the frames:
+
+| Frame | Bits known | Code alone | Whole receiver |
+|---|---|---|---|
+| Last frame of a message, one byte of text | 64 | 2.1 dB | 0.8 dB |
+| Last frame of a message, three bytes of text | 48 | 1.2 dB | 0.45 dB |
+| First frame of a reply from the station you're working | 71 | not measured | about 1 dB |
+| First frame addressed to you from a stranger | 31 | not measured | 0.3 dB |
+
+The whole receiver gains less than the code alone because guesses only help
+once the frame has been found. At the weakest signals many frames are lost
+earlier, at the sync search of Lessons 3 and 4, and knowing what a frame
+says does not help find it.
+
+Two properties make this safe to add. Nothing on the air changes, so every
+station benefits whatever version the sender runs. And it only ever adds a
+second chance: a frame that decodes plainly decodes exactly as before, and
+a station that fades in mid-message still reads it without any guesses at
+all.
 
 ## What glide-then-hold gains and gives up
 
