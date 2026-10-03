@@ -265,6 +265,12 @@ follow the console again. Its retries keep the tempo it went out at. A
 message at a tempo of its own keys by itself, never riding behind an
 acknowledgement, and nothing queued behind it rides there instead.
 
+Once a message is on the air its chip, SENDING (or RETRY or RESEND), sits
+over a bar in the same style that fills from the left as the audio plays
+out, across the whole transmission when it is split into several keyings
+for the time-out timer. Data2G does not say how far it has got, so its chip
+stays plain.
+
 A chat keying runs the same time-out timer as voice. When one would outlast
 it, the transport sends it as several keyings, each at least 20 s short of the
 limit (clear of the warning the main window gives 15 s before it) and cut only

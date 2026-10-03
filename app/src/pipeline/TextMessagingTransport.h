@@ -83,6 +83,10 @@ public:
     // Drops anything queued and unkeys. Used when audio stops.
     void abort();
 
+    // How much of the transmission on the air has been played, from 0 to 1,
+    // across every keying it was split into; negative when nothing is.
+    double keyingProgress() const;
+
 private:
     void unkey();
 

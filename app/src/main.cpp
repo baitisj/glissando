@@ -1103,6 +1103,12 @@ int MainFrame::chatTransmitGear()
     return textMessagingModem().glissandoStatus().transmitGear;
 }
 
+double MainFrame::chatSendProgress()
+{
+    if (data2gChatActive_.load() || m_textMessagingTransport == nullptr) return -1.0;
+    return m_textMessagingTransport->keyingProgress();
+}
+
 int MainFrame::chatTimeOutSeconds()
 {
     // With the app's timer off, the rig's own is still likely there, and

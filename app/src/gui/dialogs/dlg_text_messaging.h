@@ -114,6 +114,7 @@ private:
     void updateEngageChips();
     void updateQueueBars();
     wxString queueBarChip(const TextMessaging::TextMessage& message);
+    wxString barChip(int64_t messageId, const wxString& label, int fillPixels, const wxColour& filled);
     void refreshStations();
     std::string selectedCallsign() const;
     long stationItem(const std::string& callsign) const;
@@ -211,6 +212,7 @@ private:
     std::vector<wxString> m_queueBarImages;     // on the page now
     std::vector<wxString> m_newQueueBarImages;  // for the page being built
     unsigned m_queueBarGeneration = 0;
+    int m_sendFillPixels = -1; // the bar behind SENDING, as last drawn; -1 for none
 
     // Remembered so the one second timer only touches the controls when the
     // transmitter's state, or whether it may be used, actually changes,

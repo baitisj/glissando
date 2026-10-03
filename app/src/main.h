@@ -348,6 +348,10 @@ public:
     // console or Auto shift; 0 when chat goes over codec2 or Data2G.
     int chatTransmitGear();
 
+    // How much of the chat transmission on the air has been sent, 0 to 1;
+    // negative when none is, or when Data2G carries chat and does not say.
+    double chatSendProgress();
+
     // The keying length past which the time-out timer cuts in: the app's,
     // or 180 s, the usual setting on a rig, when the app's is off.
     int chatTimeOutSeconds();

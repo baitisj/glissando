@@ -758,9 +758,22 @@ void TextMessagingDialog::renderChat(bool keepPlace)
             // queued by an earlier run never goes, engaged or not.
             bool waits = m_waitingForEngage && message.status == MessageStatus::Queued &&
                          TextMessagingSession::instance().protocol().isMessageQueued(message.id);
-            right = !waits && m_queueBars.count(message.id) != 0
-                        ? queueBarChip(message)
-                        : statusChip(message, waits, m_engageChipLit);
+            if (!waits && m_queueBars.count(message.id) != 0)
+            {
+                right = queueBarChip(message);
+            }
+            else if (message.status == MessageStatus::Transmitting && message.kind == MessageKind::Chat &&
+                     m_sendFillPixels >= 0)
+            {
+                // On the air: SENDING, or RETRY or RESEND, over a bar that
+                // fills as it goes out.
+                right = barChip(message.id, deliveryChip(message).label, m_sendFillPixels,
+                                wxColour(0xFF, 0xFC, 0xF0));
+            }
+            else
+            {
+                right = statusChip(message, waits, m_engageChipLit);
+            }
         }
         else if (message.snr != 0.0f && std::isfinite(message.snr))
         {
@@ -1491,6 +1504,13 @@ void TextMessagingDialog::updateQueueBars()
     }
 
     m_queueBars.swap(bars);
+
+    // And the bar behind the chip of the message on the air.
+    double progress = frame != nullptr ? frame->chatSendProgress() : -1.0;
+    int sendFill = progress < 0.0 ? -1 : (int)std::lround(QUEUE_BAR_WIDTH * progress);
+    if (sendFill != m_sendFillPixels) changed = true;
+    m_sendFillPixels = sendFill;
+
     if (changed && IsShown()) renderChat(true);
 }
 
@@ -1501,20 +1521,28 @@ wxString TextMessagingDialog::queueBarChip(const TextMessage& message)
 {
     const QueueBar& bar = m_queueBars.at(message.id);
 
-    const wxColour empty(0x4A, 0x48, 0x45);   // the smoke of the other waiting chips
-    const wxColour filled = bar.channelBusy ? Chaotica::Colour::Dim : Chaotica::Colour::Chrome;
-    const wxColour lightText = Chaotica::Colour::Bone;
-    const wxColour darkText = Chaotica::Colour::Void;
     // With the tempo it will key at, in the console's words.
     const wxString label = bar.gear != 0
                                ? wxString::Format("%s %s %s", _("QUEUED"), wxString(wxUniChar(0x00B7)),
                                                   GlissandoConsole::gearLabel(bar.gear).Upper())
                                : wxString(_("QUEUED"));
+    return barChip(message.id, label, bar.fillPixels,
+                   bar.channelBusy ? Chaotica::Colour::Dim : Chaotica::Colour::Chrome);
+}
+
+// A chip with a bar behind its label, fillPixels of QUEUE_BAR_WIDTH filled
+// from the left, as an image the chat page shows from memory.
+wxString TextMessagingDialog::barChip(int64_t messageId, const wxString& label, int fillPixels,
+                                      const wxColour& filled)
+{
+    const wxColour empty(0x4A, 0x48, 0x45);   // the smoke of the other waiting chips
+    const wxColour lightText = Chaotica::Colour::Bone;
+    const wxColour darkText = Chaotica::Colour::Void;
 
     wxFont font = Chaotica::font(Chaotica::FontRole::Caption);
     double scale = GetDPIScaleFactor();
     int width = (int)std::lround(QUEUE_BAR_WIDTH * scale);
-    int fill = (int)std::lround(bar.fillPixels * scale);
+    int fill = (int)std::lround(std::max(fillPixels, 0) * scale);
 
     wxBitmap probe(1, 1);
     wxMemoryDC measure(probe);
@@ -1553,7 +1581,7 @@ wxString TextMessagingDialog::queueBarChip(const TextMessage& message)
     }
 
     wxString name = wxString::Format("glissando-queue-%u-%lld.bmp", m_queueBarGeneration,
-                                     (long long)message.id);
+                                     (long long)messageId);
     wxMemoryFSHandler::AddFile(name, bitmap, wxBITMAP_TYPE_BMP);
     m_newQueueBarImages.push_back(name);
 
