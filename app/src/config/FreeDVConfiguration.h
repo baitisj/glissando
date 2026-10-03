@@ -101,6 +101,8 @@ public:
     ConfigurationDataElement<bool> glissandoScopeLens;
     ConfigurationDataElement<bool> glissandoTransmitShips;  // rockets and invaders on the scope while sending
     ConfigurationDataElement<bool> glissandoShowMarquee;    // the GLISSANDO title card above the scope
+    ConfigurationDataElement<bool> glissandoChatOpen;       // the COMMS window was open when the app closed
+    ConfigurationDataElement<bool> glissandoSnoopOpen;      // and the snooping window
     ConfigurationDataElement<long> glissandoWindowLeft;
     ConfigurationDataElement<long> glissandoWindowTop;
     ConfigurationDataElement<long> glissandoWindowWidth;

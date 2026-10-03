@@ -395,8 +395,9 @@ void GlissandoConsole::buildControls()
     auto* switches = new wxBoxSizer(wxVERTICAL);
     engageButton_ = new Button(commandPlate, wxID_ANY, _("Engage"), true, wxSize(COLUMN, engageHeight));
     engageButton_->SetToolTip(_("Start or stop the audio."));
-    chatButton_ = new Button(commandPlate, wxID_ANY, _("Transmission log"), true, wxSize(COLUMN, ROW));
-    chatButton_->SetToolTip(_("Open or close the chat window."));
+    chatButton_ = new Button(commandPlate, wxID_ANY, _("Comms"), true, wxSize(COLUMN, ROW));
+    chatButton_->SetToolTip(_("Open or close the COMMS window, where chat is sent and read. "
+                              "Flashes red while it is closed and a message has come in."));
     preferencesButton_ = new Button(commandPlate, wxID_ANY, _("Preferences"), false, wxSize(COLUMN, ROW));
     preferencesButton_->SetToolTip(_("Options, sound cards, rig control and audio filters."));
     switches->AddSpacer(engageTop);
@@ -707,6 +708,10 @@ void GlissandoConsole::refreshTelemetry()
     // Both windows can be opened or closed from elsewhere too.
     chatButton_->SetChecked(host_->glissandoChatShown());
     snoopButton_->SetChecked(host_->glissandoSnoopShown());
+
+    // A message waiting in a closed COMMS window: the button flashes red,
+    // in step with ENGAGE TO SEND, until the window is opened.
+    chatButton_->SetAlarm(t.chatUnread && Chaotica::blinkLit());
 }
 
 // Much of the world holds 30 m to 500 Hz (the IARU Region 1 band plan, which

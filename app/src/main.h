@@ -256,6 +256,7 @@ class MainFrame : public TopFrame, public IGlissandoHost
         TextMessagingTransport* m_textMessagingTransport;
         TextMessaging::Data2GTransport* m_data2gTransport;
         GlissandoConsole*       m_glissandoConsole;
+        bool                    m_chatUnread = false;
         PlotScalar*             m_panelDemodIn;
 
         bool                    m_RxRunning;
@@ -343,6 +344,14 @@ public:
     // seconds, at the Glissando tempo chat would send it at now; 0 when that
     // is not known (codec2 modes, or Data2G carrying chat).
     double chatMessageAirSeconds(size_t textBytes);
+
+    // A chat message has come in while the COMMS window is closed; the
+    // console's COMMS button flashes until the window is opened.
+    void noteChatUnread() { m_chatUnread = true; }
+
+    // Makes the COMMS window, hidden, so it hears messages even before it is
+    // first opened.
+    void createChatWindow();
 
     // The keying length past which the time-out timer cuts in: the app's,
     // or 180 s, the usual setting on a rig, when the app's is off.

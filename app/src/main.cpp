@@ -486,8 +486,12 @@ bool MainApp::OnInit()
     g_parent = frame;
     frame->openGlissandoConsole();
     frame->CallAfter([]() {
-        wxGetApp().frame->glissandoShowChat(true);
-        wxGetApp().frame->glissandoShowSnoop(true);
+        // The COMMS and snooping windows as they were when the app last
+        // closed. COMMS is made either way, so it hears what comes in.
+        MainFrame* mainFrame = wxGetApp().frame;
+        mainFrame->createChatWindow();
+        if (wxGetApp().appConfiguration.glissandoChatOpen) mainFrame->glissandoShowChat(true);
+        if (wxGetApp().appConfiguration.glissandoSnoopOpen) mainFrame->glissandoShowSnoop(true);
     });
     
     return true;

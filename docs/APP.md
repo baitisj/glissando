@@ -1,7 +1,7 @@
 # The Glissando app
 
 A desktop front end for Glissando (`docs/DESIGN.md`): a console with the
-visi-scope waterfall, tuning and the mode's options, and a text chat window
+visi-scope waterfall, tuning and the mode's options, and a COMMS window for text chat
 whose messages go out as Glissando melodies. It lives in `app/`, and the C++
 modem it uses lives in `modem/`, beside the NumPy prototype in `prototype/`
 that the modem's tests are checked against.
@@ -57,9 +57,11 @@ Both open at launch:
   tuning, the mode's modulation options, the radio's dial and the setup
   dialogs, dressed as Chaotica's control room from the Captain Proton
   holonovel. Closing it quits.
-* **The chat window** ("Glissando Chat"): heard stations, the transmission
-  log and the transmitter, in the same dress. Closing it only hides it;
-  `Transmission log` on the console brings it back.
+* **The COMMS window** ("Glissando COMMS"), where chat is sent and read:
+  heard stations, the log of messages and the transmitter, in the same dress.
+  Closing it only hides it; `Comms` on the console brings it back, and
+  flashes red while it is closed and a message for you, or for all, has come
+  in.
 * **The snooping window** ("Glissando Snooper"): every message the station
   hears, including directed messages between other stations, which the chat
   window leaves out. Messages for you are lit and marked FOR YOU. The
@@ -68,6 +70,9 @@ Both open at launch:
   never been heard transmitting shows as `#` and the CRC of its callsign,
   because frames carry only that. Closing it only hides it; `Snooper` on the
   console brings it back with everything heard meanwhile.
+
+The COMMS and snooping windows come back at launch only if they were open
+when the app last closed.
 
 `--glissando` is still accepted, so older scripts keep working, but it no
 longer changes anything.
@@ -89,7 +94,7 @@ longer changes anything.
 | Scale | Pentatonic (default, harmonious when stations overlap), whole tone, diminished, diabolus (tritones). The scale costs nothing in sensitivity (DESIGN.md 3.1a). It is the scale you send in: the receiver hears every scale and shows the one heard (DESIGN.md 3.1b). |
 | Telemetry | Signal meter (SNR of the last frame heard, red from -30 to -20 dB where a frame is only just copyable; while transmitting, on radios whose Hamlib backend reports it, the meter reads the radio's SWR instead, asked for once a second, red above 2.5:1), Doppler spread, tempo of the last frame and how long ago, tempo we would send at, that tempo's frame length, and the scale the last frame was sung in. |
 | Engage | Starts and stops audio. |
-| Transmission log | Brings the chat window back if it was closed. |
+| Comms | Lit while the COMMS window is up. Press it to open or close that window. While it is closed, a chat message received, directed to you or broadcast, makes the button flash red, in step with ENGAGE TO SEND, until the window is opened; pongs, acknowledgements and the window's own notices do not. |
 | Snooper | Lit while the snooping window is up. Press it to open or close that window. |
 | Preferences | Drops down Options, Sound cards, Rig control (CAT and PTT) and Easy setup. Sound cards, rig control and easy setup only change while disengaged. The app opens only the radio's two audio streams, input from the radio and output to it, so Sound cards and Easy setup ask for nothing else; leave the output as none to only listen. Options has four tabs: Station (your callsign, and the Stations Heard log file, a CSV line for each station whose chat frame is heard), Rig Control (among the rest, the SWR switches: show SWR on the meter while transmitting, on by default, and abort the transmission at the first reading over 3:1, off by default), Modem (start on launch, half duplex, and the Text Chat switches, among them the opening chord and the tail that ends each transmission: off, a chord, or the station's call in Morse, sung on the scale or keyed straight on E4+D5, see [CW_TAIL.md](CW_TAIL.md)) and Debugging. |
 
@@ -223,13 +228,13 @@ header, three segments):
 about 20 s at Presto, 41 s at Allegro, 2.8 minutes at Adagio. A full 54 byte
 text fragment is six frames, about 5.5 minutes at Adagio.
 
-The chat window's send button shows how long the message being typed will be
+The COMMS window's send button shows how long the message being typed will be
 on the air at the tempo it would go out at now, in red once that is longer
 than the transmit time-out (Preferences, Rig control; 180 s when the app's
 timer is off, the usual rig setting). Nothing is shown for codec2 or Data2G.
 
 More messages can be queued while the transmitter is keyed; they go when it
-is free. In the transmission log, clicking a message selects the station it
+is free. In COMMS, clicking a message selects the station it
 is with in the heard list, putting the station back if it has aged out, and a
 directed message for you selects its sender when no station is selected. A
 right click offers `Clear Messages`, which keeps only messages still being
@@ -294,7 +299,7 @@ The text chat loopback bench runs Glissando too:
 
     app/test/test_text_chat_loopback.sh up
 
-Press Engage in both consoles and send from either chat window.
+Press Engage in both consoles and send from either COMMS window.
 
 ![Two stations on the loopback bench: B (right) hearing A's reply at Presto on the visi-scope, both chat windows below with the conversation both ways](images/glissando-bench.png)
 

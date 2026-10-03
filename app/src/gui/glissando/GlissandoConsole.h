@@ -65,6 +65,7 @@ struct GlissandoTelemetry
     bool showSwr = false;           // the meter reads the radio's SWR rather than the signal
     bool swrKnown = false;          // a reading has come back since keying
     double swr = 0.0;
+    bool chatUnread = false;        // a message has come in since the COMMS window was last open
 };
 
 // The setup dialogs the console's Preferences button leads to.

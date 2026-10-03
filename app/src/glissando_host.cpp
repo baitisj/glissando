@@ -156,6 +156,10 @@ void MainFrame::glissandoConsoleClosed(const wxRect& lastPosition)
     config.glissandoWindowWidth = lastPosition.width;
     config.glissandoWindowHeight = lastPosition.height;
 
+    // The COMMS and snooping windows open next time only if they are open now.
+    config.glissandoChatOpen = glissandoChatShown();
+    config.glissandoSnoopOpen = glissandoSnoopShown();
+
     m_glissandoConsole = nullptr;
     applyGlissandoToModem_(false);
     log_info("Glissando console closed; text chat back on the codec2 data modes");
@@ -240,6 +244,8 @@ GlissandoTelemetry MainFrame::glissandoTelemetry()
                              (m_RxRunning && m_textMessagingTransport != nullptr &&
                               m_textMessagingTransport->isTransmitting());
     telemetry.audioRunning = m_RxRunning;
+    if (glissandoChatShown()) m_chatUnread = false;
+    telemetry.chatUnread = m_chatUnread;
     telemetry.engageToSend =
         chatWaitsForEngage() && TextMessaging::TextMessagingSession::instance().protocol().hasQueuedTransmissions();
 
