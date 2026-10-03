@@ -161,6 +161,10 @@ void MainFrame::OnToolsOptions(wxCommandEvent& event)
 
         // The text chat preferences may have changed.
         applyChatModem_();
+        if (m_glissandoConsole != nullptr)
+        {
+            m_glissandoConsole->showMarquee(wxGetApp().appConfiguration.glissandoShowMarquee, true);
+        }
         updateTextChatTransmitPermission_();
     
         // Show/hide frequency box based on CAT control configuration.

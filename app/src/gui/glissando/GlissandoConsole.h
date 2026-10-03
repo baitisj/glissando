@@ -130,6 +130,12 @@ public:
 
     GlissandoConsoleSettings settings() const { return settings_; }
 
+    // Shows or hides the GLISSANDO title card across the top. With resize,
+    // the console changes height by the card's rather than the scope
+    // taking up the room; without, as when it opens at its saved size, the
+    // scope does.
+    void showMarquee(bool show, bool resize);
+
     // Human names for the tempos and scales, shared with the rest of the UI.
     static wxString gearLabel(int gear);
     static wxString scaleLabel(Glissando::Scale scale);

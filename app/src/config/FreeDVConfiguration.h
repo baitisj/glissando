@@ -100,6 +100,7 @@ public:
     ConfigurationDataElement<int> glissandoScanRateDeci;
     ConfigurationDataElement<bool> glissandoScopeLens;
     ConfigurationDataElement<bool> glissandoTransmitShips;  // rockets and invaders on the scope while sending
+    ConfigurationDataElement<bool> glissandoShowMarquee;    // the GLISSANDO title card above the scope
     ConfigurationDataElement<long> glissandoWindowLeft;
     ConfigurationDataElement<long> glissandoWindowTop;
     ConfigurationDataElement<long> glissandoWindowWidth;
