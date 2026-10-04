@@ -36,6 +36,7 @@ PHRASES=[json.loads(l) for l in open(os.path.join(HERE,'phrases.txt')) if l.stri
 for p in PHRASES: assert len(p)>1 and all(32<=ord(c)<127 for c in p), p
 assert len(set(PHRASES))==len(PHRASES)
 NSYM=95+len(PHRASES)+2; ESC=NSYM-2; EOM=NSYM-1  # EOM is HamText's EMPTY
+PHRASE_FLOOR=0.7/1000
 BY_LENGTH=sorted(range(len(PHRASES)),key=lambda i:-len(PHRASES[i]))
 def symbols(t):
     i=0
@@ -52,6 +53,10 @@ def lengths_for(train_msgs, maxlen=15):
     f=[1e-4]*NSYM
     for src,w in ((counts(train_msgs,0.7),1),(counts([prose],0.3),1)):
         for k,v in src.items(): f[k]+=v
+    # A listed phrase the small corpus rarely or never uses is still
+    # expected on the air (fb, qsy, agn): count it as at least about once
+    # per 30 chat lines, so its code stays shorter than spelling it out.
+    for k in range(len(PHRASES)): f[95+k]=max(f[95+k],PHRASE_FLOOR)
     f[ESC]=2e-4
     f[EOM]=min(f)/2
     while True:
