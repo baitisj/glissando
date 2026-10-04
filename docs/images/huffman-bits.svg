@@ -1,109 +1,91 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 190" width="600" height="190">
-<rect width="600" height="190" rx="6" fill="#FFFFFF"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 190" width="760" height="190">
+<rect width="760" height="190" rx="6" fill="#FFFFFF"/>
 <g font-family="Menlo, Consolas, monospace">
 <text x="20" y="38" font-size="12" fill="#1F2633">8-bit text: 200 bits</text>
-<rect x="20.0" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="31.2" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">7</text>
-<rect x="42.4" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="53.6" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">3</text>
-<rect x="64.8" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="76.0" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">␣</text>
-<rect x="87.2" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="98.4" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">d</text>
-<rect x="109.6" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="120.8" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">e</text>
-<rect x="132.0" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="143.2" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">␣</text>
-<rect x="154.4" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="165.6" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">A</text>
-<rect x="176.8" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="188.0" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">G</text>
-<rect x="199.2" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="210.4" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">7</text>
-<rect x="221.6" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="232.8" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">E</text>
-<rect x="244.0" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="255.2" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">W</text>
-<rect x="266.4" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="277.6" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">,</text>
-<rect x="288.8" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="300.0" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">␣</text>
-<rect x="311.2" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="322.4" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">n</text>
-<rect x="333.6" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="344.8" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">a</text>
-<rect x="356.0" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="367.2" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">m</text>
-<rect x="378.4" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="389.6" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">e</text>
-<rect x="400.8" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="412.0" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">␣</text>
-<rect x="423.2" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="434.4" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">i</text>
-<rect x="445.6" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="456.8" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">s</text>
-<rect x="468.0" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="479.2" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">␣</text>
-<rect x="490.4" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="501.6" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">J</text>
-<rect x="512.8" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="524.0" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">e</text>
-<rect x="535.2" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="546.4" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">f</text>
-<rect x="557.6" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
-<text x="568.8" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">f</text>
-<text x="20" y="118" font-size="12" fill="#1F2633">Ham-table Huffman: 133 bits</text>
-<rect x="20.0" y="128" width="19.6" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="29.8" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">7</text>
-<rect x="39.6" y="128" width="22.4" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="50.8" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">3</text>
-<rect x="62.0" y="128" width="8.4" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="66.2" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">␣</text>
-<rect x="70.4" y="128" width="14.0" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="77.4" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">d</text>
-<rect x="84.4" y="128" width="11.2" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="90.0" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">e</text>
-<rect x="95.6" y="128" width="8.4" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="99.8" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">␣</text>
-<rect x="104.0" y="128" width="19.6" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="113.8" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">A</text>
-<rect x="123.6" y="128" width="19.6" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="133.4" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">G</text>
-<rect x="143.2" y="128" width="19.6" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="153.0" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">7</text>
-<rect x="162.8" y="128" width="22.4" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="174.0" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">E</text>
-<rect x="185.2" y="128" width="19.6" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="195.0" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">W</text>
-<rect x="204.8" y="128" width="16.8" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="213.2" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">,</text>
-<rect x="221.6" y="128" width="8.4" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="225.8" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">␣</text>
-<rect x="230.0" y="128" width="11.2" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="235.6" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">n</text>
-<rect x="241.2" y="128" width="11.2" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="246.8" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">a</text>
-<rect x="252.4" y="128" width="16.8" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="260.8" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">m</text>
-<rect x="269.2" y="128" width="11.2" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="274.8" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">e</text>
-<rect x="280.4" y="128" width="8.4" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="284.6" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">␣</text>
-<rect x="288.8" y="128" width="11.2" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="294.4" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">i</text>
-<rect x="300.0" y="128" width="14.0" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="307.0" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">s</text>
-<rect x="314.0" y="128" width="8.4" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="318.2" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">␣</text>
-<rect x="322.4" y="128" width="25.2" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="335.0" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">J</text>
-<rect x="347.6" y="128" width="11.2" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="353.2" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">e</text>
-<rect x="358.8" y="128" width="16.8" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="367.2" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">f</text>
-<rect x="375.6" y="128" width="16.8" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="384.0" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">f</text>
+<rect x="20.0" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="34.4" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">7</text>
+<rect x="48.8" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="63.2" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">3</text>
+<rect x="77.6" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="92.0" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">␣</text>
+<rect x="106.4" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="120.8" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">d</text>
+<rect x="135.2" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="149.6" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">e</text>
+<rect x="164.0" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="178.4" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">␣</text>
+<rect x="192.8" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="207.2" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">A</text>
+<rect x="221.6" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="236.0" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">G</text>
+<rect x="250.4" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="264.8" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">7</text>
+<rect x="279.2" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="293.6" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">E</text>
+<rect x="308.0" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="322.4" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">W</text>
+<rect x="336.8" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="351.2" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">,</text>
+<rect x="365.6" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="380.0" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">␣</text>
+<rect x="394.4" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="408.8" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">n</text>
+<rect x="423.2" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="437.6" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">a</text>
+<rect x="452.0" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="466.4" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">m</text>
+<rect x="480.8" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="495.2" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">e</text>
+<rect x="509.6" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="524.0" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">␣</text>
+<rect x="538.4" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="552.8" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">i</text>
+<rect x="567.2" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="581.6" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">s</text>
+<rect x="596.0" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="610.4" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">␣</text>
+<rect x="624.8" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="639.2" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">J</text>
+<rect x="653.6" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="668.0" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">e</text>
+<rect x="682.4" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="696.8" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">f</text>
+<rect x="711.2" y="48" width="28.8" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
+<text x="725.6" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">f</text>
+<text x="20" y="118" font-size="12" fill="#1F2633">Ham-table Huffman: 107 bits</text>
+<rect x="20.0" y="128" width="32.4" height="26" fill="#B0472F" stroke="#FFFFFF" stroke-width="1"/>
+<text x="36.2" y="145" font-size="9" text-anchor="middle" fill="#FFFFFF">73</text>
+<rect x="52.4" y="128" width="28.8" height="26" fill="#B0472F" stroke="#FFFFFF" stroke-width="1"/>
+<text x="66.8" y="145" font-size="9" text-anchor="middle" fill="#FFFFFF">␣de</text>
+<rect x="81.2" y="128" width="10.8" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
+<text x="86.6" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">␣</text>
+<rect x="92.0" y="128" width="25.2" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
+<text x="104.6" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">A</text>
+<rect x="117.2" y="128" width="25.2" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
+<text x="129.8" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">G</text>
+<rect x="142.4" y="128" width="25.2" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
+<text x="155.0" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">7</text>
+<rect x="167.6" y="128" width="28.8" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
+<text x="182.0" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">E</text>
+<rect x="196.4" y="128" width="25.2" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
+<text x="209.0" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">W</text>
+<rect x="221.6" y="128" width="21.6" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
+<text x="232.4" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">,</text>
+<rect x="243.2" y="128" width="36.0" height="26" fill="#B0472F" stroke="#FFFFFF" stroke-width="1"/>
+<text x="261.2" y="145" font-size="9" text-anchor="middle" fill="#FFFFFF">␣name</text>
+<rect x="279.2" y="128" width="25.2" height="26" fill="#B0472F" stroke="#FFFFFF" stroke-width="1"/>
+<text x="291.8" y="145" font-size="9" text-anchor="middle" fill="#FFFFFF">␣is</text>
+<rect x="304.4" y="128" width="10.8" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
+<text x="309.8" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">␣</text>
+<rect x="315.2" y="128" width="32.4" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
+<text x="331.4" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">J</text>
+<rect x="347.6" y="128" width="14.4" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
+<text x="354.8" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">e</text>
+<rect x="362.0" y="128" width="21.6" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
+<text x="372.8" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">f</text>
+<rect x="383.6" y="128" width="21.6" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
+<text x="394.4" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">f</text>
 <text x="20" y="96" font-size="10" fill="#5A6477">every character the same width</text>
-<text x="20" y="176" font-size="10" fill="#5A6477">space 3 bits, e 4, J 9: width is the cost</text>
+<text x="20" y="176" font-size="10" fill="#5A6477">width is the cost; rust boxes are whole phrases, one code each</text>
 </g>
 </svg>

@@ -1,0 +1,54 @@
+# Phrases the ham text table codes as one symbol each, so they cost a few
+# bits instead of several characters' worth. One per line, in double
+# quotes, so a leading space shows: " the" matches only after a space.
+# Matching is exact and case sensitive: list CQ and cq separately if both
+# are wanted. Lines starting with # are comments.
+#
+# After editing, run   python3 gen_table.py --write   to rebuild
+# app/src/text_messaging/HamTextTable.h, which the encoder, the decoder and
+# the COMMS highlight all read. Changing the list changes the code for
+# every symbol, so builds with different lists cannot read each other's
+# text.
+"CQ CQ"
+" the"
+" you"
+" and"
+" to"
+" is"
+" for"
+" your"
+" with"
+" have"
+" here"
+" good"
+" very"
+" nice"
+"thanks"
+"Thanks"
+" name"
+" report"
+" copy"
+" signal"
+" weather"
+" today"
+" tonight"
+" rig"
+" pwr"
+" power"
+"qsy"
+" ant"
+"agn"
+" de"
+" pse"
+"fb"
+"73"
+" antenna"
+# Common letter runs inside words.
+"ing"
+"in"
+"nd"
+" on"
+"es"
+"at"
+"tion"
+"re"

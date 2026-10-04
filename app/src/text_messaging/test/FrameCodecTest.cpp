@@ -38,6 +38,7 @@
 
 #include "../FrameCodec.h"
 #include "../HamText.h"
+#include "../HamTextTable.h"
 
 using namespace TextMessaging;
 
@@ -270,6 +271,73 @@ void testHamText()
 
     std::vector<uint8_t> zeros((size_t)TEXT_FRAME_BYTES, 0);
     CHECK(HamText::decode(zeros.data(), 0, frameBits).empty());
+}
+
+// Phrases ride as one symbol each: found longest first, exactly (case and
+// leading space), the same ones the COMMS highlight shows, and cheaper than
+// spelling them out.
+void testHamTextPhrases()
+{
+    std::string text = "CQ CQ CQ de AG7EW, can you hear the beacon? The YOU and the";
+    std::vector<HamText::PhraseSpan> spans = HamText::phraseSpans(text);
+    std::vector<std::string> found;
+    for (const auto& span : spans) found.push_back(text.substr(span.start, span.length));
+    std::vector<std::string> expected = {"CQ CQ", " de", " you", " the", " and", " the"};
+    CHECK(found == expected);
+    CHECK(HamText::phraseSpans("the").empty());
+    CHECK(HamText::phraseSpans(" They").empty());
+
+    const int frameBits = 8 * TEXT_FRAME_BYTES;
+    std::vector<uint8_t> frame((size_t)TEXT_FRAME_BYTES, 0);
+    CHECK(HamText::encode(text, 0, frame.data(), 73, frameBits) == text.size());
+    CHECK(HamText::decode(frame.data(), 73, frameBits) == text);
+
+    // " the" costs less than its four characters.
+    int spelled = 0;
+    for (char c : std::string(" the")) spelled += HamText::characterBits((unsigned char)c);
+    std::vector<uint8_t> one((size_t)TEXT_FRAME_BYTES, 0);
+    CHECK(HamText::encode(" the", 0, one.data(), 0, spelled - 1) == 4);
+
+    // A phrase is never split between frames: it waits whole for the next.
+    bool cutAtPhrase = false;
+    for (size_t n = 1; n < 60; n++)
+    {
+        std::string longText = std::string(n, 'x') + " the end";
+        size_t fits = FrameCodec::textThatFits("AG7EW", longText, 0);
+        CHECK(fits <= n || fits >= n + 4);
+        cutAtPhrase = cutAtPhrase || fits == n;
+    }
+    CHECK(cutAtPhrase);
+}
+
+// A phrase that holds a shorter one (" antenna" holds " ant", "ing" holds
+// "in") always rides as the whole, longer phrase, never as the short one
+// plus letters. Every listed phrase, typed alone, is one symbol.
+void testHamTextLongestPhrase()
+{
+    const int frameBits = 8 * TEXT_FRAME_BYTES;
+    for (int k = 0; k < HamText::PHRASE_COUNT; k++)
+    {
+        std::string phrase = HamText::PHRASES[k];
+        std::vector<HamText::PhraseSpan> spans = HamText::phraseSpans(phrase);
+        CHECK(spans.size() == 1 && spans[0].start == 0 && spans[0].length == phrase.size());
+
+        // The encoder agrees: the phrase fits in exactly its own code.
+        int bits = HamText::SYMBOL_BITS[95 + k];
+        std::vector<uint8_t> frame((size_t)TEXT_FRAME_BYTES, 0);
+        CHECK(HamText::encode(phrase, 0, frame.data(), 0, bits) == phrase.size());
+        CHECK(HamText::encode(phrase, 0, frame.data(), 0, bits - 1) == 0);
+        CHECK(HamText::decode(frame.data(), 0, frameBits).compare(0, phrase.size(), phrase) == 0);
+    }
+
+    std::string text = "my antenna is up, ant down, antennas";
+    std::vector<std::string> found;
+    for (const auto& span : HamText::phraseSpans(text)) found.push_back(text.substr(span.start, span.length));
+    std::vector<std::string> antennas;
+    for (const auto& f : found)
+        if (f.compare(0, 4, " ant") == 0) antennas.push_back(f);
+    std::vector<std::string> expected = {" antenna", " ant", " antenna"};
+    CHECK(antennas == expected);
 }
 
 // Whether the sender acknowledges by itself rides in the type of its pings,
@@ -562,6 +630,8 @@ int main()
     testRoundTrip();
     testSizes();
     testHamText();
+    testHamTextPhrases();
+    testHamTextLongestPhrase();
     testBurstsFollowing();
     testAutoAckFlag();
     testOldBuildsApart();

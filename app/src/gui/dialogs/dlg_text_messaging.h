@@ -150,6 +150,7 @@ private:
     // the send button, in red past the time-out timer. Nothing for codec2
     // or Data2G, which do not say.
     void updateAirTime();
+    void updatePhraseHighlight();
     void updateSendToolTip();
 
     void OnSend(wxCommandEvent& event);
@@ -186,6 +187,7 @@ private:
     Chaotica::Button* m_btnSend;
     wxString m_sendToolTip;         // where the message goes
     wxString m_airTimeToolTip;      // and how long it takes, when that is long
+    bool m_phraseHighlighted = false; // some of the entry text has the accelerated background
     Chaotica::Button* m_chkAutoReply;
     WrappingText* m_txtStatus;
     WrappingText* m_txtInhibited;
