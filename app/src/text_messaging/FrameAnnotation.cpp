@@ -10,6 +10,7 @@
 #include <cstdio>
 
 #include "FrameCodec.h"
+#include "HamText.h"
 #include "TextMessagingTypes.h"
 
 namespace TextMessaging
@@ -17,21 +18,6 @@ namespace TextMessaging
 
 namespace
 {
-
-// The header layout, as FrameCodec.cpp packs it (see TextMessagingTypes.h).
-// FrameAnnotationTest checks these against frames FrameCodec encodes.
-constexpr int OFFSET_TYPE = 0;
-constexpr int OFFSET_DEST_CRC = 1;
-constexpr int OFFSET_ORIGIN_CALLSIGN = 4;
-constexpr int OFFSET_AIR_ID = 10;
-constexpr int OFFSET_FRAGMENT_INDEX = 12;
-constexpr int OFFSET_FRAGMENT_COUNT = 13;
-constexpr int OFFSET_SIGNALLING_PAYLOAD_LENGTH = 12;
-constexpr int OFFSET_TEXT_PAYLOAD_LENGTH = 14;
-constexpr uint8_t TYPE_MORE_FOLLOWS = 0x80;
-constexpr uint8_t TYPE_VALUE_MASK = 0x7F;
-constexpr uint8_t FRAGMENT_INDEX_MASK = 0x0F;
-constexpr int BURSTS_FOLLOWING_SHIFT = 4;
 
 const char* kindName(FrameType type)
 {
@@ -47,11 +33,6 @@ const char* kindName(FrameType type)
     return "?";
 }
 
-bool carriesText(FrameType type)
-{
-    return type == FrameType::Message || type == FrameType::Broadcast;
-}
-
 std::string format(const char* pattern, unsigned a, unsigned b = 0)
 {
     char buffer[48];
@@ -59,41 +40,35 @@ std::string format(const char* pattern, unsigned a, unsigned b = 0)
     return buffer;
 }
 
+// The header is packed to the bit, so fields are read by bit position.
 class Reader
 {
 public:
     Reader(const std::vector<uint8_t>& bytes, int segmentFrom, int knownFrom)
-        : bytes_(bytes), segmentFrom_(segmentFrom), knownFrom_(knownFrom)
+        : bytes_(bytes), segmentFromBit_(8 * segmentFrom), knownFromBit_(8 * knownFrom)
     {
     }
 
-    bool known(int offset, int length) const
+    bool known(int bit, int count) const
     {
-        return offset >= knownFrom_ && offset + length <= (int)bytes_.size();
+        return bit >= knownFromBit_ && bit + count <= sizeBits();
     }
 
-    // A field is told on the segment that brings its last byte.
-    bool completesHere(int offset, int length) const
+    // A field is told on the segment that brings its last bit.
+    bool completesHere(int bit, int count) const
     {
-        int lastByte = offset + length - 1;
-        return known(offset, length) && lastByte >= segmentFrom_;
+        return known(bit, count) && bit + count - 1 >= segmentFromBit_;
     }
 
-    uint32_t value(int offset, int length) const
-    {
-        uint32_t v = 0;
-        for (int i = 0; i < length; i++) v = (v << 8) | bytes_[(size_t)(offset + i)];
-        return v;
-    }
-
-    const uint8_t* at(int offset) const { return bytes_.data() + offset; }
-    int segmentFrom() const { return segmentFrom_; }
-    int size() const { return (int)bytes_.size(); }
+    uint64_t value(int bit, int count) const { return getBits(bytes_.data(), bit, count); }
+    const uint8_t* data() const { return bytes_.data(); }
+    int segmentFromBit() const { return segmentFromBit_; }
+    int sizeBits() const { return 8 * (int)bytes_.size(); }
 
 private:
     const std::vector<uint8_t>& bytes_;
-    int segmentFrom_;
-    int knownFrom_;
+    int segmentFromBit_;
+    int knownFromBit_;
 };
 
 void add(std::vector<AnnotationToken>& tokens, AnnotationToken::Role role, const std::string& text)
@@ -101,16 +76,16 @@ void add(std::vector<AnnotationToken>& tokens, AnnotationToken::Role role, const
     tokens.push_back(AnnotationToken{role, text});
 }
 
-// The characters of the segment from `from`, up to `to`, as one token.
-// Zero bytes are the padding after the text and are left out.
-void addText(std::vector<AnnotationToken>& tokens, const Reader& r, int from, int to)
+// The characters the newest segment carried, from bit `from` on. Codes never
+// cross a segment, so a segment's text reads on its own.
+void addText(std::vector<AnnotationToken>& tokens, const Reader& r, int from)
 {
+    from = std::max(from, r.segmentFromBit());
+    if (from >= r.sizeBits()) return;
     std::string text;
-    for (int i = std::max(from, r.segmentFrom()); i < std::min(to, r.size()); i++)
+    for (char c : HamText::decode(r.data(), from, r.sizeBits()))
     {
-        uint8_t c = *r.at(i);
-        if (c == 0) continue;
-        text.push_back(c < 0x20 || c == 0x7F ? '.' : (char)c);
+        text.push_back((unsigned char)c < 0x20 || (unsigned char)c >= 0x7F ? '.' : c);
     }
     if (!text.empty()) add(tokens, AnnotationToken::Role::Text, text);
 }
@@ -125,95 +100,80 @@ std::vector<AnnotationToken> describeSegment(const std::vector<uint8_t>& bytes, 
     Reader r(bytes, segmentFrom, knownFrom);
     if (segmentFrom >= (int)bytes.size()) return tokens;
 
-    // Without the type byte there is no telling the header's layout: say
-    // what was lost, and read anything past the longest header as text.
-    if (!r.known(OFFSET_TYPE, 1))
+    // Without the type and the origin's form there is no telling where the
+    // header ends: say what was lost, and read any segment past the longest
+    // header as text.
+    const int longestHeader = FrameCodec::headerBits(FrameType::Message, false);
+    if (!r.known(0, TYPE_BITS) || !r.known(FrameCodec::ORIGIN_BIT, 1))
     {
-        int header = text ? TEXT_HEADER_BYTES : SIGNALLING_HEADER_BYTES;
-        if (segmentFrom < header) add(tokens, Role::Unknown, "...");
-        if (text) addText(tokens, r, header, r.size());
+        int textFrom = (longestHeader + HamText::TEXT_BLOCK_BITS - 1) / HamText::TEXT_BLOCK_BITS *
+                       HamText::TEXT_BLOCK_BITS;
+        if (r.segmentFromBit() < textFrom) add(tokens, Role::Unknown, "...");
+        else if (text) addText(tokens, r, textFrom);
         return tokens;
     }
 
-    uint8_t typeByte = *r.at(OFFSET_TYPE);
-    if (!FrameCodec::isKnownFrameType(typeByte & TYPE_VALUE_MASK))
-    {
-        if (r.completesHere(OFFSET_TYPE, 1)) add(tokens, Role::Unknown, "NOT CHAT");
-        return tokens;
-    }
+    FrameType type;
     bool noAutoAck = false;
-    FrameType type = FrameCodec::frameType(typeByte & TYPE_VALUE_MASK, &noAutoAck);
-    bool signalling = FrameCodec::isSignallingFrameType(type);
-    int header = FrameCodec::headerBytes(type);
+    if (!FrameCodec::typeFromCode((uint8_t)r.value(0, TYPE_BITS), type, noAutoAck))
+    {
+        if (r.completesHere(0, TYPE_BITS)) add(tokens, Role::Unknown, "NOT CHAT");
+        return tokens;
+    }
+    const bool signalling = FrameCodec::isSignallingFrameType(type);
+    const bool standard = r.value(FrameCodec::ORIGIN_BIT, 1) == 0;
+    const int originBits = FrameCodec::originBits(standard);
 
-    if (r.completesHere(OFFSET_TYPE, 1))
+    if (r.completesHere(0, TYPE_BITS))
     {
         add(tokens, Role::Kind, kindName(type));
         if (noAutoAck) add(tokens, Role::Field, "NO AUTO ACK");
     }
-    if (r.completesHere(OFFSET_DEST_CRC, 3))
+    if (r.completesHere(FrameCodec::DESTINATION_BIT, DESTINATION_HASH_BITS))
     {
-        uint32_t crc = r.value(OFFSET_DEST_CRC, 3);
-        std::string name = crc != 0 && nameFor ? nameFor(crc) : std::string();
-        add(tokens, Role::Station, crc == 0 ? std::string("TO ALL")
-                                   : !name.empty() ? "TO " + name : format("TO #%06X", crc));
+        uint32_t hash = (uint32_t)r.value(FrameCodec::DESTINATION_BIT, DESTINATION_HASH_BITS);
+        std::string name = hash != 0 && nameFor ? nameFor(hash) : std::string();
+        add(tokens, Role::Station, hash == 0 ? std::string("TO ALL")
+                                   : !name.empty() ? "TO " + name : format("TO #%05X", hash));
     }
-    if (r.completesHere(OFFSET_ORIGIN_CALLSIGN, PACKED_CALLSIGN_BYTES))
+    if (r.completesHere(FrameCodec::ORIGIN_BIT, originBits))
     {
-        add(tokens, Role::Station, "DE " + FrameCodec::unpackCallsign(r.at(OFFSET_ORIGIN_CALLSIGN)));
-    }
-    if (r.completesHere(OFFSET_AIR_ID, 2))
-    {
-        add(tokens, Role::Field, format("No.%u", r.value(OFFSET_AIR_ID, 2)));
+        std::string origin = FrameCodec::unpackCallsign(r.data(), FrameCodec::ORIGIN_BIT + 1, standard);
+        add(tokens, Role::Station, "DE " + (origin.empty() ? std::string("?") : origin));
     }
 
-    int lengthOffset = signalling ? OFFSET_SIGNALLING_PAYLOAD_LENGTH : OFFSET_TEXT_PAYLOAD_LENGTH;
-    if (!signalling && r.completesHere(OFFSET_FRAGMENT_INDEX, 2))
+    int bit = FrameCodec::ORIGIN_BIT + originBits;
+    if (signalling)
     {
-        uint8_t indexByte = *r.at(OFFSET_FRAGMENT_INDEX);
-        unsigned index = indexByte & FRAGMENT_INDEX_MASK;
-        unsigned following = indexByte >> BURSTS_FOLLOWING_SHIFT;
-        add(tokens, Role::Field, format("PART %u/%u", index + 1, *r.at(OFFSET_FRAGMENT_COUNT)));
+        if (r.completesHere(bit, 1) && r.value(bit, 1) != 0) add(tokens, Role::Field, "MORE TO COME");
+        bit += 1;
+        if (r.completesHere(bit, AIR_ID_BITS)) add(tokens, Role::Field, format("No.%u", (unsigned)r.value(bit, AIR_ID_BITS)));
+        bit += AIR_ID_BITS;
+
+        // A pong's SNR or which parts arrived, in hex.
+        int payloadBits = FrameCodec::signallingPayloadBits(type);
+        if (payloadBits > 0 && r.completesHere(bit, payloadBits))
+        {
+            add(tokens, Role::Field, format("%02X", (unsigned)r.value(bit, payloadBits)));
+        }
+        return tokens;
+    }
+
+    int followingBit = bit;
+    bit += BURSTS_FOLLOWING_BITS;
+    if (r.completesHere(bit, AIR_ID_BITS)) add(tokens, Role::Field, format("No.%u", (unsigned)r.value(bit, AIR_ID_BITS)));
+    bit += AIR_ID_BITS;
+    if (r.completesHere(followingBit, bit + 2 * FRAGMENT_FIELD_BITS - followingBit))
+    {
+        unsigned index = (unsigned)r.value(bit, FRAGMENT_FIELD_BITS);
+        unsigned count = (unsigned)r.value(bit + FRAGMENT_FIELD_BITS, FRAGMENT_FIELD_BITS) + 1;
+        unsigned following = (unsigned)r.value(followingBit, BURSTS_FOLLOWING_BITS);
+        add(tokens, Role::Field, format("PART %u/%u", index + 1, count));
         if (following > 0) add(tokens, Role::Field, format("%u MORE TO COME", following));
     }
-    if (signalling && (typeByte & TYPE_MORE_FOLLOWS) && r.completesHere(OFFSET_TYPE, 1))
-    {
-        add(tokens, Role::Field, "MORE TO COME");
-    }
+    bit += 2 * FRAGMENT_FIELD_BITS;
 
-    int payloadEnd = r.size();
-    if (r.known(lengthOffset, 1))
-    {
-        int length = *r.at(lengthOffset);
-        payloadEnd = header + length;
-        if (r.completesHere(lengthOffset, 1))
-        {
-            add(tokens, Role::Field, carriesText(type) ? format("%u CH", (unsigned)length)
-                                                       : format("%u B", (unsigned)length));
-        }
-    }
-
-    if (carriesText(type))
-    {
-        addText(tokens, r, header, payloadEnd);
-    }
-    else
-    {
-        // A ping's first payload byte is its flags.
-        if (type == FrameType::Ping && payloadEnd > header && r.completesHere(header, 1) &&
-            (*r.at(header) & PING_FLAG_NO_AUTO_ACK) != 0)
-        {
-            add(tokens, Role::Field, "NO AUTO ACK");
-        }
-
-        // Signalling payloads (a pong's SNR, which parts arrived) in hex.
-        std::string hex;
-        for (int i = std::max(header, segmentFrom); i < std::min(payloadEnd, r.size()); i++)
-        {
-            hex += format(hex.empty() ? "%02X" : " %02X", *r.at(i));
-        }
-        if (!hex.empty()) add(tokens, Role::Field, hex);
-    }
+    addText(tokens, r, bit);
     return tokens;
 }
 

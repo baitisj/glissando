@@ -223,10 +223,17 @@ frame could have decoded. A ping queued behind one nobody answers now goes
 chord to be heard, below about -14 dB, can be keyed over. The
 acknowledgement and ping timeouts still wait for the answer's first frame.
 
-Air time for a short message (up to 12 characters of text behind the 15 byte
-header, three segments):
-about 20 s at Presto, 41 s at Allegro, 2.8 minutes at Adagio. A full 54 byte
-text fragment is six frames, about 5.5 minutes at Adagio.
+Chat text is Huffman coded with a fixed table drawn from ham chat
+(`HamText`), about 5 bits a character, behind a header packed to the bit:
+type, a 20-bit destination hash, the sender's callsign (28 bits as FT8 packs
+a standard callsign, 48 otherwise), message number and fragment fields
+(`FrameCodec`). A ping, pong or acknowledgement from a standard callsign is
+one segment. A short message (up to about 13 characters) is two segments:
+about 14 s at Presto, 28 s at Allegro, 1.8 minutes at Adagio. A full text
+fragment, six segments, carries about 65 characters of ordinary chat. See
+Lesson 8 of [HOW_IT_HEARS.md](HOW_IT_HEARS.md). Glissando 0.3 and older
+cannot read these frames, and the type values keep each build from
+misreading the other's.
 
 The COMMS window's send button shows how long the message being typed will be
 on the air at the tempo it would go out at now, in red once that is longer
@@ -250,18 +257,14 @@ or aborted.
 
 `Auto acknowledge`, in COMMS, is lit unless the station should not
 transmit unattended. While it is dark the station sends no acknowledgements
-or pongs, and says so on everything it sends: its pings set a flag in their
-otherwise empty payload byte, and its messages and broadcasts go out with
-the type bit 0x08 added (`TYPE_NO_AUTO_ACK`). A station that hears the flag
-sends its messages to that station once, without retries; the chip reads
-SENT, and a message already waiting for an acknowledgement ends as SENT
-instead of retrying. The log notes when a station turns it off or on, and a
-ping to such a station that goes unanswered says why. Retries come back as
-soon as the station is heard without the flag, or an acknowledgement or pong
-arrives from it. A station with it lit sends exactly what earlier builds
-sent, so nothing changes between stations that leave it on. Glissando 0.3 and
-older drop a frame type they do not know, so they cannot read messages or
-broadcasts from a station with it dark; they read its pings.
+or pongs, and says so on everything it sends: its pings, messages and
+broadcasts go out with a frame type of their own that says so. A station
+that hears that sends its messages to that station once, without retries;
+the chip reads SENT, and a message already waiting for an acknowledgement
+ends as SENT instead of retrying. The log notes when a station turns it off
+or on, and a ping to such a station that goes unanswered says why. Retries
+come back as soon as the station is heard without the flag, or an
+acknowledgement or pong arrives from it.
 
 The right-click menu also offers `Woah!`, for when you can hear somebody the
 receiver has missed. Nothing keys, acknowledgements and pongs included, until

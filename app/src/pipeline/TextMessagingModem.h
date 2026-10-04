@@ -227,10 +227,10 @@ public:
     // defaults, or ones sized to the Glissando tempo we transmit at.
     TextMessaging::AirTiming airTiming() const;
 
-    // How long a new message of textBytes would be on the air, in seconds,
-    // sent on its own at the tempo modulate() would pick now. Zero when chat
+    // How long a new message of this text from callsign would be on the
+    // air, in seconds, sent on its own at the tempo modulate() would pick now. Zero when chat
     // goes over the codec2 modes, whose messages are all well under a minute.
-    double glissandoMessageSeconds(size_t textBytes) const;
+    double glissandoMessageSeconds(const std::string& text, const std::string& callsign) const;
 
     // How many times longer a burst takes at the given tempo than at the
     // one modulate() would pick now; 1 when chat goes over the codec2 modes.

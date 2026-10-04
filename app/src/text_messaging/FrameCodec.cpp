@@ -37,16 +37,31 @@
 #include <cctype>
 #include <cstring>
 
+#include "HamText.h"
+
 namespace TextMessaging
 {
 
 namespace
 {
 
-// Air alphabet. Index zero is the pad character, so a short callsign packs to
-// the same value whichever end does the packing.
+// Air alphabet for callsigns that are not standard. Index zero is the pad
+// character, so a short callsign packs to the same value whichever end does
+// the packing.
 const char* const BASE40_ALPHABET = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-/.";
 constexpr int BASE40_SIZE = 40;
+
+// A standard callsign as FT8 packs it: six positions, the call area digit
+// third (a one character prefix is shifted right by a space), each position
+// from its own alphabet.
+const char* const STANDARD_ALPHABETS[6] = {
+    " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "0123456789",
+    " ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    " ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    " ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+};
 
 // CRC-24/OPENPGP, the same parameters FreeDATA uses for its callsign CRCs.
 constexpr uint32_t CRC24_INIT = 0xB704CEu;
@@ -61,60 +76,82 @@ int base40Index(char c)
     return -1;
 }
 
-// Offsets of each header field, in the order documented in
-// TextMessagingTypes.h. Everything up to and including the message ID is
-// common to both frame layouts; the fragment fields exist only in text frames,
-// and the payload length byte is the last header byte either way.
-constexpr int OFFSET_TYPE = 0;
-constexpr int OFFSET_DEST_CRC = 1;
-constexpr int OFFSET_ORIGIN_CALLSIGN = 4;
-constexpr int OFFSET_AIR_ID = 10;
-constexpr int OFFSET_FRAGMENT_INDEX = 12;  // text frames only
-constexpr int OFFSET_FRAGMENT_COUNT = 13;  // text frames only
-constexpr int OFFSET_SIGNALLING_PAYLOAD_LENGTH = 12;
-constexpr int OFFSET_TEXT_PAYLOAD_LENGTH = 14;
+// Type codes. Glissando 0.3 and older began every frame with a type byte
+// whose top nibble was 1, 2, 9 or A, so none of those is used here, and
+// none of these, read as such a byte, is one of their types.
+constexpr uint8_t CODE_PING = 0x3;
+constexpr uint8_t CODE_PING_NO_AUTO_ACK = 0x4;
+constexpr uint8_t CODE_PING_ACK = 0x5;
+constexpr uint8_t CODE_MESSAGE_ACK = 0x6;
+constexpr uint8_t CODE_PARTIAL_ACK = 0x7;
+constexpr uint8_t CODE_MESSAGE = 0x8;
+constexpr uint8_t CODE_MESSAGE_NO_AUTO_ACK = 0xB;
+constexpr uint8_t CODE_BROADCAST = 0xC;
+constexpr uint8_t CODE_BROADCAST_NO_AUTO_ACK = 0xD;
 
-// Bursts still to come in the keying. Fragment numbers never reach 16, so a
-// text frame's fragment index byte has a spare high nibble for the count.
-// A signalling frame has no spare byte, but frame type values stay below
-// 0x80, which leaves the top bit of the type byte to say "more follows".
-constexpr uint8_t TYPE_MORE_FOLLOWS = 0x80;
-constexpr uint8_t TYPE_VALUE_MASK = 0x7F;
-constexpr uint8_t FRAGMENT_INDEX_MASK = 0x0F;
-constexpr int BURSTS_FOLLOWING_SHIFT = 4;
-
-static_assert(MAX_FRAGMENTS_PER_MESSAGE <= FRAGMENT_INDEX_MASK + 1,
-              "fragment index no longer leaves room for the bursts following count");
-static_assert(MAX_TEXT_BURSTS_FOLLOWING == (0xFF >> BURSTS_FOLLOWING_SHIFT),
-              "bursts following count and its nibble disagree");
-static_assert(((uint8_t)FrameType::Ping & TYPE_MORE_FOLLOWS) == 0 &&
-                  ((uint8_t)FrameType::PingAck & TYPE_MORE_FOLLOWS) == 0 &&
-                  ((uint8_t)FrameType::Message & TYPE_MORE_FOLLOWS) == 0 &&
-                  ((uint8_t)FrameType::MessageAck & TYPE_MORE_FOLLOWS) == 0 &&
-                  ((uint8_t)FrameType::Broadcast & TYPE_MORE_FOLLOWS) == 0 &&
-                  ((uint8_t)FrameType::MessagePartialAck & TYPE_MORE_FOLLOWS) == 0,
-              "a frame type value collides with the more-follows bit");
-static_assert((((uint8_t)FrameType::Ping | (uint8_t)FrameType::PingAck | (uint8_t)FrameType::Message |
-                (uint8_t)FrameType::MessageAck | (uint8_t)FrameType::Broadcast |
-                (uint8_t)FrameType::MessagePartialAck) &
-               TYPE_NO_AUTO_ACK) == 0,
-              "a frame type value collides with the no-auto-ACK bit");
-
-static_assert(OFFSET_AIR_ID == OFFSET_ORIGIN_CALLSIGN + PACKED_CALLSIGN_BYTES,
-              "packed callsign does not fit its header field");
-static_assert(OFFSET_SIGNALLING_PAYLOAD_LENGTH + 1 == SIGNALLING_HEADER_BYTES,
-              "signalling header field offsets and SIGNALLING_HEADER_BYTES disagree");
-static_assert(OFFSET_TEXT_PAYLOAD_LENGTH + 1 == TEXT_HEADER_BYTES,
-              "text header field offsets and TEXT_HEADER_BYTES disagree");
-static_assert(OFFSET_FRAGMENT_COUNT + 1 == OFFSET_TEXT_PAYLOAD_LENGTH,
-              "fragment fields must sit between the message ID and the length byte");
-
-// The offset of the payload length byte, which is the only header field whose
-// position depends on the layout.
-int payloadLengthOffset(FrameType type)
+uint8_t typeCode(FrameType type, bool autoAck)
 {
-    return FrameCodec::isSignallingFrameType(type) ? OFFSET_SIGNALLING_PAYLOAD_LENGTH
-                                                   : OFFSET_TEXT_PAYLOAD_LENGTH;
+    switch (type)
+    {
+        case FrameType::Ping: return autoAck ? CODE_PING : CODE_PING_NO_AUTO_ACK;
+        case FrameType::PingAck: return CODE_PING_ACK;
+        case FrameType::MessageAck: return CODE_MESSAGE_ACK;
+        case FrameType::MessagePartialAck: return CODE_PARTIAL_ACK;
+        case FrameType::Message: return autoAck ? CODE_MESSAGE : CODE_MESSAGE_NO_AUTO_ACK;
+        case FrameType::Broadcast: return autoAck ? CODE_BROADCAST : CODE_BROADCAST_NO_AUTO_ACK;
+    }
+    return 0;
+}
+
+// The six positions of a standard callsign, or empty if it is not one.
+std::string standardPositions(const std::string& normalized)
+{
+    std::string t;
+    if (normalized.size() >= 3 && std::isdigit((unsigned char)normalized[2])) t = normalized;
+    else if (normalized.size() >= 2 && std::isdigit((unsigned char)normalized[1])) t = " " + normalized;
+    else return std::string();
+    if (t.size() > 6) return std::string();
+    t.resize(6, ' ');
+
+    for (int i = 0; i < 6; i++)
+    {
+        if (std::strchr(STANDARD_ALPHABETS[i], t[(size_t)i]) == nullptr) return std::string();
+    }
+    // At least one suffix letter, and no letter after a space.
+    if (t[3] == ' ' || (t[4] == ' ' && t[5] != ' ')) return std::string();
+    return t;
+}
+
+uint64_t packStandard(const std::string& positions)
+{
+    uint64_t value = 0;
+    for (int i = 0; i < 6; i++)
+    {
+        const char* alphabet = STANDARD_ALPHABETS[i];
+        value = value * std::strlen(alphabet) + (uint64_t)(std::strchr(alphabet, positions[(size_t)i]) - alphabet);
+    }
+    return value;
+}
+
+uint64_t packExtended(const std::string& normalized)
+{
+    // Left aligned and padded with the zero symbol, so unpacking gives the
+    // callsign back with trailing pad characters that are easy to strip.
+    uint64_t packed = 0;
+    for (int i = 0; i < MAX_PACKED_CALLSIGN_CHARS; i++)
+    {
+        int index = i < (int)normalized.size() ? base40Index(normalized[(size_t)i]) : 0;
+        if (index < 0) index = 0;
+        packed = packed * BASE40_SIZE + (uint64_t)index;
+    }
+    return packed;
+}
+
+std::string trimmed(const std::string& s)
+{
+    size_t first = s.find_first_not_of(' ');
+    if (first == std::string::npos) return std::string();
+    return s.substr(first, s.find_last_not_of(' ') - first + 1);
 }
 
 } // namespace
@@ -152,40 +189,36 @@ uint32_t FrameCodec::callsignCrc24(const std::string& callsign)
     return crc & 0xFFFFFFu;
 }
 
-void FrameCodec::packCallsign(const std::string& callsign, uint8_t* out)
+uint32_t FrameCodec::callsignHash(const std::string& callsign)
 {
-    std::string normalized = normalizeCallsign(callsign);
-    if ((int)normalized.size() > MAX_PACKED_CALLSIGN_CHARS)
-    {
-        normalized.resize(MAX_PACKED_CALLSIGN_CHARS);
-    }
-
-    // Left aligned and padded with the zero symbol, so unpacking gives the
-    // callsign back with trailing pad characters that are easy to strip.
-    uint64_t packed = 0;
-    for (int i = 0; i < MAX_PACKED_CALLSIGN_CHARS; i++)
-    {
-        int index = i < (int)normalized.size() ? base40Index(normalized[i]) : 0;
-        if (index < 0) index = 0;
-        packed = packed * BASE40_SIZE + (uint64_t)index;
-    }
-
-    for (int i = 0; i < PACKED_CALLSIGN_BYTES; i++)
-    {
-        out[i] = (uint8_t)(packed >> (8 * (PACKED_CALLSIGN_BYTES - 1 - i)));
-    }
+    return callsignCrc24(callsign) >> (24 - DESTINATION_HASH_BITS);
 }
 
-std::string FrameCodec::unpackCallsign(const uint8_t* in)
+bool FrameCodec::isStandardCallsign(const std::string& callsign)
 {
-    uint64_t packed = 0;
-    for (int i = 0; i < PACKED_CALLSIGN_BYTES; i++)
+    return !standardPositions(normalizeCallsign(callsign)).empty();
+}
+
+std::string FrameCodec::unpackCallsign(const uint8_t* data, int bit, bool standard)
+{
+    if (standard)
     {
-        packed = (packed << 8) | (uint64_t)in[i];
+        uint64_t value = getBits(data, bit, STANDARD_CALLSIGN_BITS);
+        char positions[7] = {};
+        for (int i = 5; i >= 0; i--)
+        {
+            size_t size = std::strlen(STANDARD_ALPHABETS[i]);
+            positions[i] = STANDARD_ALPHABETS[i][value % size];
+            value /= size;
+        }
+        // Values past the alphabets' range, or positions packing never
+        // produces, are corruption that slipped past the modem CRC.
+        std::string callsign = trimmed(positions);
+        if (value != 0 || standardPositions(callsign) != std::string(positions)) return "";
+        return callsign;
     }
 
-    // Six bytes can hold values the nine symbol alphabet cannot produce, so
-    // anything above the alphabet's range is corruption, not a callsign.
+    uint64_t packed = getBits(data, bit, EXTENDED_CALLSIGN_BITS);
     uint64_t maxPacked = 1;
     for (int i = 0; i < MAX_PACKED_CALLSIGN_CHARS; i++) maxPacked *= BASE40_SIZE;
     if (packed >= maxPacked) return "";
@@ -203,37 +236,27 @@ std::string FrameCodec::unpackCallsign(const uint8_t* in)
     if (end == std::string::npos) return "";
     result.resize(end + 1);
 
-    // A packed value larger than the alphabet can represent (corruption that
-    // slipped past the modem CRC) decodes to pad characters in the middle;
-    // those are not callsigns, so refuse them rather than show garbage.
+    // Pad characters in the middle are not a callsign either.
     if (result.find(' ') != std::string::npos) return "";
 
     return result;
 }
 
-FrameType FrameCodec::frameType(uint8_t type, bool* noAutoAckOut)
+bool FrameCodec::typeFromCode(uint8_t code, FrameType& typeOut, bool& noAutoAckOut)
 {
-    // Only messages and broadcasts carry the flag in their type.
-    uint8_t base = (uint8_t)(type & ~TYPE_NO_AUTO_ACK);
-    bool flagged = (type & TYPE_NO_AUTO_ACK) != 0 &&
-                   (base == (uint8_t)FrameType::Message || base == (uint8_t)FrameType::Broadcast);
-    if (noAutoAckOut != nullptr) *noAutoAckOut = flagged;
-    return (FrameType)(flagged ? base : type);
-}
-
-bool FrameCodec::isKnownFrameType(uint8_t type)
-{
-    switch (frameType(type))
+    noAutoAckOut = false;
+    switch (code)
     {
-        case FrameType::Ping:
-        case FrameType::PingAck:
-        case FrameType::Message:
-        case FrameType::MessageAck:
-        case FrameType::Broadcast:
-        case FrameType::MessagePartialAck:
-            return true;
-        default:
-            return false;
+        case CODE_PING_NO_AUTO_ACK: noAutoAckOut = true; [[fallthrough]];
+        case CODE_PING: typeOut = FrameType::Ping; return true;
+        case CODE_PING_ACK: typeOut = FrameType::PingAck; return true;
+        case CODE_MESSAGE_ACK: typeOut = FrameType::MessageAck; return true;
+        case CODE_PARTIAL_ACK: typeOut = FrameType::MessagePartialAck; return true;
+        case CODE_MESSAGE_NO_AUTO_ACK: noAutoAckOut = true; [[fallthrough]];
+        case CODE_MESSAGE: typeOut = FrameType::Message; return true;
+        case CODE_BROADCAST_NO_AUTO_ACK: noAutoAckOut = true; [[fallthrough]];
+        case CODE_BROADCAST: typeOut = FrameType::Broadcast; return true;
+        default: return false;
     }
 }
 
@@ -254,158 +277,161 @@ bool FrameCodec::isSignallingFrameType(FrameType type)
     return false;
 }
 
-int FrameCodec::headerBytes(FrameType type)
+int FrameCodec::signallingPayloadBits(FrameType type)
 {
-    return isSignallingFrameType(type) ? SIGNALLING_HEADER_BYTES : TEXT_HEADER_BYTES;
+    return type == FrameType::PingAck || type == FrameType::MessagePartialAck ? SIGNALLING_PAYLOAD_BITS : 0;
+}
+
+int FrameCodec::headerBits(FrameType type, bool standardOrigin)
+{
+    int bits = ORIGIN_BIT + originBits(standardOrigin) + AIR_ID_BITS;
+    if (isSignallingFrameType(type)) return bits + 1;
+    return bits + BURSTS_FOLLOWING_BITS + 2 * FRAGMENT_FIELD_BITS;
+}
+
+size_t FrameCodec::textThatFits(const std::string& originCallsign, const std::string& text, size_t from)
+{
+    int start = headerBits(FrameType::Message, isStandardCallsign(originCallsign));
+    return HamText::encode(text, from, nullptr, start, 8 * TEXT_FRAME_BYTES);
 }
 
 std::vector<uint8_t> FrameCodec::encode(const Frame& frame, int frameBytes)
 {
-    const int header = headerBytes(frame.type);
     const bool signalling = isSignallingFrameType(frame.type);
+    const std::string origin = normalizeCallsign(frame.originCallsign);
+    const std::string positions = standardPositions(origin);
+    const bool standard = !positions.empty();
+    const int header = headerBits(frame.type, standard);
+    const int payloadBits = signalling ? signallingPayloadBits(frame.type) : 0;
 
-    // A ping's first payload byte is its flags, sent only when there is
-    // something to say, so a ping from a station with Auto acknowledge on is
-    // the same as one from a build before the flag.
-    std::vector<uint8_t> payload = frame.payload;
-    if (frame.type == FrameType::Ping && !frame.senderAutoAck)
-    {
-        if (payload.empty()) payload.push_back(0);
-        payload[0] |= PING_FLAG_NO_AUTO_ACK;
-    }
-
-    if (frameBytes < header) return {};
-    if (payload.size() > 255) return {};
-    if ((int)payload.size() > frameBytes - header) return {};
-    if (normalizeCallsign(frame.originCallsign).empty()) return {};
+    if (origin.empty()) return {};
+    if (frameBytes <= 0 || 8 * frameBytes < header + payloadBits) return {};
+    if (frame.destinationCrc >> DESTINATION_HASH_BITS) return {};
+    if (frame.airId > MAX_AIR_ID) return {};
 
     // A signalling frame has nowhere to put the fragment fields, so it may
     // only ever describe a single fragment.
     if (signalling)
     {
         if (frame.fragmentCount != 1 || frame.fragmentIndex != 0) return {};
+        if ((int)frame.payload.size() * 8 > payloadBits) return {};
     }
     else
     {
-        if (frame.fragmentCount == 0) return {};
+        if (frame.fragmentCount == 0 || frame.fragmentCount > MAX_FRAGMENTS_PER_MESSAGE) return {};
         if (frame.fragmentIndex >= frame.fragmentCount) return {};
-        if (frame.fragmentIndex > FRAGMENT_INDEX_MASK) return {};
         if (frame.burstsFollowing > MAX_TEXT_BURSTS_FOLLOWING) return {};
     }
 
-    std::vector<uint8_t> out(frameBytes, 0);
+    std::vector<uint8_t> out((size_t)frameBytes, 0);
+    uint8_t* data = out.data();
+    int bit = 0;
+    auto put = [&](uint64_t value, int count) {
+        putBits(data, bit, value, count);
+        bit += count;
+    };
 
-    out[OFFSET_TYPE] = (uint8_t)frame.type;
-    if (signalling && frame.burstsFollowing > 0) out[OFFSET_TYPE] |= TYPE_MORE_FOLLOWS;
-    if (!signalling && !frame.senderAutoAck) out[OFFSET_TYPE] |= TYPE_NO_AUTO_ACK;
-    out[OFFSET_DEST_CRC] = (uint8_t)(frame.destinationCrc >> 16);
-    out[OFFSET_DEST_CRC + 1] = (uint8_t)(frame.destinationCrc >> 8);
-    out[OFFSET_DEST_CRC + 2] = (uint8_t)frame.destinationCrc;
-    packCallsign(frame.originCallsign, &out[OFFSET_ORIGIN_CALLSIGN]);
-    out[OFFSET_AIR_ID] = (uint8_t)(frame.airId >> 8);
-    out[OFFSET_AIR_ID + 1] = (uint8_t)frame.airId;
+    put(typeCode(frame.type, frame.senderAutoAck || !(frame.type == FrameType::Ping ||
+                                                      frame.type == FrameType::Message ||
+                                                      frame.type == FrameType::Broadcast)),
+        TYPE_BITS);
+    put(frame.destinationCrc, DESTINATION_HASH_BITS);
+    put(standard ? 0 : 1, 1);
+    if (standard) put(packStandard(positions), STANDARD_CALLSIGN_BITS);
+    else put(packExtended(origin), EXTENDED_CALLSIGN_BITS);
 
-    if (!signalling)
+    if (signalling)
     {
-        out[OFFSET_FRAGMENT_INDEX] =
-            (uint8_t)((frame.burstsFollowing << BURSTS_FOLLOWING_SHIFT) | frame.fragmentIndex);
-        out[OFFSET_FRAGMENT_COUNT] = frame.fragmentCount;
+        put(frame.burstsFollowing > 0 ? 1 : 0, 1);
+        put(frame.airId, AIR_ID_BITS);
+        if (payloadBits > 0) put(frame.payload.empty() ? 0 : frame.payload[0], payloadBits);
+        return out;
     }
 
-    out[payloadLengthOffset(frame.type)] = (uint8_t)payload.size();
+    put(frame.burstsFollowing, BURSTS_FOLLOWING_BITS);
+    put(frame.airId, AIR_ID_BITS);
+    put(frame.fragmentIndex, FRAGMENT_FIELD_BITS);
+    put(frame.fragmentCount - 1u, FRAGMENT_FIELD_BITS);
 
-    if (!payload.empty())
-    {
-        std::memcpy(&out[header], payload.data(), payload.size());
-    }
-
+    std::string text(frame.payload.begin(), frame.payload.end());
+    if (HamText::encode(text, 0, data, bit, 8 * frameBytes) != text.size()) return {};
     return out;
 }
 
 bool FrameCodec::decode(const uint8_t* data, int length, Frame& frameOut)
 {
-    // The type byte decides which layout the rest of the frame is in, so it
-    // has to be checked before anything is read at a layout dependent offset.
     if (data == nullptr || length < 1) return false;
+    const int available = 8 * length;
+    if (available < ORIGIN_BIT + 1) return false;
 
-    const bool moreFollows = (data[OFFSET_TYPE] & TYPE_MORE_FOLLOWS) != 0;
-    const uint8_t typeValue = data[OFFSET_TYPE] & TYPE_VALUE_MASK;
-    if (!isKnownFrameType(typeValue)) return false;
-
+    FrameType type;
     bool noAutoAck = false;
-    FrameType type = frameType(typeValue, &noAutoAck);
-    const int header = headerBytes(type);
+    if (!typeFromCode((uint8_t)getBits(data, 0, TYPE_BITS), type, noAutoAck)) return false;
+
     const bool signalling = isSignallingFrameType(type);
-    if (length < header) return false;
+    const bool standard = getBits(data, ORIGIN_BIT, 1) == 0;
+    const int header = headerBits(type, standard);
+    const int payloadBits = signalling ? signallingPayloadBits(type) : 0;
+    if (available < header + payloadBits) return false;
 
-    int payloadLength = data[payloadLengthOffset(type)];
-    if (payloadLength > length - header) return false;
-
-    uint8_t fragmentIndex = 0;
-    uint8_t fragmentCount = 1;
-    uint8_t burstsFollowing = moreFollows ? 1 : 0;
-    if (!signalling)
-    {
-        // A text frame says how many follow in its own header; the type bit
-        // is not something we send on one.
-        if (moreFollows) return false;
-
-        fragmentIndex = data[OFFSET_FRAGMENT_INDEX] & FRAGMENT_INDEX_MASK;
-        burstsFollowing = data[OFFSET_FRAGMENT_INDEX] >> BURSTS_FOLLOWING_SHIFT;
-        fragmentCount = data[OFFSET_FRAGMENT_COUNT];
-        if (fragmentCount == 0 || fragmentIndex >= fragmentCount) return false;
-        if (fragmentCount > MAX_FRAGMENTS_PER_MESSAGE) return false;
-    }
-
-    std::string originCallsign = unpackCallsign(&data[OFFSET_ORIGIN_CALLSIGN]);
+    std::string originCallsign = unpackCallsign(data, ORIGIN_BIT + 1, standard);
     if (originCallsign.empty()) return false;
 
-    frameOut.type = type;
-    frameOut.destinationCrc =
-        ((uint32_t)data[OFFSET_DEST_CRC] << 16) |
-        ((uint32_t)data[OFFSET_DEST_CRC + 1] << 8) |
-        (uint32_t)data[OFFSET_DEST_CRC + 2];
-    frameOut.originCallsign = originCallsign;
-    frameOut.airId = (uint16_t)(((uint16_t)data[OFFSET_AIR_ID] << 8) | data[OFFSET_AIR_ID + 1]);
-    frameOut.fragmentIndex = fragmentIndex;
-    frameOut.fragmentCount = fragmentCount;
-    frameOut.burstsFollowing = burstsFollowing;
-    frameOut.payload.assign(&data[header], &data[header] + payloadLength);
-    if (type == FrameType::Ping)
-    {
-        noAutoAck = !frameOut.payload.empty() && (frameOut.payload[0] & PING_FLAG_NO_AUTO_ACK) != 0;
-    }
-    frameOut.senderAutoAck = !noAutoAck;
+    int bit = ORIGIN_BIT + originBits(standard);
+    auto get = [&](int count) {
+        uint64_t value = getBits(data, bit, count);
+        bit += count;
+        return value;
+    };
 
+    Frame frame;
+    frame.type = type;
+    frame.destinationCrc = (uint32_t)getBits(data, DESTINATION_BIT, DESTINATION_HASH_BITS);
+    frame.originCallsign = originCallsign;
+    frame.senderAutoAck = !noAutoAck;
+
+    if (signalling)
+    {
+        frame.burstsFollowing = (uint8_t)get(1);
+        frame.airId = (uint16_t)get(AIR_ID_BITS);
+        if (payloadBits > 0) frame.payload.push_back((uint8_t)get(payloadBits));
+    }
+    else
+    {
+        frame.burstsFollowing = (uint8_t)get(BURSTS_FOLLOWING_BITS);
+        frame.airId = (uint16_t)get(AIR_ID_BITS);
+        frame.fragmentIndex = (uint8_t)get(FRAGMENT_FIELD_BITS);
+        frame.fragmentCount = (uint8_t)(get(FRAGMENT_FIELD_BITS) + 1);
+        if (frame.fragmentIndex >= frame.fragmentCount) return false;
+        std::string text = HamText::decode(data, bit, available);
+        frame.payload.assign(text.begin(), text.end());
+    }
+
+    frameOut = frame;
     return true;
 }
 
 void FrameCodec::expectedFrameStart(const std::string& ownCallsign, const std::string& fromCallsign,
                                     uint8_t* bytesOut, uint8_t* masksOut)
 {
-    static_assert(EXPECTED_START_BYTES == OFFSET_AIR_ID, "the expected start runs up to the message ID");
+    static_assert(8 * EXPECTED_START_BYTES >= ORIGIN_BIT + 1 + EXTENDED_CALLSIGN_BITS,
+                  "the expected start must cover the longest origin callsign");
     std::memset(bytesOut, 0, EXPECTED_START_BYTES);
     std::memset(masksOut, 0, EXPECTED_START_BYTES);
 
-    // Type byte: the bits no frame type uses are zero. The more-follows bit
-    // is anybody's guess.
-    const FrameType types[] = {FrameType::Ping, FrameType::PingAck, FrameType::Message,
-                               FrameType::MessageAck, FrameType::Broadcast, FrameType::MessagePartialAck};
-    uint8_t used = TYPE_MORE_FOLLOWS | TYPE_NO_AUTO_ACK;
-    for (FrameType type : types) used |= (uint8_t)type;
-    masksOut[OFFSET_TYPE] = (uint8_t)~used;
+    // The type is anybody's guess.
+    putBits(bytesOut, DESTINATION_BIT, callsignHash(ownCallsign), DESTINATION_HASH_BITS);
+    putBits(masksOut, DESTINATION_BIT, (1u << DESTINATION_HASH_BITS) - 1, DESTINATION_HASH_BITS);
 
-    uint32_t crc = callsignCrc24(ownCallsign);
-    bytesOut[OFFSET_DEST_CRC] = (uint8_t)(crc >> 16);
-    bytesOut[OFFSET_DEST_CRC + 1] = (uint8_t)(crc >> 8);
-    bytesOut[OFFSET_DEST_CRC + 2] = (uint8_t)crc;
-    std::memset(&masksOut[OFFSET_DEST_CRC], 0xFF, 3);
-
-    if (!normalizeCallsign(fromCallsign).empty())
-    {
-        packCallsign(fromCallsign, &bytesOut[OFFSET_ORIGIN_CALLSIGN]);
-        std::memset(&masksOut[OFFSET_ORIGIN_CALLSIGN], 0xFF, PACKED_CALLSIGN_BYTES);
-    }
+    std::string from = normalizeCallsign(fromCallsign);
+    if (from.empty()) return;
+    std::string positions = standardPositions(from);
+    bool standard = !positions.empty();
+    int bits = originBits(standard);
+    putBits(bytesOut, ORIGIN_BIT, standard ? 0 : 1, 1);
+    if (standard) putBits(bytesOut, ORIGIN_BIT + 1, packStandard(positions), STANDARD_CALLSIGN_BITS);
+    else putBits(bytesOut, ORIGIN_BIT + 1, packExtended(from), EXTENDED_CALLSIGN_BITS);
+    putBits(masksOut, ORIGIN_BIT, ~0ull >> (64 - bits), bits);
 }
 
 } // namespace TextMessaging

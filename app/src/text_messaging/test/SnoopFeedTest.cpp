@@ -30,7 +30,7 @@ Frame textFrame(const std::string& from, const std::string& to, uint16_t airId, 
 {
     Frame frame;
     frame.type = to.empty() ? FrameType::Broadcast : FrameType::Message;
-    frame.destinationCrc = to.empty() ? 0 : FrameCodec::callsignCrc24(to);
+    frame.destinationCrc = to.empty() ? 0 : FrameCodec::callsignHash(to);
     frame.originCallsign = from;
     frame.airId = airId;
     frame.fragmentIndex = (uint8_t)index;
@@ -44,7 +44,7 @@ Frame signalling(FrameType type, const std::string& from, const std::string& to,
 {
     Frame frame;
     frame.type = type;
-    frame.destinationCrc = FrameCodec::callsignCrc24(to);
+    frame.destinationCrc = FrameCodec::callsignHash(to);
     frame.originCallsign = from;
     frame.airId = airId;
     frame.payload = payload;

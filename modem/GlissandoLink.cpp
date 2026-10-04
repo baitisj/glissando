@@ -94,8 +94,9 @@ std::vector<Payload> segmentBursts(const std::vector<LinkBurst>& bursts, int voi
 KnownBits firstSegmentKnownBits(const uint8_t* bytes, const uint8_t* masks, int count)
 {
     KnownBits known = noKnownBits();
-    // Header: mode (unknown), index 0 in three bits, last segment clear.
-    for (int bit = 1; bit < SEGMENT_HEADER_BITS; bit++) known[(size_t)bit] = 0;
+    // Header: mode (unknown), index 0 in three bits. Whether it is the last
+    // segment is unknown too: a pong or an acknowledgement is one segment.
+    for (int bit = 1; bit < SEGMENT_HEADER_BITS - 1; bit++) known[(size_t)bit] = 0;
     count = std::min(std::max(count, 0), SEGMENT_DATA_BYTES);
     for (int i = 0; i < count; i++)
     {

@@ -75,7 +75,7 @@ void SnoopFeed::setMyCallsign(const std::string& callsign)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     myCallsign_ = FrameCodec::normalizeCallsign(callsign);
-    myCallsignCrc_ = myCallsign_.empty() ? 0 : FrameCodec::callsignCrc24(myCallsign_);
+    myCallsignCrc_ = myCallsign_.empty() ? 0 : FrameCodec::callsignHash(myCallsign_);
     learnLocked(myCallsign_);
 }
 
@@ -88,7 +88,7 @@ void SnoopFeed::addKnownCallsign(const std::string& callsign)
 void SnoopFeed::learnLocked(const std::string& callsign)
 {
     if (callsign.empty()) return;
-    callsignsByCrc_[FrameCodec::callsignCrc24(callsign)] = callsign;
+    callsignsByCrc_[FrameCodec::callsignHash(callsign)] = callsign;
 }
 
 std::string SnoopFeed::resolveLocked(uint32_t crc, bool& known) const

@@ -327,13 +327,13 @@ std::vector<GlissandoScopeFrame> MainFrame::glissandoHeardFrames()
     // ourselves and the stations we have heard.
     auto& session = TextMessaging::TextMessagingSession::instance();
     std::string me = session.protocol().myCallsign();
-    uint32_t myCrc = me.empty() ? 0 : TextMessaging::FrameCodec::callsignCrc24(me);
+    uint32_t myCrc = me.empty() ? 0 : TextMessaging::FrameCodec::callsignHash(me);
     std::vector<TextMessaging::HeardStation> stations = session.stations().stations();
     TextMessaging::CallsignForCrc nameFor = [&](uint32_t crc) -> std::string {
         if (myCrc != 0 && crc == myCrc) return "YOU";
         for (const TextMessaging::HeardStation& station : stations)
         {
-            if (TextMessaging::FrameCodec::callsignCrc24(station.callsign) == crc) return station.callsign;
+            if (TextMessaging::FrameCodec::callsignHash(station.callsign) == crc) return station.callsign;
         }
         return std::string();
     };

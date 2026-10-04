@@ -1,0 +1,94 @@
+CQ CQ de AG7EW AG7EW
+AG7SU de AG7EW GM Tyler, UR 559 here in Portland
+Name here is Jeff, QTH Portland OR. Rig is an IC-7100 at 50 W into a dipole
+TNX for the call. HW CPY?
+R R solid copy. WX here is rain and 12C
+73 and thanks for the QSO
+QRZ?
+Good morning! Band is opening nicely on 20m
+Can you QSY up 2 kHz? QRM here
+Sure, moving to 14.078
+Hi Jeff, nice to hear you on Glissando again
+Running 5 W QRP from the park today, POTA K-4386
+Wow, 5 watts and I'm reading you fine at -12 dB
+FB OM. Antenna is an EFHW at 30 ft
+What scale are you using? Pentatonic sounds great here
+Switched to diabolus for fun, sounds evil
+lol yes it does. Captain Proton would approve
+QSB is deep, missed your last message. PSE AGN
+Name Jeff, QTH Portland
+RST 579, signal strong
+Your signal is 5 by 7 here in Seattle
+Thanks for the report. You are -8 dB on the scope
+I am going QRT for dinner. 73!
+CUL es GL
+de VE7XYZ: anyone on for a test?
+VE7XYZ de AG7EW yes, copy you -15 dB
+Great! Try Presto next?
+Presto failed, falling back to Allegro
+Allegro works, 100% copy
+Testing the new queue bars, looks nice
+did you get my last msg?
+yes got it, sorry slow reply, was outside
+Tuning the antenna, stand by
+OK
+QSL
+Rig here: FT-991A, 100 W, Hex beam at 40 ft. Software Glissando 0.2.0
+Grid CN85 here. Whats yours?
+DM79 Colorado
+Nice, about 1600 km
+Band conditions are poor today, SFI 92
+Lots of fading on 40m tonight
+Can you hear me now? Trying the duet
+Duet copy, but a few errors
+Back to Allegro for the long message then
+Here is my station description: Elecraft K3, 100 W, homebrew magnetic loop on the balcony, 3 m diameter
+Thanks, I'll send a picture by email later
+Do you know if Tyler is on tonight?
+AG7SU is on 7.078 I think
+Gotta run, XYL calling. 73 de AG7EW SK
+73 TU
+CQ POTA de KD9ABC K-1234
+KD9ABC de W1AW UR 599 MA
+TU 599 OR 73
+QRL? Is this frequency in use?
+Frequency busy, QSY please
+Sorry about that, moving up
+Hello from Japan! JA1XYZ here, signal weak but copy
+Wow DX! Welcome. You are -18 dB here, Adagio copy
+Name Taro, QTH Tokyo, 73
+What time is it there?
+Morning, 7 AM. Coffee time
+Ha, it is 3 PM here in Oregon
+Thanks for the contact, will upload to LoTW
+Confirmed on LoTW, TNX
+Battery voltage is dropping, 11.8 V
+Going to switch to Adagio to save power?
+Adagio is slower but more robust
+Message received, thank you
+Please confirm frequency 10.142 MHz
+Confirmed 10.142
+The waterfall shows two signals near 700 Hz
+That second one might be FT8 bleeding over
+I hear a chirping signal, is that you?
+Yes that's Glissando, the melodic chirp mode
+Sounds like birds singing, nice
+Ping
+Pong
+Test 1 2 3
+Testing testing
+How long does a message take at Adagio?
+About a minute per frame
+Ok will keep it short then
+WX: sunny 24C, light wind
+Rain here, antenna wet, SWR up a bit
+SWR 1.3 on 20m, 2.1 on 40m
+Need a tuner for 80m
+Anyone on 30m? Looking for a sked
+Sked tomorrow 1500 UTC on 14.080?
+OK see you then. 73
+Good evening all, net starts in 5 minutes
+Checking in, AG7EW Jeff Portland, no traffic
+Roger, AG7EW checked in. Any others?
+KI7QRS checking in, Bend, no traffic
+Thanks all, net closed at 0230 UTC

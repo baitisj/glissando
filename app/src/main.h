@@ -340,10 +340,10 @@ public:
     // Data2G, whether data2g-host is reachable. Empty for our own modem.
     wxString chatModemStatus();
 
-    // How long a chat message of textBytes would take on the air, in
+    // How long a chat message of this text would take on the air, in
     // seconds, at the Glissando tempo chat would send it at now; 0 when that
     // is not known (codec2 modes, or Data2G carrying chat).
-    double chatMessageAirSeconds(size_t textBytes);
+    double chatMessageAirSeconds(const std::string& text);
 
     // A chat message has come in while the COMMS window is closed; the
     // console's COMMS button flashes until the window is opened.
