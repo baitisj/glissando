@@ -252,6 +252,7 @@ void ChordListener::analyse()
         if (!tracking_)
         {
             tracking_ = true;
+            singing_ = -1;
             chordStartSample_ = samples_;
             scaleEnergy_.fill(0.0);
             for (size_t s = 0; s < before_.size(); s++) before_[s] = usualComb(s, bestStep);
@@ -277,7 +278,11 @@ void ChordListener::analyse()
         // Only notes over what was on the channel before the chord count:
         // a signal already sitting on them is not the melody.
         double needed = std::max(SOUNDING_THRESHOLD, OVER_BEFORE * before_[singing]);
-        if (power[singing] >= needed) lastSoundedSample_ = samples_;
+        if (power[singing] >= needed)
+        {
+            lastSoundedSample_ = samples_;
+            singing_ = (int)singing;
+        }
         if (samples_ - lastSoundedSample_ > (long long)(HOLD_SECONDS * SAMPLE_RATE_HZ)) tracking_ = false;
     }
 
@@ -289,6 +294,19 @@ void ChordListener::analyse()
     sounding_.store(tracking_, std::memory_order_release);
     remember(false);
     rememberCombs(false);
+}
+
+std::vector<double> ChordListener::soundingNotesHz() const
+{
+    std::vector<double> notes;
+    if (!tracking_) return notes;
+    if (singing_ < 0)
+    {
+        notes = {CHORD_LOW_HZ + last_.offsetHz, CHORD_HIGH_HZ + last_.offsetHz};
+        return notes;
+    }
+    for (double hz : scaleNotes((Scale)singing_, 0)) notes.push_back(hz + last_.offsetHz);
+    return notes;
 }
 
 // Whether a note sounds in both halves of the window, as the chord's do. A

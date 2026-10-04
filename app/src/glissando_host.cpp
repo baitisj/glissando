@@ -246,6 +246,16 @@ GlissandoTelemetry MainFrame::glissandoTelemetry()
     telemetry.audioRunning = m_RxRunning;
     if (glissandoChatShown()) m_chatUnread = false;
     telemetry.chatUnread = m_chatUnread;
+
+    // What holds the transmit queue, for the visi-scope to paint red: the
+    // receiver hearing somebody, or a station's word that it has more to send.
+    if (m_RxRunning)
+    {
+        TextMessagingModem::CarrierSense sense = textMessagingModem().carrierSense();
+        telemetry.channelHeld =
+            sense.busy || TextMessaging::TextMessagingSession::instance().protocol().channelHeld();
+        if (sense.busy) telemetry.carrierHz = sense.notesHz;
+    }
     telemetry.engageToSend =
         chatWaitsForEngage() && TextMessaging::TextMessagingSession::instance().protocol().hasQueuedTransmissions();
 

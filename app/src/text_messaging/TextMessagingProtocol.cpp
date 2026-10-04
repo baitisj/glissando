@@ -171,6 +171,12 @@ bool TextMessagingProtocol::autoReplyEnabled() const
     return autoReplyEnabled_;
 }
 
+bool TextMessagingProtocol::channelHeld() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return channelHeld_;
+}
+
 bool TextMessagingProtocol::stationAutoAcks(const std::string& callsign) const
 {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -1404,6 +1410,7 @@ void TextMessagingProtocol::tick()
         // end cannot answer us through somebody else's burst, and it may be the
         // answer itself that is coming in.
         bool frozen = channelFrozenLocked(nowMs);
+        channelHeld_ = frozen;
         if (frozen && lastTickMs_ != 0 && nowMs > lastTickMs_) holdTimersLocked(nowMs - lastTickMs_);
         lastTickMs_ = nowMs;
 

@@ -37,6 +37,12 @@ constexpr int LEFT_MARGIN = 38;
 constexpr float DISPLAY_RANGE_DB = 24.0f;
 constexpr float PEAK_RANGE_DB = 30.0f;
 
+// Carrier sense: each note it counts is painted red this far either side,
+// about the chord listener's bin and its neighbours, and a row drawn while
+// the transmit queue was held has red edges this wide.
+constexpr double SENSE_HALF_WIDTH_HZ = 3.0;
+constexpr int HELD_EDGE_PIXELS = 3;
+
 // Decoded frames kept on the trace at most, however slowly it scrolls.
 constexpr size_t HEARD_LIMIT = 200;
 
@@ -199,7 +205,15 @@ void GlissandoScope::clear()
     // pixel.
     std::fill(history_.begin(), history_.end(), 0);
     std::fill(ships_.begin(), ships_.end(), 0);
+    std::fill(sensed_.begin(), sensed_.end(), 0);
+    std::fill(heldRows_.begin(), heldRows_.end(), 0);
     Refresh();
+}
+
+void GlissandoScope::setCarrierSense(bool held, const std::vector<double>& notesHz)
+{
+    held_ = held;
+    heldHz_ = notesHz;
 }
 
 double GlissandoScope::steadySeconds()
@@ -384,6 +398,8 @@ void GlissandoScope::sizeHistory()
     if (rows == historyRows_ && history_.size() == (size_t)historyWidth_ * rows) return;
     history_.resize((size_t)historyWidth_ * rows, 0);
     ships_.resize((size_t)historyWidth_ * rows, 0);
+    sensed_.resize((size_t)historyWidth_ * rows, 0);
+    heldRows_.resize((size_t)rows, 0);
     rowSeconds_.resize((size_t)rows, 0.0);
     historyRows_ = rows;
 }
@@ -471,6 +487,7 @@ void GlissandoScope::addRow()
         historyNyquistHz_ = nyquist;
         history_.assign((size_t)historyWidth_ * historyRows_, 0);
         ships_.assign((size_t)historyWidth_ * historyRows_, 0);
+        sensed_.assign((size_t)historyWidth_ * historyRows_, 0);
     }
 
     // Scroll everything down one row.
@@ -481,7 +498,20 @@ void GlissandoScope::addRow()
         std::memmove(ships_.data() + historyWidth_, ships_.data(), (size_t)historyWidth_ * (historyRows_ - 1));
         std::fill(ships_.begin(), ships_.begin() + historyWidth_, 0);
         printShips();
+
+        std::memmove(sensed_.data() + historyWidth_, sensed_.data(), (size_t)historyWidth_ * (historyRows_ - 1));
+        unsigned char* sensed = sensed_.data();
+        std::fill(sensed, sensed + historyWidth_, 0);
+        double binsPerHz = (historyWidth_ - 1) / historyNyquistHz_;
+        for (double hz : heldHz_)
+        {
+            int from = std::max(0, (int)std::ceil((hz - SENSE_HALF_WIDTH_HZ) * binsPerHz));
+            int to = std::min(historyWidth_ - 1, (int)std::floor((hz + SENSE_HALF_WIDTH_HZ) * binsPerHz));
+            for (int b = from; b <= to; b++) sensed[b] = 255;
+        }
     }
+    std::move_backward(heldRows_.begin(), heldRows_.end() - 1, heldRows_.end());
+    heldRows_[0] = held_ ? 1 : 0;
     std::move_backward(rowSeconds_.begin(), rowSeconds_.end() - 1, rowSeconds_.end());
     rowSeconds_[0] = steadySeconds();
 
@@ -943,30 +973,51 @@ void GlissandoScope::renderTrace(wxImage& image)
 
     std::vector<unsigned> line((size_t)bins + 1, 0u);
     std::vector<unsigned> shipLine((size_t)bins + 1, 0u);
+    std::vector<unsigned> senseLine((size_t)bins + 1, 0u);
+    bool held = false;
+    const bool sensing = sensed_.size() == history_.size() && heldRows_.size() == (size_t)historyRows_;
+    const unsigned alarm[3] = {Chaotica::Colour::Alarm.Red(), Chaotica::Colour::Alarm.Green(),
+                               Chaotica::Colour::Alarm.Blue()};
     auto putLine = [&](int y) {
         unsigned char* out = rgb + 3 * (size_t)y * w;
         for (int x = 0; x < w; x++, out += 3)
         {
+            if (held && (x < HELD_EDGE_PIXELS || x >= w - HELD_EDGE_PIXELS))
+            {
+                for (int c = 0; c < 3; c++) out[c] = (unsigned char)alarm[c];
+                continue;
+            }
             int b0 = b0s[(size_t)x];
             unsigned v = 0;
+            unsigned red = 0;
             if (b0 >= 0)
             {
                 unsigned f = std::min(256u, fracs[(size_t)x]);
                 v = (line[(size_t)b0] * (256 - f) + line[(size_t)b0 + 1] * f) >> 8;
                 unsigned s = (shipLine[(size_t)b0] * (256 - f) + shipLine[(size_t)b0 + 1] * f) >> 8;
+                red = (senseLine[(size_t)b0] * (256 - f) + senseLine[(size_t)b0 + 1] * f) >> 8;
                 // Our ships sit behind the waterfall: they show through
                 // the dark and a faint noise floor, and anything heard
                 // half as bright as the ship hides it.
                 unsigned cover = std::min(255u, 2 * v);
                 v = std::max(v, s * (255 - cover) / 255);
             }
-            out[0] = (unsigned char)(8 + v * 224 / 255);
-            out[1] = (unsigned char)(9 + v * 227 / 255);
-            out[2] = (unsigned char)(12 + v * 218 / 255);
+            unsigned rgbOut[3] = {8 + v * 224 / 255, 9 + v * 227 / 255, 12 + v * 218 / 255};
+            if (red > 0)
+            {
+                // Where carrier sense listens: a dim red on the noise, and
+                // what it hears there as bright as the alarm lamps.
+                unsigned shade[3] = {70 + v * (alarm[0] - 70) / 255, 10 + v * (alarm[1] - 10) / 255,
+                                     12 + v * (alarm[2] - 12) / 255};
+                for (int c = 0; c < 3; c++) rgbOut[c] = (rgbOut[c] * (255 - red) + shade[c] * red) / 255;
+            }
+            for (int c = 0; c < 3; c++) out[c] = (unsigned char)rgbOut[c];
         }
     };
     auto rowAt = [&](int row) { return history_.data() + (size_t)row * bins; };
     auto shipsAt = [&](int row) { return ships_.data() + (size_t)row * bins; };
+    auto sensedAt = [&](int row) { return sensed_.data() + (size_t)row * bins; };
+    auto heldAt = [&](int row) { return sensing && heldRows_[(size_t)row] != 0; };
 
     bool throughLens = lens_ && !rowSeconds_.empty() && rowSeconds_[0] > 0.0;
     double newest = throughLens ? rowSeconds_[0] : 0.0;
@@ -974,6 +1025,8 @@ void GlissandoScope::renderTrace(wxImage& image)
     {
         std::fill(line.begin(), line.end(), 0u);
         std::fill(shipLine.begin(), shipLine.end(), 0u);
+        std::fill(senseLine.begin(), senseLine.end(), 0u);
+        held = false;
         if (!throughLens)
         {
             if (y < historyRows_)
@@ -984,6 +1037,12 @@ void GlissandoScope::renderTrace(wxImage& image)
                 {
                     line[(size_t)b] = src[b];
                     shipLine[(size_t)b] = ships[b];
+                }
+                if (sensing)
+                {
+                    const unsigned char* sensed = sensedAt(y);
+                    for (int b = 0; b < bins; b++) senseLine[(size_t)b] = sensed[b];
+                    held = heldAt(y);
                 }
             }
             putLine(y);
@@ -1014,6 +1073,13 @@ void GlissandoScope::renderTrace(wxImage& image)
                 line[(size_t)k] = (ra[k] * (256 - f) + rb[k] * f) >> 8;
                 shipLine[(size_t)k] = (sa[k] * (256 - f) + sb[k] * f) >> 8;
             }
+            if (sensing)
+            {
+                const unsigned char* na = sensedAt(a);
+                const unsigned char* nb = sensedAt(b);
+                for (int k = 0; k < bins; k++) senseLine[(size_t)k] = (na[k] * (256 - f) + nb[k] * f) >> 8;
+                held = heldAt(f < 128 ? a : b);
+            }
             putLine(y);
             continue;
         }
@@ -1028,6 +1094,13 @@ void GlissandoScope::renderTrace(wxImage& image)
             {
                 line[(size_t)k] = std::max<unsigned>(line[(size_t)k], src[k]);
                 shipLine[(size_t)k] = std::max<unsigned>(shipLine[(size_t)k], ships[k]);
+            }
+            if (sensing)
+            {
+                const unsigned char* sensed = sensedAt(row);
+                for (int k = 0; k < bins; k++)
+                    senseLine[(size_t)k] = std::max<unsigned>(senseLine[(size_t)k], sensed[k]);
+                held = held || heldAt(row);
             }
         }
         putLine(y);

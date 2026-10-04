@@ -109,6 +109,19 @@ public:
     // call from any thread.
     bool isReceiving() const;
 
+    // What isReceiving() hears, for the visi-scope to paint: whether the
+    // channel is taken, and the notes taking it, tuning included. Those are
+    // the opening chord's two, or the scale the chord listener hears
+    // singing after it, or, once frames decode, the notes of the last frame
+    // heard (held through its closing chord or CW tail). None for codec2.
+    // Safe to call from any thread.
+    struct CarrierSense
+    {
+        bool busy = false;
+        std::vector<double> notesHz;
+    };
+    CarrierSense carrierSense() const;
+
     // Puts both demodulators back to searching for a preamble and forgets
     // any sync they reported. Called at the end of our own transmission: the
     // receive path is not run while we are keyed, so a demodulator that was
@@ -270,6 +283,16 @@ private:
     // Glissando. The receiver runs its own worker thread; its callback lands
     // in onGlissandoDecode(), which reassembles segments into chat frames.
     void onGlissandoDecode(const Glissando::StreamDecode& decode);
+
+    // Why isReceiving() says the channel is taken.
+    enum class Busy
+    {
+        No,
+        Chord,      // the chord listener follows an opening chord and its melody
+        Melody,     // frames decoding, or the closing chord or tail after them
+        Codec2,     // a codec2 demodulator in sync
+    };
+    Busy busyReason() const;
     void configureGlissandoReceiverLocked();
     int transmitGearLocked() const;
     // True when the next keying ends with the CW tail rather than the chord.
@@ -290,6 +313,8 @@ private:
     GlissandoStatus glissandoStatus_;
     Glissando::Reassembler reassembler_;
     std::vector<GlissandoHeard> glissandoHeard_;
+    std::vector<double> lastHeardNotesHz_;      // every voice of the last frame heard
+    uint64_t lastHeardStartMs_ = 0;
     std::vector<GlissandoSent> glissandoSent_;
     TextMessaging::StationTempos stationGears_; // the gear each station was last heard in
     std::string ownCallsign_;                   // as our last keying sent it
@@ -300,7 +325,7 @@ private:
     // before the receiver can decode any of it: carrier sense for the chat
     // protocol. Pushed on the receive tap's thread and configured on the
     // GUI's, hence its own lock; isSounding() needs none.
-    std::mutex chordMutex_;
+    mutable std::mutex chordMutex_;
     Glissando::ChordListener chordListener_;
     bool chordWasSounding_ = false;                 // under chordMutex_
     std::atomic<long long> chordStoppedAt_{-1};     // receiver samples, when it last stopped sounding
