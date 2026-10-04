@@ -1008,9 +1008,10 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
 
     if (rxLogEnabled())
     {
-        log_info("RX: Glissando %s %s voice %d, %.1f dB, %.2f Hz Doppler, offset %+.1f Hz%s",
+        std::string averaged = d.copies > 1 ? ", averaged over " + std::to_string(d.copies) + " copies" : "";
+        log_info("RX: Glissando %s %s voice %d, %.1f dB, %.2f Hz Doppler, offset %+.1f Hz%s%s",
                  Glissando::gearInfo(decode.gear).tempo, Glissando::scaleName(d.scale), d.voice, d.report.snrDb,
-                 d.report.dopplerHz, d.frequencyOffsetHz, complete ? ", burst complete" : "");
+                 d.report.dopplerHz, d.frequencyOffsetHz, averaged.c_str(), complete ? ", burst complete" : "");
     }
     if (!complete) return;
 

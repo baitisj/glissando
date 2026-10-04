@@ -37,6 +37,26 @@ constexpr long long HILBERT_GUARD = 256;
 constexpr size_t PENDING_LIMIT = 60 * SAMPLE_RATE_HZ;
 constexpr long long HISTORY_SLACK = SAMPLE_RATE_HZ;
 
+// Averaging. A frame that fails to decode is kept as soft bits for
+// AVERAGING_SECONDS; when a later candidate in the same voice, scale and
+// tempo also fails, it is added to each kept copy that sat within
+// AVERAGING_OFFSET_HZ of it and whose soft bits agree with it by
+// MIN_AGREEMENT (detail::softAgreement), and the sum is decoded. A repeat
+// (a retry, a second ping) then decodes on less signal than either copy
+// needs alone, as JT65 decoders average. Unrelated frames and noise agree
+// by about 0 +/- 0.07, so the agreement floor keeps the extra decodes, and
+// with them the extra chances for noise to pass the CRC, few.
+constexpr long long AVERAGING_SECONDS = 10 * 60;
+constexpr size_t AVERAGING_KEPT = 2048;
+// Only candidates that look like a signal are kept. A frame 1.5 dB below
+// the decoding threshold measures an Es/N0 (see detail::VoiceDecode) of 1.35
+// or more 95 % of the time; a noise peak measures 1.0 on median and above
+// 1.3 about one time in six.
+constexpr double MIN_KEPT_ES_OVER_N0 = 1.3;
+constexpr double AVERAGING_OFFSET_HZ = 3.0;
+constexpr double MIN_AGREEMENT = 0.2;
+constexpr int MAX_AVERAGING_TRIES = 4;
+
 // Geometry of one gear's search.
 struct Geometry
 {
@@ -88,6 +108,18 @@ struct StreamingReceiver::Impl
         long long start;
     };
 
+    // A candidate that did not decode, kept for averaging.
+    struct Kept
+    {
+        long long samplesPerSymbol;
+        int voice;
+        Scale scale;
+        long long start;
+        double frequencyOffsetHz;
+        double syncScore;
+        FrameLlrs llrs;
+    };
+
     // Shared with push() and the control calls, under mutex.
     std::mutex mutex;
     std::condition_variable wake;
@@ -125,6 +157,7 @@ struct StreamingReceiver::Impl
     long long historyStart = 0;
     std::vector<GearState> states;
     std::vector<Recent> recent;
+    std::vector<Kept> kept;
     unsigned seenGeneration = 0;
     double activeTuning = 0.0;
     std::vector<Scale> activeScales{Scale::Pentatonic};
@@ -134,6 +167,10 @@ struct StreamingReceiver::Impl
     GearState* nextDue();
     void search(GearState& state, unsigned generation);
     bool alreadyReported(long long samplesPerSymbol, int voice, long long start);
+    bool average(const Geometry& geo, int voice, const detail::SoftFrame& soft, long long start, Scale scale,
+                 const std::vector<KnownBits>& known, Decode& decodeOut);
+    void keep(const Geometry& geo, int voice, const detail::SoftFrame& soft, long long start, Scale scale);
+    void forgetKept(long long samplesPerSymbol, int voice, long long start);
 };
 
 StreamingReceiver::StreamingReceiver()
@@ -200,6 +237,7 @@ void StreamingReceiver::start()
     impl_->historyStart = 0;
     impl_->states.clear();
     impl_->recent.clear();
+    impl_->kept.clear();
     impl_->seenGeneration = impl_->resetGeneration;
 
     impl_->running = true;
@@ -420,6 +458,98 @@ StreamingReceiver::Impl::GearState* StreamingReceiver::Impl::nextDue()
     return best;
 }
 
+bool StreamingReceiver::Impl::average(const Geometry& geo, int voice, const detail::SoftFrame& soft, long long start,
+                                      Scale scale, const std::vector<KnownBits>& known, Decode& decodeOut)
+{
+    // Earlier copies that could be this frame sent again, best agreement
+    // first. A copy less than a frame earlier is this same frame, seen by
+    // an overlapping search.
+    std::vector<std::pair<double, size_t>> matches;
+    for (size_t i = 0; i < kept.size(); i++)
+    {
+        const Kept& k = kept[i];
+        if (k.samplesPerSymbol != geo.L || k.voice != voice || k.scale != scale) continue;
+        if (start - k.start < geo.frame) continue;
+        if (std::fabs(k.frequencyOffsetHz - soft.frequencyOffsetHz) > AVERAGING_OFFSET_HZ) continue;
+        double agreement = detail::softAgreement(k.llrs, soft.llrs);
+        if (agreement >= MIN_AGREEMENT) matches.push_back({agreement, i});
+    }
+    if (matches.empty()) return false;
+    std::sort(matches.begin(), matches.end(), std::greater<std::pair<double, size_t>>());
+    if (matches.size() > (size_t)MAX_AVERAGING_TRIES) matches.resize((size_t)MAX_AVERAGING_TRIES);
+
+    auto add = [](FrameLlrs& sum, const FrameLlrs& llrs) {
+        for (int i = 0; i < FRAME_BITS; i++) sum[(size_t)i] += llrs[(size_t)i];
+    };
+    auto decoded = [&](const FrameLlrs& sum, int copies, const std::vector<size_t>& used) {
+        Payload payload;
+        if (!detail::decodeWithGuesses(sum, known, payload)) return false;
+        decodeOut.ok = true;
+        decodeOut.payload = payload;
+        decodeOut.startSample = start;
+        decodeOut.frequencyOffsetHz = soft.frequencyOffsetHz;
+        decodeOut.report = soft.report;
+        decodeOut.scale = scale;
+        decodeOut.copies = copies;
+        // Those copies are spent: a later repeat starts afresh.
+        std::vector<size_t> drop = used;
+        std::sort(drop.begin(), drop.end(), std::greater<size_t>());
+        for (size_t i : drop) kept.erase(kept.begin() + (long)i);
+        return true;
+    };
+
+    // This copy with each earlier one, then with all of them together.
+    for (const auto& match : matches)
+    {
+        FrameLlrs sum = soft.llrs;
+        add(sum, kept[match.second].llrs);
+        if (decoded(sum, 2, {match.second})) return true;
+    }
+    if (matches.size() > 1)
+    {
+        FrameLlrs sum = soft.llrs;
+        std::vector<size_t> used;
+        for (const auto& match : matches)
+        {
+            add(sum, kept[match.second].llrs);
+            used.push_back(match.second);
+        }
+        if (decoded(sum, 1 + (int)used.size(), used)) return true;
+    }
+    return false;
+}
+
+void StreamingReceiver::Impl::keep(const Geometry& geo, int voice, const detail::SoftFrame& soft, long long start,
+                                   Scale scale)
+{
+    if (soft.esOverN0 < MIN_KEPT_ES_OVER_N0) return;
+
+    // Overlapping searches find the same frame more than once; keep the
+    // copy with the better sync.
+    for (Kept& k : kept)
+    {
+        if (k.samplesPerSymbol == geo.L && k.voice == voice && std::llabs(k.start - start) <= geo.L &&
+            std::fabs(k.frequencyOffsetHz - soft.frequencyOffsetHz) <= AVERAGING_OFFSET_HZ)
+        {
+            if (soft.syncScore > k.syncScore)
+                k = {geo.L, voice, scale, start, soft.frequencyOffsetHz, soft.syncScore, soft.llrs};
+            return;
+        }
+    }
+    if (kept.size() >= AVERAGING_KEPT) kept.erase(kept.begin());
+    kept.push_back({geo.L, voice, scale, start, soft.frequencyOffsetHz, soft.syncScore, soft.llrs});
+}
+
+void StreamingReceiver::Impl::forgetKept(long long samplesPerSymbol, int voice, long long start)
+{
+    kept.erase(std::remove_if(kept.begin(), kept.end(),
+                              [&](const Kept& k) {
+                                  return k.samplesPerSymbol == samplesPerSymbol && k.voice == voice &&
+                                         std::llabs(k.start - start) <= samplesPerSymbol;
+                              }),
+               kept.end());
+}
+
 bool StreamingReceiver::Impl::alreadyReported(long long samplesPerSymbol, int voice, long long start)
 {
     // One frame is found by every search whose window covers it, and a
@@ -483,17 +613,49 @@ void StreamingReceiver::Impl::search(GearState& state, unsigned generation)
             report = result.decode.report;
             reportAt = start + geo.frame;
         }
-        if (!result.decode.ok || alreadyReported(geo.L, voice, start)) continue;
+        Decode decoded = result.decode;
+        decoded.scale = activeScales[(size_t)result.hypothesis];
+        if (!decoded.ok)
+        {
+            // Strongest candidate first: add each to the copies kept from
+            // earlier, and keep it in turn if that does not decode either.
+            for (const detail::SoftFrame& soft : result.failed)
+            {
+                long long softStart = windowStart + soft.startSample;
+                Scale softScale = activeScales[(size_t)soft.hypothesis];
+                if (average(geo, voice, soft, softStart, softScale, known, decoded))
+                {
+                    start = softStart;
+                    break;
+                }
+            }
+            for (const detail::SoftFrame& soft : result.failed)
+            {
+                long long softStart = windowStart + soft.startSample;
+                if (!decoded.ok || std::llabs(softStart - start) > geo.L)
+                    keep(geo, voice, soft, softStart, activeScales[(size_t)soft.hypothesis]);
+            }
+        }
+        if (!decoded.ok) continue;
+        // A kept copy of a frame that has now decoded is no use any more.
+        forgetKept(geo.L, voice, start);
+        if (alreadyReported(geo.L, voice, start)) continue;
 
         recent.push_back({geo.L, voice, start});
         StreamDecode decode;
         decode.gear = state.gear;
-        decode.decode = result.decode;
+        decode.decode = decoded;
         decode.decode.voice = voice;
-        decode.decode.scale = activeScales[(size_t)result.hypothesis];
         decode.decode.startSample = start;
         found.push_back(decode);
     }
+
+    // Forget kept copies too old to be averaged with.
+    kept.erase(std::remove_if(kept.begin(), kept.end(),
+                              [&](const Kept& k) {
+                                  return k.start < first - AVERAGING_SECONDS * SAMPLE_RATE_HZ;
+                              }),
+               kept.end());
 
     // Forget frames at this tempo that no window can reach any more (the
     // windows reach only a few steps before their first start).

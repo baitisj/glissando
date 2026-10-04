@@ -148,6 +148,11 @@ struct Decode
     long long startSample = 0;  // of symbol 0, in the buffer's (or stream's) sample count
     double frequencyOffsetHz = 0.0;
     ChannelReport report;
+
+    // How many transmissions of the frame were added together to decode
+    // it: 1, or more when the streaming receiver averaged a repeat with
+    // copies it heard earlier but could not decode (StreamingReceiver).
+    int copies = 1;
 };
 
 // Batch receiver: decodes every voice of a frame of the given settings that

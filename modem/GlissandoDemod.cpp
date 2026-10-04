@@ -1035,6 +1035,32 @@ static bool allZero(const Payload& payload)
     return true;
 }
 
+bool decodeWithGuesses(const FrameLlrs& llrs, const std::vector<KnownBits>& knownBits, Payload& payloadOut)
+{
+    if (decodeFrame(llrs, payloadOut) && !allZero(payloadOut)) return true;
+    for (int knownZeroBits : PADDING_HYPOTHESES)
+    {
+        if (decodeFrame(llrs, payloadOut, knownZeroBits) && !allZero(payloadOut)) return true;
+    }
+    for (const KnownBits& known : knownBits)
+    {
+        if (decodeFrame(llrs, payloadOut, known) && !allZero(payloadOut)) return true;
+    }
+    return false;
+}
+
+double softAgreement(const FrameLlrs& a, const FrameLlrs& b)
+{
+    double ab = 0.0, aa = 0.0, bb = 0.0;
+    for (int i = 0; i < FRAME_BITS; i++)
+    {
+        ab += (double)a[(size_t)i] * b[(size_t)i];
+        aa += (double)a[(size_t)i] * a[(size_t)i];
+        bb += (double)b[(size_t)i] * b[(size_t)i];
+    }
+    return aa > 0.0 && bb > 0.0 ? ab / std::sqrt(aa * bb) : 0.0;
+}
+
 VoiceDecode receiveVoice(const ComplexSignal& z, const GearInfo& gear, const VoiceTemplates& voice,
                          long long searchFrom, long long searchTo, double maxOffsetHz, int candidates,
                          const std::vector<KnownBits>& knownBits)
@@ -1067,21 +1093,7 @@ VoiceDecode receiveVoice(const ComplexSignal& z, const GearInfo& gear, const std
         // Too weak to decode by a wide margin: no Viterbi, so no chance of
         // a CRC passing by luck (see MIN_ES_OVER_N0).
         Payload payload{};
-        bool ok = false;
-        if (esOverN0 >= MIN_ES_OVER_N0)
-        {
-            ok = decodeFrame(llrs, payload) && !allZero(payload);
-            for (int knownZeroBits : PADDING_HYPOTHESES)
-            {
-                if (ok) break;
-                ok = decodeFrame(llrs, payload, knownZeroBits) && !allZero(payload);
-            }
-            for (const KnownBits& known : knownBits)
-            {
-                if (ok) break;
-                ok = decodeFrame(llrs, payload, known) && !allZero(payload);
-            }
-        }
+        bool ok = esOverN0 >= MIN_ES_OVER_N0 && decodeWithGuesses(llrs, knownBits, payload);
 
         if (!result.haveCandidate)
         {
@@ -1106,8 +1118,19 @@ VoiceDecode receiveVoice(const ComplexSignal& z, const GearInfo& gear, const std
             result.syncScore = sync.score;
             result.esOverN0 = esOverN0;
             result.hypothesis = sync.hypothesis;
+            result.failed.clear();
             break;
         }
+
+        SoftFrame soft;
+        soft.llrs = llrs;
+        soft.startSample = sync.start;
+        soft.frequencyOffsetHz = sync.df;
+        soft.syncScore = sync.score;
+        soft.esOverN0 = esOverN0;
+        soft.hypothesis = sync.hypothesis;
+        soft.report = report;
+        result.failed.push_back(soft);
     }
     return result;
 }

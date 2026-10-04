@@ -6,6 +6,9 @@
 // frame and a bit of audio for each gear it listens to and, every quarter of
 // that gear's frame, searches the new stretch for frames that have now
 // arrived in full. A frame is reported once, however many searches cover it.
+// A frame that fails to decode is kept for a while as soft bits, so that a
+// repeat of it (a retry) can be added to it and decoded on less signal;
+// Decode::copies then says how many copies went into it.
 //=========================================================================
 
 #ifndef GLISSANDO__GLISSANDO_RECEIVER_H
