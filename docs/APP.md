@@ -248,6 +248,21 @@ broadcast if it was one, as a new message at the back of the queue. A ping's
 line says where it has got to: queued, on the air, awaiting PONG, not sent
 or aborted.
 
+`Auto acknowledge`, in COMMS, is lit unless the station should not
+transmit unattended. While it is dark the station sends no acknowledgements
+or pongs, and says so on everything it sends: its pings set a flag in their
+otherwise empty payload byte, and its messages and broadcasts go out with
+the type bit 0x08 added (`TYPE_NO_AUTO_ACK`). A station that hears the flag
+sends its messages to that station once, without retries; the chip reads
+SENT, and a message already waiting for an acknowledgement ends as SENT
+instead of retrying. The log notes when a station turns it off or on, and a
+ping to such a station that goes unanswered says why. Retries come back as
+soon as the station is heard without the flag, or an acknowledgement or pong
+arrives from it. A station with it lit sends exactly what earlier builds
+sent, so nothing changes between stations that leave it on. Glissando 0.3 and
+older drop a frame type they do not know, so they cannot read messages or
+broadcasts from a station with it dark; they read its pings.
+
 The right-click menu also offers `Woah!`, for when you can hear somebody the
 receiver has missed. Nothing keys, acknowledgements and pongs included, until
 one more modem frame at your tempo could have gone by (about 7 s at Presto,

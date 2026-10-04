@@ -63,6 +63,11 @@ struct Frame
     // is zero, so it always decodes as 0 or 1.
     uint8_t burstsFollowing = 0;
 
+    // Whether the sender acknowledges and answers pings by itself. Said by
+    // messages, broadcasts and pings; true for every other frame, and for
+    // any frame from a build before the flag. See TYPE_NO_AUTO_ACK.
+    bool senderAutoAck = true;
+
     std::vector<uint8_t> payload;
 };
 
@@ -99,7 +104,12 @@ public:
 
     // True for the frame types this build knows how to handle. Kept separate
     // so the receive path can drop unknown types without parsing them.
+    // Takes the type byte less its "more follows" bit.
     static bool isKnownFrameType(uint8_t type);
+
+    // The frame type a known type value stands for, without the sender's
+    // "no auto ACK" flag, which noAutoAckOut reports if given.
+    static FrameType frameType(uint8_t type, bool* noAutoAckOut = nullptr);
 
     // Pings and acknowledgements ride DATAC13, which is too small for the
     // fragment fields, so they carry a shorter header and are always a single

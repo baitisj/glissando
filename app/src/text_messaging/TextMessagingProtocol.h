@@ -40,6 +40,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -124,6 +125,13 @@ public:
     // station into a receive only chat client.
     void setAutoReplyEnabled(bool enabled);
     bool autoReplyEnabled() const;
+
+    // Whether a station acknowledges by itself, as far as we have heard: its
+    // messages, broadcasts and pings say so, and an acknowledgement or pong
+    // from it does too. Until it says otherwise, every station does. A
+    // message to one that does not is sent once, without waiting for an
+    // acknowledgement that will not come, and so without retries.
+    bool stationAutoAcks(const std::string& callsign) const;
 
     // Stops every chat transmission, for a station on a frequency where it
     // may not send data. Whatever is waiting to go out is discarded as not
@@ -342,6 +350,9 @@ private:
                           uint8_t fragmentIndex, uint8_t fragmentCount,
                           const std::vector<uint8_t>& payload) const;
     bool isAddressedToMeLocked(const Frame& frame) const;
+    void noteStationAutoAckLocked(const std::string& station, bool autoAck,
+                                  std::vector<PendingEvent>& events);
+    bool expectsAckFromLocked(const std::string& destination) const;
 
     void deliver(const std::vector<PendingEvent>& events);
 
@@ -354,6 +365,7 @@ private:
     std::string myCallsign_;
     uint32_t myCallsignCrc_;
     bool autoReplyEnabled_;
+    std::set<std::string> noAutoAckStations_;  // heard saying Auto acknowledge is off
     std::string inhibitReason_;   // empty unless transmitting is inhibited
     uint16_t nextAirId_;
 

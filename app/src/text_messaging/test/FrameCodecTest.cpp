@@ -179,6 +179,67 @@ void testRoundTrip()
     CHECK(decoded.payload.size() == 1);
 }
 
+// Whether the sender acknowledges by itself. A station with it on must send
+// the same bytes as a build before the flag, and a frame from such a build
+// must read as on; one with it off marks a message or broadcast's type and
+// sets a ping's flags byte. Acknowledgements and pongs never carry it.
+void testAutoAckFlag()
+{
+    Frame on = makeMessageFrame();
+    std::vector<uint8_t> plain = FrameCodec::encode(on, TEXT_FRAME_BYTES);
+    CHECK(!plain.empty() && plain[0] == 0x20);
+    Frame decoded;
+    CHECK(FrameCodec::decode(plain.data(), (int)plain.size(), decoded));
+    CHECK(decoded.senderAutoAck);
+
+    Frame off = makeMessageFrame();
+    off.senderAutoAck = false;
+    std::vector<uint8_t> flagged = FrameCodec::encode(off, TEXT_FRAME_BYTES);
+    CHECK(!flagged.empty() && flagged[0] == 0x28);
+    CHECK(FrameCodec::decode(flagged.data(), (int)flagged.size(), decoded));
+    CHECK(decoded.type == FrameType::Message);
+    CHECK(!decoded.senderAutoAck);
+    CHECK(decoded.payload == off.payload);
+    for (size_t i = 1; i < plain.size(); i++) CHECK(plain[i] == flagged[i]);
+
+    off.type = FrameType::Broadcast;
+    flagged = FrameCodec::encode(off, TEXT_FRAME_BYTES);
+    CHECK(!flagged.empty() && flagged[0] == 0x2A);
+    CHECK(FrameCodec::decode(flagged.data(), (int)flagged.size(), decoded));
+    CHECK(decoded.type == FrameType::Broadcast && !decoded.senderAutoAck);
+
+    Frame ping = makePingFrame();
+    plain = FrameCodec::encode(ping, SIGNALLING_FRAME_BYTES);
+    CHECK(!plain.empty() && plain[SIGNALLING_HEADER_BYTES - 1] == 0);
+    CHECK(FrameCodec::decode(plain.data(), (int)plain.size(), decoded));
+    CHECK(decoded.senderAutoAck && decoded.payload.empty());
+
+    ping.senderAutoAck = false;
+    flagged = FrameCodec::encode(ping, SIGNALLING_FRAME_BYTES);
+    CHECK(!flagged.empty() && flagged[0] == 0x10);
+    CHECK(flagged[SIGNALLING_HEADER_BYTES - 1] == 1);
+    CHECK(flagged[SIGNALLING_HEADER_BYTES] == PING_FLAG_NO_AUTO_ACK);
+    CHECK(FrameCodec::decode(flagged.data(), (int)flagged.size(), decoded));
+    CHECK(decoded.type == FrameType::Ping && !decoded.senderAutoAck);
+
+    // The bit means nothing on any other type: those values stay unknown.
+    Frame pong = makePingFrame();
+    pong.type = FrameType::PingAck;
+    pong.payload.assign(1, 0x2A);
+    pong.senderAutoAck = false;
+    flagged = FrameCodec::encode(pong, SIGNALLING_FRAME_BYTES);
+    CHECK(!flagged.empty() && flagged[0] == 0x11);
+    CHECK(FrameCodec::decode(flagged.data(), (int)flagged.size(), decoded));
+    CHECK(decoded.senderAutoAck && decoded.payload[0] == 0x2A);
+    flagged[0] = 0x19;
+    CHECK(!FrameCodec::decode(flagged.data(), (int)flagged.size(), decoded));
+    CHECK(!FrameCodec::isKnownFrameType(0x18));
+    CHECK(!FrameCodec::isKnownFrameType(0x29));
+    CHECK(!FrameCodec::isKnownFrameType(0x2B));
+    CHECK(FrameCodec::isKnownFrameType(0x28));
+    CHECK(FrameCodec::isKnownFrameType(0x2A));
+}
+
 // How many bursts follow in the keying is how listeners know how long to
 // leave the channel alone, and it is a wire format change, so the bytes are
 // pinned: the high nibble of a text frame's fragment index byte, and the top
@@ -400,7 +461,7 @@ void testExpectedFrameStart()
     int knownBits = 0;
     for (int i = 0; i < n; i++)
         for (int bit = 0; bit < 8; bit++) knownBits += (fromW1awMask[i] >> bit) & 1;
-    CHECK(knownBits == 9 * 8 + 3);
+    CHECK(knownBits == 9 * 8 + 2);
     for (int i = 4; i < n; i++) CHECK(anybodyMask[i] == 0);
 }
 
@@ -410,6 +471,7 @@ int main()
     testExpectedFrameStart();
     testRoundTrip();
     testBurstsFollowing();
+    testAutoAckFlag();
     testPartialAcknowledgement();
     testEncodeRejections();
     testDecodeRejections();

@@ -141,13 +141,15 @@ std::vector<AnnotationToken> describeSegment(const std::vector<uint8_t>& bytes, 
         if (r.completesHere(OFFSET_TYPE, 1)) add(tokens, Role::Unknown, "NOT CHAT");
         return tokens;
     }
-    FrameType type = (FrameType)(typeByte & TYPE_VALUE_MASK);
+    bool noAutoAck = false;
+    FrameType type = FrameCodec::frameType(typeByte & TYPE_VALUE_MASK, &noAutoAck);
     bool signalling = FrameCodec::isSignallingFrameType(type);
     int header = FrameCodec::headerBytes(type);
 
     if (r.completesHere(OFFSET_TYPE, 1))
     {
         add(tokens, Role::Kind, kindName(type));
+        if (noAutoAck) add(tokens, Role::Field, "NO AUTO ACK");
     }
     if (r.completesHere(OFFSET_DEST_CRC, 3))
     {
@@ -197,7 +199,14 @@ std::vector<AnnotationToken> describeSegment(const std::vector<uint8_t>& bytes, 
     }
     else
     {
-        // Signalling payloads (a ping's SNR, which parts arrived) in hex.
+        // A ping's first payload byte is its flags.
+        if (type == FrameType::Ping && payloadEnd > header && r.completesHere(header, 1) &&
+            (*r.at(header) & PING_FLAG_NO_AUTO_ACK) != 0)
+        {
+            add(tokens, Role::Field, "NO AUTO ACK");
+        }
+
+        // Signalling payloads (a pong's SNR, which parts arrived) in hex.
         std::string hex;
         for (int i = std::max(header, segmentFrom); i < std::min(payloadEnd, r.size()); i++)
         {

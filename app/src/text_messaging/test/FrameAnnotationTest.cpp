@@ -105,6 +105,35 @@ void testMessage()
     check(text == message.substr(2 * SEGMENT - TEXT_HEADER_BYTES), "text after a lost header, from where it was heard");
 }
 
+// A station with Auto acknowledge off says so in a message's type and in a
+// ping's flags.
+void testNoAutoAck()
+{
+    using Role = AnnotationToken::Role;
+    Frame frame;
+    frame.type = FrameType::Broadcast;
+    frame.originCallsign = "K6ABC";
+    frame.fragmentCount = 1;
+    frame.senderAutoAck = false;
+    frame.payload.assign(3, 'X');
+    std::string text;
+    std::vector<std::string> tokens = readOut(FrameCodec::encode(frame, TEXT_FRAME_BYTES), true, text);
+    check(has(tokens, Role::Kind, "BROADCAST"), "flagged broadcast kind");
+    check(has(tokens, Role::Field, "NO AUTO ACK"), "flagged broadcast says so");
+    check(text == "XXX", "flagged broadcast text");
+
+    frame.type = FrameType::Ping;
+    frame.destinationCrc = FrameCodec::callsignCrc24("W1AW");
+    frame.payload.clear();
+    tokens = readOut(FrameCodec::encode(frame, SIGNALLING_FRAME_BYTES), false, text);
+    check(has(tokens, Role::Kind, "PING"), "flagged ping kind");
+    check(has(tokens, Role::Field, "NO AUTO ACK"), "flagged ping says so");
+
+    frame.senderAutoAck = true;
+    tokens = readOut(FrameCodec::encode(frame, SIGNALLING_FRAME_BYTES), false, text);
+    for (const std::string& t : tokens) check(t.find("NO AUTO ACK") == std::string::npos, "plain ping says nothing");
+}
+
 void testSignalling()
 {
     Frame frame;
@@ -150,6 +179,7 @@ void testBroadcastAndJunk()
 int main()
 {
     testMessage();
+    testNoAutoAck();
     testSignalling();
     testBroadcastAndJunk();
     if (failures == 0) std::printf("frame annotation tests passed\n");
