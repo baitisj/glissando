@@ -28,7 +28,8 @@ line numbers. Lesson 6 leaves the frame decoder for the listener that hears
 the opening chord, in [GlissandoChord.cpp](../modem/GlissandoChord.cpp).
 Lesson 7 returns to it, for the bits a receiver can guess before it
 decodes, and Lesson 8 is about the chat text itself: how the ham table and
-Huffman coding spend fewer bits on it (both October 2026).
+Huffman coding spend fewer bits on it. Lesson 9 adds up the copies of a
+frame that is sent more than once (all October 2026).
 
 ## Lesson 1: a matched filter is a stencil
 
@@ -467,6 +468,67 @@ instead of 14. When Auto acknowledge is off, the type field says so.
 The new frames do not work with Glissando 0.3 and older. The type values
 are chosen so that neither build mistakes the other's frames for its own:
 each drops them as noise.
+
+## Lesson 9: adding up the copies of a repeat
+
+A frame too weak to decode is not wasted. If the same frame is sent again,
+a retry or a second ping, the receiver can add what it heard the first time
+to what it hears the second time, and decode the sum. JT65 and Q65 decoders
+call this averaging.
+
+**Stacking photographs.** Astronomers photograph a faint galaxy many times
+and stack the pictures. The galaxy is in the same place in every picture,
+so it adds up; the grain of each picture is random, so it partly cancels.
+Two stacked pictures show a galaxy that neither shows alone.
+
+The receiver stacks the bit likelihoods of Lesson 5. For each candidate
+that fails to decode it keeps the 195 numbers, one per coded bit, that say
+how sure it was of a 0 or a 1 (`SoftFrame`, [GlissandoInternal.h](../modem/GlissandoInternal.h)).
+When a later candidate also fails, it adds the two sets of numbers and
+hands the sum to the decoder, with Lesson 7's guesses as usual
+(`StreamingReceiver::Impl::average()`, [GlissandoReceiver.cpp](../modem/GlissandoReceiver.cpp)).
+Where both copies leaned towards a 0, the sum leans harder; where the noise
+pushed one copy the wrong way, the other usually outvotes it.
+
+**Which copies belong together?** The receiver does not know which earlier
+candidate, if any, was the same frame. So it only stacks copies that:
+
+- are at the same tempo, voice and scale, within 3 Hz of each other;
+- started at least a frame apart (two searches that overlap find the same
+  frame twice; that is not a repeat);
+- looked like a signal when heard: a measured Es/N0 of 1.3 or more, which a
+  real frame 1.5 dB under the threshold reaches 95% of the time and a noise
+  peak about one time in six;
+- agree. The receiver correlates the two sets of likelihoods. Copies of the
+  same frame lean the same way on most bits: 0.2 to 0.4 at these signal
+  levels. Different frames and noise score about 0, give or take 0.07. Only
+  pairs scoring 0.2 or more are added.
+
+Copies are kept for ten minutes. A copy that helps decode a frame is
+dropped, so the next repeat starts afresh.
+
+**What it gains.** At Presto, measured on a stream of noise with a frame
+sent two or three times, each copy starting 12 to 27 seconds after the last,
+40 trials per point:
+
+| Signal (dB in 2500 Hz) | One copy decodes | Two copies | Three copies |
+|---|---|---|---|
+| -18.0 | 38% | 75% | |
+| -18.5 | 5% | 48% | |
+| -19.0 | 0% | 28% | 45% |
+| -19.5 | 0% | 5% | 20% |
+
+Half of all frames decode at about -17.6 dB from one copy, -18.5 dB from
+two and -18.9 dB from three: about 0.9 dB and 1.4 dB of gain. Sixty minutes
+of plain noise, listened to at every tempo, gave no false decodes.
+
+Why not the full 3 dB that doubling the signal suggests? Two reasons. The
+receiver detects each note by its power, not its phase, and power detection
+loses more of a weak signal than it keeps, so each copy brings in less than
+its share. And each copy must still be found on its own: the sync search of
+Lesson 3 has to pick it out of the noise before there is anything to stack.
+A slower "Largo" gear, on the roadmap, could stack copies whose timing is
+already known, which avoids the second loss.
 
 ## What glide-then-hold gains and gives up
 

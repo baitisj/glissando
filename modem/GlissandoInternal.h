@@ -105,6 +105,20 @@ struct VoiceTemplates
 
 std::shared_ptr<const VoiceTemplates> voiceTemplates(Scale scale, int voice, int gear, double tuningOffsetHz);
 
+// The soft bits of a sync candidate that did not decode, kept so that a
+// later copy of the same frame can be added to them (averaging; see
+// combineSoftFrames()).
+struct SoftFrame
+{
+    FrameLlrs llrs{};
+    long long startSample = 0;  // in z's sample numbering
+    double frequencyOffsetHz = 0.0;
+    double syncScore = 0.0;
+    double esOverN0 = 0.0;
+    int hypothesis = 0;
+    ChannelReport report;
+};
+
 // Everything the receiver works out about one voice of one frame.
 struct VoiceDecode
 {
@@ -113,7 +127,21 @@ struct VoiceDecode
     double syncScore = 0.0;     // sync peak over the median sync score
     double esOverN0 = 0.0;      // signal to noise ratio per symbol, measured on the sync symbols
     int hypothesis = 0;         // index into the voices searched: which scale the frame was heard in
+
+    // Candidates that were searched but did not decode, strongest sync
+    // first, when no candidate decoded. Empty when one did.
+    std::vector<SoftFrame> failed;
 };
+
+// The decoder's full ladder on one set of soft bits: as heard, then on the
+// zero padding guesses, then on each of knownBits. Never reports the
+// all-zero payload.
+bool decodeWithGuesses(const FrameLlrs& llrs, const std::vector<KnownBits>& knownBits, Payload& payloadOut);
+
+// How alike two candidates' soft bits are: the normalised correlation of
+// their LLRs, 1 for identical, near 0 for unrelated frames or noise (about
+// 0.07 standard deviation over FRAME_BITS bits).
+double softAgreement(const FrameLlrs& a, const FrameLlrs& b);
 
 // Searches z for a frame of one voice starting in [searchFrom, searchTo) and
 // decodes it (prototype glissando.receive() for one voice): coarse sync,

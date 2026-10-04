@@ -21,6 +21,11 @@ namespace
 
 constexpr int CHUNK = SAMPLE_RATE_HZ / 50; // 20 ms, as an audio callback delivers
 
+// Below Presto's decoding threshold, where one copy decodes about one time
+// in twenty and two copies added together about half the time.
+constexpr double AVERAGING_SNR_DB = -18.5;
+constexpr uint64_t AVERAGING_TRIALS = 6;
+
 class Collector
 {
 public:
@@ -344,6 +349,66 @@ void testAnyScale()
     }
 }
 
+// A frame too weak to decode, sent twice with another frame between. The
+// second copy, added to the first, often decodes when neither does alone,
+// and is reported as two copies. Whatever decodes is the right frame, once
+// (the frame between is a different payload, so its soft bits do not agree
+// with either copy). Several seeds, since which trials decode depends on
+// the noise and, a little, on how the compiler rounds.
+std::vector<StreamDecode> averagingRun(uint64_t seed, Payload& sent, long long& secondStart)
+{
+    Random rng(seed);
+    const double sigma = 0.02;
+    const long long f4 = gearInfo(4).frameSamples();
+    Payload repeated = rng.payload();
+    long long first = SAMPLE_RATE_HZ;
+    long long between = first + f4 + 2 * SAMPLE_RATE_HZ;
+    long long second = between + f4 + 2 * SAMPLE_RATE_HZ;
+    long long total = second + f4 + 3 * SAMPLE_RATE_HZ;
+
+    std::vector<float> stream((size_t)total);
+    for (float& v : stream) v = (float)(sigma * rng.gaussian());
+    place(stream, {4, first, {repeated}}, AVERAGING_SNR_DB, sigma);
+    place(stream, {4, between, {rng.payload()}}, AVERAGING_SNR_DB, sigma);
+    place(stream, {4, second, {repeated}}, AVERAGING_SNR_DB, sigma);
+
+    StreamingReceiver receiver;
+    Collector collector;
+    collector.attach(receiver);
+    receiver.configure({4}, Scale::Pentatonic, 0.0);
+    receiver.start();
+    pushAll(receiver, toShort(stream));
+    receiver.flush();
+    receiver.stop();
+    sent = repeated;
+    secondStart = second;
+    return collector.decodes();
+}
+
+void testAveraging()
+{
+    int averaged = 0;
+    for (uint64_t seed = 1; seed <= AVERAGING_TRIALS; seed++)
+    {
+        Payload sent;
+        long long second = 0;
+        std::vector<StreamDecode> decodes = averagingRun(seed, sent, second);
+        CHECK(decodes.size() <= 1);
+        for (const StreamDecode& d : decodes)
+        {
+            CHECK(d.decode.payload == sent);
+            if (d.decode.copies == 2)
+            {
+                averaged++;
+                CHECK(std::llabs(d.decode.startSample - second) <= 8);
+            }
+            CHECK(d.decode.copies == 1 || d.decode.copies == 2);
+        }
+    }
+    printf("averaging: %d of %d repeats decoded only by adding the two copies\n", averaged, (int)AVERAGING_TRIALS);
+    CHECK(averaged >= 2);
+}
+
 int main()
 {
     auto start = std::chrono::steady_clock::now();
@@ -352,6 +417,7 @@ int main()
     testAnyScale();
     testReset();
     testSilence();
+    testAveraging();
     printf("receiver tests took %.1f s\n", secondsSince(start));
     if (failures == 0) printf("glissando receiver tests passed\n");
     return failures == 0 ? 0 : 1;

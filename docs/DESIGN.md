@@ -384,7 +384,10 @@ code should more than close that gap (an estimate, not yet measured).
 2. Real-time implementation (C or Rust library, sound card I/O, CAT/PTT),
    decoding every gear every slot, several signals per slot.
 3. Averaging of repeated transmissions (as Q65 does) for a "Largo" gear
-   below G1 without longer symbols, which HF Doppler would punish.
+   below G1 without longer symbols, which HF Doppler would punish. The
+   streaming receiver already averages a repeat with failed copies it
+   heard earlier (about 0.9 dB for two copies at G4; see Lesson 9 of
+   [HOW_IT_HEARS.md](HOW_IT_HEARS.md)).
 4. Over-the-air tests on 40 m and 20 m against the simulator's predictions.
 5. AFC that also corrects the audible pitch, so a mistuned rig still sounds
    in tune.
