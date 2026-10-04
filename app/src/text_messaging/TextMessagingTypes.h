@@ -65,56 +65,55 @@ enum class FrameType : uint8_t
 constexpr int SIGNALLING_FRAME_BYTES = 14; // DATAC13: 128 bits - CRC16
 constexpr int TEXT_FRAME_BYTES = 54;       // DATAC4: 448 bits - CRC16
 
-// On air header. Every frame starts with type (1) + destination CRC (3) +
-// packed origin callsign (6) + message ID (2). The origin CRC is not sent: it
-// is the CRC of the callsign already in the frame, and three bytes is a tenth
-// of a DATAC13 frame.
+// On air header, packed to the bit (most significant bit of each byte
+// first; see FrameCodec for the layout). Every frame starts with a 4-bit
+// type, a 20-bit hash of the destination callsign (zero for broadcasts) and
+// the origin callsign: a form bit, then 28 bits for a standard callsign
+// (one or two prefix characters, a digit and up to three letters, packed as
+// FT8 packs them) or 48 bits for anything else (nine characters, base 40,
+// which covers portable suffixes such as VK3ABC/P). The origin's own hash
+// is not sent: it is the hash of the callsign already in the frame.
 //
-// Text frames then add fragment index (1) + fragment count (1); signalling
-// frames are always a single fragment and spend those two bytes on payload
-// instead, which is what lets a ping fit in DATAC13 at all. Both end with a
-// payload length byte, which is how the decoder tells payload from the zero
-// padding out to the modem frame size.
+// A signalling frame then has a "more follows" bit, a 10-bit message ID and,
+// for a pong or partial acknowledgement, one payload byte: 72 bits with a
+// standard callsign, one Glissando segment. A text frame has how many bursts
+// follow in this keying (4 bits), the message ID, the fragment's index and
+// the fragment count less one (3 bits each), 73 bits with a standard
+// callsign, and then the text, Huffman coded (HamText) to the end of the
+// frame. Zero padding reads as no text, so no length field is needed.
 //
-// Every frame also says whether more bursts follow it in the same keying, so
-// that listeners know how long the sender will hold the channel. A text frame
-// carries how many, in the high nibble of its fragment index byte; a
-// signalling frame has no spare byte and carries only whether any do, in the
-// top bit of its type byte. See FrameCodec for the layout.
+// A station with Auto acknowledge off says so in the type of its pings,
+// messages and broadcasts, so that others do not retry to it. Pongs and
+// acknowledgements never need to: a station sends them only with it on.
 //
-// A station with Auto acknowledge off says so, so that others do not retry
-// to it: its messages and broadcasts go with TYPE_NO_AUTO_ACK added to their
-// type, and its pings carry PING_FLAG_NO_AUTO_ACK in a payload byte. A station
-// with it on sends exactly what builds before the flag sent, and that is
-// what anything without the flag means. Builds before the flag ignore a
-// ping's payload, but drop a message or broadcast of a type they do not
-// know, so they cannot read a station that has Auto acknowledge off.
-constexpr uint8_t TYPE_NO_AUTO_ACK = 0x08;
-constexpr uint8_t PING_FLAG_NO_AUTO_ACK = 0x01;
-constexpr int SIGNALLING_HEADER_BYTES = 13;
-constexpr int TEXT_HEADER_BYTES = 15;
-constexpr int TEXT_BYTES_PER_FRAGMENT = TEXT_FRAME_BYTES - TEXT_HEADER_BYTES;
-constexpr int SIGNALLING_PAYLOAD_BYTES = SIGNALLING_FRAME_BYTES - SIGNALLING_HEADER_BYTES;
-
-static_assert(SIGNALLING_HEADER_BYTES < SIGNALLING_FRAME_BYTES,
-              "a signalling frame must have room for its header and a payload byte");
-static_assert(TEXT_HEADER_BYTES < TEXT_FRAME_BYTES,
-              "a text frame must have room for its header and some text");
+// The type values avoid every first nibble the byte-aligned header of
+// Glissando 0.3 and older could start with, so each build drops the other's
+// frames as not its own rather than misreading them.
+constexpr int TYPE_BITS = 4;
+constexpr int DESTINATION_HASH_BITS = 20;
+constexpr int STANDARD_CALLSIGN_BITS = 28;
+constexpr int EXTENDED_CALLSIGN_BITS = 48;
+constexpr int AIR_ID_BITS = 10;
+constexpr int BURSTS_FOLLOWING_BITS = 4;
+constexpr int FRAGMENT_FIELD_BITS = 3;
+constexpr int SIGNALLING_PAYLOAD_BITS = 8;
+constexpr int MAX_AIR_ID = (1 << AIR_ID_BITS) - 1;
 
 // A message is sent as one keying of the transmitter, so its length is bounded
-// by how long we are willing to hold the channel: eight DATAC4 fragments is
-// around 30 seconds.
-constexpr int MAX_FRAGMENTS_PER_MESSAGE = 8;
+// by how long we are willing to hold the channel.
+constexpr int MAX_FRAGMENTS_PER_MESSAGE = 1 << FRAGMENT_FIELD_BITS;
 
-static_assert(MAX_FRAGMENTS_PER_MESSAGE <= 8 * SIGNALLING_PAYLOAD_BYTES,
+static_assert(MAX_FRAGMENTS_PER_MESSAGE <= SIGNALLING_PAYLOAD_BITS,
               "a partial acknowledgement has one bit per fragment in a signalling payload");
-constexpr int MAX_MESSAGE_TEXT_BYTES = TEXT_BYTES_PER_FRAGMENT * MAX_FRAGMENTS_PER_MESSAGE;
 
-// Callsigns are packed nine characters into six bytes (base 40), which covers
-// portable suffixes such as VK3ABC/P. Anything longer is truncated for the
-// air, never for the display.
+// What the operator may type. Ordinary text takes about five bits a
+// character, so this is four or five fragments; text of rare characters
+// can need more than eight, and the protocol refuses it then.
+constexpr int MAX_MESSAGE_TEXT_BYTES = 312;
+
+// Callsigns that are not standard are packed nine characters into 48 bits.
+// Anything longer is truncated for the air, never for the display.
 constexpr int MAX_PACKED_CALLSIGN_CHARS = 9;
-constexpr int PACKED_CALLSIGN_BYTES = 6;
 
 // A half duplex station hears nothing while it is keyed, and its receiver
 // needs a moment to settle after it unkeys. So replying the instant a burst

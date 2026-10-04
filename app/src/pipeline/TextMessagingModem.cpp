@@ -767,9 +767,9 @@ double TextMessagingModem::airTimeScale(int gear) const
     return secondsPerPayload(gear) / secondsPerPayload(current);
 }
 
-double TextMessagingModem::glissandoMessageSeconds(size_t textBytes) const
+double TextMessagingModem::glissandoMessageSeconds(const std::string& text, const std::string& callsign) const
 {
-    if (!glissandoOn_.load(std::memory_order_acquire) || textBytes == 0) return 0.0;
+    if (!glissandoOn_.load(std::memory_order_acquire) || text.empty()) return 0.0;
 
     int gear = 0;
     bool chords = false;
@@ -783,14 +783,21 @@ double TextMessagingModem::glissandoMessageSeconds(size_t textBytes) const
     const Glissando::GearInfo& info = Glissando::gearInfo(gear);
 
     // The link trims a frame's zero padding off before cutting it into
-    // segments, so a fragment costs its header and its text, as the protocol
-    // cuts the message in sendMessage().
-    textBytes = std::min(textBytes, (size_t)MAX_MESSAGE_TEXT_BYTES);
+    // segments, so a fragment costs its header and its coded text, cut as
+    // the protocol cuts the message in sendMessage().
+    std::string sender = FrameCodec::normalizeCallsign(callsign).empty() ? std::string("N0CALL") : callsign;
     std::vector<Glissando::LinkBurst> bursts;
-    for (size_t offset = 0; offset < textBytes; offset += TEXT_BYTES_PER_FRAGMENT)
+    for (size_t at = 0; at < text.size() && bursts.size() < (size_t)MAX_FRAGMENTS_PER_MESSAGE;)
     {
-        size_t chunk = std::min(textBytes - offset, (size_t)TEXT_BYTES_PER_FRAGMENT);
-        bursts.push_back({true, std::vector<uint8_t>(TEXT_HEADER_BYTES + chunk, 0xFF)});
+        size_t fits = FrameCodec::textThatFits(sender, text, at);
+        if (fits == 0) break;
+        Frame frame;
+        frame.type = FrameType::Message;
+        frame.originCallsign = sender;
+        frame.fragmentCount = MAX_FRAGMENTS_PER_MESSAGE;
+        frame.payload.assign(text.begin() + (long)at, text.begin() + (long)(at + fits));
+        bursts.push_back({true, FrameCodec::encode(frame, TEXT_FRAME_BYTES)});
+        at += fits;
     }
 
     return Glissando::framesForBursts(bursts, info.voices) * info.frameSeconds() +

@@ -265,11 +265,12 @@ void testFirstSegmentKnownBits()
             count++;
             CHECK(known[(size_t)i] == first[(size_t)i]);
         }
-        int expected = SEGMENT_HEADER_BITS - 1;
+        int expected = SEGMENT_HEADER_BITS - 2;
         for (uint8_t m : masks)
             for (int bit = 0; bit < 8; bit++) expected += (m >> bit) & 1;
         CHECK(count == expected);
         CHECK(known[0] == -1);
+        CHECK(known[SEGMENT_HEADER_BITS - 1] == -1);
     }
 }
 

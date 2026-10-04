@@ -61,7 +61,7 @@ constexpr uint64_t DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
 uint16_t randomAirId()
 {
     std::random_device device;
-    return (uint16_t)(device() & 0xFFFFu);
+    return (uint16_t)(device() & MAX_AIR_ID);
 }
 
 std::string trim(const std::string& text)
@@ -146,7 +146,7 @@ void TextMessagingProtocol::setMyCallsign(const std::string& callsign)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     myCallsign_ = FrameCodec::normalizeCallsign(callsign);
-    myCallsignCrc_ = FrameCodec::callsignCrc24(myCallsign_);
+    myCallsignCrc_ = FrameCodec::callsignHash(myCallsign_);
 
     // Seeding the backoff from our own callsign keeps it reproducible for a
     // given station while making any two stations back off differently.
@@ -387,7 +387,7 @@ size_t TextMessagingProtocol::pendingCount() const
 uint16_t TextMessagingProtocol::nextAirIdLocked()
 {
     // Zero is reserved so that an all zero header cannot look like a valid ID.
-    if (nextAirId_ == 0) nextAirId_ = 1;
+    if (nextAirId_ == 0 || nextAirId_ > MAX_AIR_ID) nextAirId_ = 1;
     return nextAirId_++;
 }
 
@@ -398,7 +398,7 @@ Frame TextMessagingProtocol::makeFrameLocked(FrameType type, const std::string& 
 {
     Frame frame;
     frame.type = type;
-    frame.destinationCrc = destination.empty() ? 0 : FrameCodec::callsignCrc24(destination);
+    frame.destinationCrc = destination.empty() ? 0 : FrameCodec::callsignHash(destination);
     frame.originCallsign = myCallsign_;
     frame.airId = airId;
     frame.fragmentIndex = fragmentIndex;
@@ -409,7 +409,7 @@ Frame TextMessagingProtocol::makeFrameLocked(FrameType type, const std::string& 
 
 bool TextMessagingProtocol::isAddressedToMeLocked(const Frame& frame) const
 {
-    // Addressing is by CRC, so a collision could in principle hand us somebody
+    // Addressing is by hash, so a collision could in principle hand us somebody
     // else's frame; the origin callsign in the frame is what gets displayed,
     // so the worst case is a stray line in the chat window.
     return !myCallsign_.empty() && frame.destinationCrc == myCallsignCrc_;
@@ -480,11 +480,25 @@ bool TextMessagingProtocol::queueMessageLocked(const std::string& text,
     pending.destination = normalizedDestination;
     pending.state = TransmissionState::Queued;
 
-    size_t fragmentCount = (body.size() + TEXT_BYTES_PER_FRAGMENT - 1) / TEXT_BYTES_PER_FRAGMENT;
+    // Cut the text where each fragment fills: the header is the same for
+    // all, and the text is Huffman coded, so how much fits depends on it.
+    std::vector<std::string> chunks;
+    for (size_t at = 0; at < body.size();)
+    {
+        size_t fits = FrameCodec::textThatFits(myCallsign_, body, at);
+        if (fits == 0 || chunks.size() == MAX_FRAGMENTS_PER_MESSAGE)
+        {
+            errorOut = "Message is too long to send in one go; please shorten it.";
+            return false;
+        }
+        chunks.push_back(body.substr(at, fits));
+        at += fits;
+    }
+
+    size_t fragmentCount = chunks.size();
     for (size_t index = 0; index < fragmentCount; index++)
     {
-        std::string chunk = body.substr(index * TEXT_BYTES_PER_FRAGMENT, TEXT_BYTES_PER_FRAGMENT);
-        std::vector<uint8_t> payload(chunk.begin(), chunk.end());
+        std::vector<uint8_t> payload(chunks[index].begin(), chunks[index].end());
 
         Frame frame = makeFrameLocked(broadcast ? FrameType::Broadcast : FrameType::Message,
                                       normalizedDestination, airId, (uint8_t)index,

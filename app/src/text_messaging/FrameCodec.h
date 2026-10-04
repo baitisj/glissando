@@ -51,9 +51,9 @@ namespace TextMessaging
 struct Frame
 {
     FrameType type = FrameType::Ping;
-    uint32_t destinationCrc = 0;    // 24 bits; zero means "broadcast"
+    uint32_t destinationCrc = 0;    // FrameCodec::callsignHash(); zero means "broadcast"
     std::string originCallsign;     // as decoded, may be truncated to 9 chars
-    uint16_t airId = 0;             // matches a message to its acknowledgement
+    uint16_t airId = 0;             // matches a message to its acknowledgement; up to MAX_AIR_ID
     uint8_t fragmentIndex = 0;      // zero based
     uint8_t fragmentCount = 1;
 
@@ -64,67 +64,80 @@ struct Frame
     uint8_t burstsFollowing = 0;
 
     // Whether the sender acknowledges and answers pings by itself. Said by
-    // messages, broadcasts and pings; true for every other frame, and for
-    // any frame from a build before the flag. See TYPE_NO_AUTO_ACK.
+    // messages, broadcasts and pings; true for every other frame.
     bool senderAutoAck = true;
 
+    // A text frame's characters, or a pong's or partial acknowledgement's
+    // one byte. Pings and acknowledgements carry none.
     std::vector<uint8_t> payload;
 };
 
-constexpr int MAX_TEXT_BURSTS_FOLLOWING = 15;
+constexpr int MAX_TEXT_BURSTS_FOLLOWING = (1 << BURSTS_FOLLOWING_BITS) - 1;
 
 class FrameCodec
 {
 public:
     // Uppercases and strips characters the air alphabet cannot carry, so that
-    // the CRC both ends compute over a callsign agrees. Returns an empty
+    // the hash both ends compute over a callsign agrees. Returns an empty
     // string if nothing usable is left.
     static std::string normalizeCallsign(const std::string& callsign);
 
-    // CRC-24/OPENPGP over the normalized callsign. Used to address frames
-    // without spending six bytes on the destination.
+    // CRC-24/OPENPGP over the normalized callsign.
     static uint32_t callsignCrc24(const std::string& callsign);
 
-    // Base 40 packing of up to MAX_PACKED_CALLSIGN_CHARS characters into
-    // PACKED_CALLSIGN_BYTES bytes, big endian. Longer callsigns are truncated.
-    static void packCallsign(const std::string& callsign, uint8_t* out);
-    static std::string unpackCallsign(const uint8_t* in);
+    // The DESTINATION_HASH_BITS that address a frame: the top of the CRC.
+    static uint32_t callsignHash(const std::string& callsign);
+
+    // Whether a callsign packs into STANDARD_CALLSIGN_BITS (a prefix of one
+    // or two characters, a digit, then one to three letters, as FT8 packs
+    // it) rather than EXTENDED_CALLSIGN_BITS.
+    static bool isStandardCallsign(const std::string& callsign);
 
     // Serializes a frame, zero padded out to frameBytes (SIGNALLING_FRAME_BYTES
-    // or TEXT_FRAME_BYTES). Returns an empty vector if the frame does not fit
-    // the header its type requires, if the payload does not fit behind that
-    // header, if it carries a callsign that cannot be packed, or if a text
-    // frame claims more bursts following than its header can say.
+    // or TEXT_FRAME_BYTES). Returns an empty vector if the frame does not fit,
+    // if a field is out of range, if it carries a callsign that cannot be
+    // packed, or if a text frame's text does not all fit behind its header.
     static std::vector<uint8_t> encode(const Frame& frame, int frameBytes);
 
     // Parses a frame received from the modem. Returns false when the frame is
-    // too short, the type is not one of ours, or the declared payload length
-    // runs past the end of the data.
+    // too short for its header, the type is not one of ours, or a field holds
+    // a value no sender produces.
     static bool decode(const uint8_t* data, int length, Frame& frameOut);
 
-    // True for the frame types this build knows how to handle. Kept separate
-    // so the receive path can drop unknown types without parsing them.
-    // Takes the type byte less its "more follows" bit.
-    static bool isKnownFrameType(uint8_t type);
-
-    // The frame type a known type value stands for, without the sender's
-    // "no auto ACK" flag, which noAutoAckOut reports if given.
-    static FrameType frameType(uint8_t type, bool* noAutoAckOut = nullptr);
+    // How many characters of text, from character `from`, fit in one text
+    // frame sent by originCallsign. The protocol cuts messages with it.
+    static size_t textThatFits(const std::string& originCallsign, const std::string& text, size_t from);
 
     // Pings and acknowledgements ride DATAC13, which is too small for the
     // fragment fields, so they carry a shorter header and are always a single
     // fragment. Message text rides DATAC4 and carries the full header.
     static bool isSignallingFrameType(FrameType type);
-    static int headerBytes(FrameType type);
+
+    // The frame type a TYPE_BITS type code stands for, and whether it says
+    // the sender has Auto acknowledge off. False for a code no frame uses.
+    static bool typeFromCode(uint8_t code, FrameType& typeOut, bool& noAutoAckOut);
+
+    // Where the header's fields sit, for reading a frame as it arrives: the
+    // origin callsign starts at ORIGIN_BIT after its form bit, and everything
+    // after it moves with its length.
+    static constexpr int DESTINATION_BIT = TYPE_BITS;
+    static constexpr int ORIGIN_BIT = DESTINATION_BIT + DESTINATION_HASH_BITS;
+    static int originBits(bool standard) { return 1 + (standard ? STANDARD_CALLSIGN_BITS : EXTENDED_CALLSIGN_BITS); }
+    static int headerBits(FrameType type, bool standardOrigin);
+    static int signallingPayloadBits(FrameType type);
+
+    // The callsign packed at bit (after the form bit), or empty if the value
+    // is not one packing produces.
+    static std::string unpackCallsign(const uint8_t* data, int bit, bool standard);
 
     // What a station can count on in the opening bytes of a frame addressed
     // to it: bits set in masksOut[i] are known to equal those of bytesOut[i].
-    // The type byte's bits that no frame type sets, the destination CRC
-    // (ownCallsign's), and with a non-empty fromCallsign the sender's packed
-    // callsign. Fills EXPECTED_START_BYTES bytes. A receiver hands these to
-    // its decoder as guesses, so a reply from the station it is working
-    // decodes on less signal (FT8 calls it a priori decoding).
-    static constexpr int EXPECTED_START_BYTES = 1 + 3 + PACKED_CALLSIGN_BYTES; // type, destination CRC, origin
+    // The destination hash (ownCallsign's), and with a non-empty fromCallsign
+    // the sender's callsign with its form bit. Fills EXPECTED_START_BYTES
+    // bytes. A receiver hands these to its decoder as guesses, so a reply
+    // from the station it is working decodes on less signal (FT8 calls it a
+    // priori decoding).
+    static constexpr int EXPECTED_START_BYTES = 10;
     static void expectedFrameStart(const std::string& ownCallsign, const std::string& fromCallsign,
                                    uint8_t* bytesOut, uint8_t* masksOut);
 };

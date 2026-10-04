@@ -61,7 +61,7 @@ std::vector<uint8_t> textFrame(const std::string& origin, const std::string& tex
     Frame frame;
     frame.type = FrameType::Broadcast;
     frame.originCallsign = origin;
-    frame.airId = 0x1234;
+    frame.airId = 0x234;
     frame.payload.assign(text.begin(), text.end());
     return FrameCodec::encode(frame, TEXT_FRAME_BYTES);
 }

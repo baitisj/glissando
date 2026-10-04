@@ -27,7 +27,8 @@ as of September 2026. The function names will stay put longer than the
 line numbers. Lesson 6 leaves the frame decoder for the listener that hears
 the opening chord, in [GlissandoChord.cpp](../modem/GlissandoChord.cpp).
 Lesson 7 returns to it, for the bits a receiver can guess before it
-decodes (October 2026).
+decodes, and Lesson 8 is about the chat text itself: how the ham table and
+Huffman coding spend fewer bits on it (both October 2026).
 
 ## Lesson 1: a matched filter is a stencil
 
@@ -312,7 +313,7 @@ noisy evidence for those bits, and the code's redundancy all goes to the
 bits still in doubt. FT8 decoders use the same trick and call it *a priori*
 (AP) decoding.
 
-![Two rows of 77 boxes, one per payload bit. In the first frame of AG7SU's reply, all but 6 bits are shaded as guessable: the frame header, three bits of the type byte, your callsign's CRC and AG7SU's packed callsign. In the last frame of a message carrying one byte, the 64 bits of zero padding are shaded](images/known-bits.svg)
+![Two rows of 77 boxes, one per payload bit. In the first frame of AG7SU's reply, 52 bits are shaded as guessable: the segment index, your callsign's hash and AG7SU's packed callsign. In the last frame of a message carrying one byte, the 64 bits of zero padding are shaded](images/known-bits.svg)
 
 *Which payload bits a listener can predict, without anything changing on
 the air. Teal bits are guessed; white bits must be decoded.*
@@ -325,11 +326,11 @@ the air. Teal bits are guessed; white bits must be decoded.*
   (`PADDING_HYPOTHESES`, [GlissandoDemod.cpp
   L67–L76](../modem/GlissandoDemod.cpp#L67-L76)).
 - **Replies.** Once you have sent something to AG7SU, the first frame of
-  AG7SU's answer must start with a known frame header, your callsign's CRC
-  and AG7SU's packed callsign: 71 of its 77 bits. Your receiver learns your
+  AG7SU's answer must start with a known segment index, your callsign's
+  hash and AG7SU's packed callsign: 52 of its 77 bits. Your receiver learns your
   callsign and who you sent to from your own transmissions. It guesses a
   reply from each of the three stations you sent to most recently in the
-  last 15 minutes, then a frame to you from anybody, which pins 31 bits
+  last 15 minutes, then a frame to you from anybody, which pins 23 bits
   (`expectedFrames()` in
   [TextMessagingModem.cpp](../app/src/pipeline/TextMessagingModem.cpp) and
   `FrameCodec::expectedFrameStart()` in
@@ -354,8 +355,15 @@ as the drop in signal needed to decode half the frames:
 |---|---|---|---|
 | Last frame of a message, one byte of text | 64 | 2.1 dB | 0.8 dB |
 | Last frame of a message, three bytes of text | 48 | 1.2 dB | 0.45 dB |
-| First frame of a reply from the station you're working | 71 | not measured | about 1 dB |
-| First frame addressed to you from a stranger | 31 | not measured | 0.3 dB |
+| First frame of a reply from the station you're working | 52 | not measured | about 0.5 dB |
+| First frame addressed to you from a stranger | 23 | not measured | about 0.1 dB |
+
+Before the header was packed to the bit (Lesson 8) a reply's first frame
+had 71 guessable bits and gained about 1 dB, and a stranger's 31 bits about
+0.3 dB. The packed header leaves less to guess, but a pong or
+acknowledgement is now one segment instead of two. Near the threshold that
+matters more: when each segment has an even chance of decoding, a
+two-segment burst arrives only one time in four.
 
 The whole receiver gains less than the code alone because guesses only help
 once the frame has been found. At the weakest signals many frames are lost
@@ -367,6 +375,98 @@ station benefits whatever version the sender runs. And it only ever adds a
 second chance: a frame that decodes plainly decodes exactly as before, and
 a station that fades in mid-message still reads it without any guesses at
 all.
+
+## Lesson 8: fewer bits for the letters hams use
+
+Lessons 1 to 7 are about hearing each bit. This one is about needing fewer
+of them. Until October 2026 every character of chat cost eight bits, the
+same for a space as for a `Q`. Glissando now codes text with a table drawn
+from ham chat, and a typical message takes about 38% fewer frames.
+
+**Morse got there first.** Samuel Morse gave `E`, the commonest letter in
+English, a single dot, and `Q` four elements. Common letters short, rare
+ones long: on average a message gets shorter. In 1952 David Huffman showed
+how to build the best possible code of this kind from a table of how often
+each character turns up. The result is a *Huffman code*.
+
+![The text "73 de AG7EW, name is Jeff" drawn twice as a strip of boxes, one per character. In 8-bit text every box is the same width, 200 bits in all. With the ham-table Huffman code each box's width is its code length, 133 bits in all: spaces are narrow, the J is wide](images/huffman-bits.svg)
+
+*The same 25 characters as plain bytes and as ham-table Huffman codes. Each
+box is as wide as the bits it costs.*
+
+**Building the ham table.** The code lengths live in `LENGTHS` in
+[HamText.cpp](../app/src/text_messaging/HamText.cpp). They come from
+counting the characters in 94 typical chat lines (CQs, signal reports,
+names, QTHs, rigs and antennas), blended 70/30 with ordinary English prose,
+so a word missing from the small sample is not punished. Out of that come:
+
+| Characters | Bits each |
+|---|---|
+| space | 3 |
+| e t a o i n | 4 |
+| most other lower-case letters (j, q, x and z cost more) | 5 to 7 |
+| capitals and digits | 7 to 10 |
+| rare punctuation | up to 14 |
+| anything else (é, emoji) | a 12-bit escape code plus the 8-bit byte |
+
+Chat in mixed case averages about 5 bits a character. The same lines typed
+in all capitals average about 7, still less than plain bytes.
+
+**No commas needed between codes.** A Morse operator hears the gaps between
+letters. A Huffman decoder has no gaps: the bits arrive end to end. It works
+because no code is the start of another one, so the decoder reads bits until
+they spell a code, writes the character, and starts again. Picture the table
+as a tree: each bit picks the left or right branch, and every character sits
+on a leaf.
+
+**Why the table never changes.** Cleverer schemes adapt to the
+conversation: zip-style compression remembers what was said earlier, and a
+*context model* guesses each letter from the ones before it. Both shrink
+text further, and both fail a station that fades in part way through,
+because it never heard what the coding depends on. Jeff's rule for
+Glissando is that a station that hears only part of a message must still
+read that part and the sender's callsign. With one fixed table, every frame
+decodes on its own. The table is the same at both ends because it is
+written into the program, which also means that changing it is a protocol
+change.
+
+Two more details keep partial copy working:
+
+- **No code straddles a segment.** Glissando carries a frame 9 bytes (72
+  bits) at a time. A code that would cross into the next segment starts
+  there instead, so a segment heard after a lost one still reads. This
+  costs about 1% more frames.
+- **Padding reads as nothing.** The rarest code in the table is 14 zero
+  bits. It means "the rest of this segment is empty", and it is what zero
+  padding spells. So the frame needs no length field, and the padding stays
+  zero for Lesson 7's guesses.
+
+**A smaller header too.** Every frame also carries a header saying what it
+is, who it is for and who sent it. That header was 15 bytes. It is now
+packed to the bit:
+
+- the frame type in 4 bits;
+- a 20-bit hash of the destination callsign;
+- the sender's callsign in 28 bits, packed as FT8 packs it, when it is
+  standard: a prefix of one or two characters, a digit, and up to three
+  letters. A portable or other callsign takes 48 bits;
+- a 10-bit message number, then the fragment fields.
+
+A ping, pong or acknowledgement from a standard callsign is now exactly 72
+bits, one segment instead of two, so at Presto a pong takes about 7 seconds
+instead of 14. When Auto acknowledge is off, the type field says so.
+
+**What it adds up to**, counted on the same 94 chat lines:
+
+| | Frames | Change |
+|---|---|---|
+| 8-bit text, 15-byte header (0.3) | 573 | |
+| Ham-table Huffman, packed header | 356 | 38% fewer |
+| Ping, pong or acknowledgement | 1 segment | was 2 |
+
+The new frames do not work with Glissando 0.3 and older. The type values
+are chosen so that neither build mistakes the other's frames for its own:
+each drops them as noise.
 
 ## What glide-then-hold gains and gives up
 

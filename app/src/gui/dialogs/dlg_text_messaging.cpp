@@ -1639,18 +1639,18 @@ void TextMessagingDialog::updateEngageChips()
     if (changed && anyQueued) renderChat(true);
 }
 
-// Counting frames is a handful of integer sums, so this runs on every change
+// Coding a message of a few hundred characters takes microseconds, so this runs on every change
 // to the text rather than waiting for typing to stop.
 void TextMessagingDialog::updateAirTime()
 {
     MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
 
-    // The protocol sends the text trimmed, counted in UTF-8 bytes.
+    // The protocol sends the text trimmed, as UTF-8.
     wxString text = m_txtEntry->GetValue();
     text.Trim(true).Trim(false);
-    size_t bytes = text.ToUTF8().length();
+    std::string utf8 = text.ToStdString(wxConvUTF8);
 
-    double seconds = frame != nullptr && bytes > 0 ? frame->chatMessageAirSeconds(bytes) : 0.0;
+    double seconds = frame != nullptr && !utf8.empty() ? frame->chatMessageAirSeconds(utf8) : 0.0;
     wxString note;
     wxString tip;
     bool over = false;

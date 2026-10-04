@@ -4,6 +4,7 @@ add_library(fdv_text_messaging STATIC
     Data2GTransport.cpp
     FrameAnnotation.cpp
     FrameCodec.cpp
+    HamText.cpp
     HeardStationList.cpp
     KeyingPlan.cpp
     MessageStore.cpp

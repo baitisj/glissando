@@ -51,6 +51,12 @@ namespace
 
 int failures = 0;
 
+// How many of character c fill a text fragment from a standard callsign.
+size_t perFragment(char c)
+{
+    return FrameCodec::textThatFits("W1AW", std::string(400, c), 0);
+}
+
 void check(bool condition, const char* what, int line)
 {
     if (!condition)
@@ -300,7 +306,7 @@ void testLongMessageIsFragmentedAndReassembled()
     Station sender("W1AW");
     Station receiver("VK3ABC");
 
-    std::string body(TEXT_BYTES_PER_FRAGMENT * 2 + 10, 'A');
+    std::string body(perFragment('A') * 2 + 10, 'A');
     std::string error;
     CHECK(sender.protocol.sendMessage(body, "VK3ABC", error));
     sender.completeOneTransmission();
@@ -571,7 +577,7 @@ void testStationWithAutoAckOffIsNotRetried()
     std::string error;
     CHECK(receiver.protocol.sendMessage("Listening only", "W1AW", error));
     receiver.completeOneTransmission();
-    CHECK(receiver.transport.transmissions[0][0][0] == (0x20 | TYPE_NO_AUTO_ACK));
+    CHECK((receiver.transport.transmissions[0][0][0] >> 4) == 0xB); // a message, Auto ACK off
     sender.receiveFrom(receiver.transport);
     CHECK(!sender.protocol.stationAutoAcks("vk3abc"));
     CHECK(hasSystemLine(sender.observer, "VK3ABC : Auto ACK off"));
@@ -612,9 +618,7 @@ void testPingSaysAutoAckIsOff()
     CHECK(receiver.protocol.sendPing("W1AW", error));
     receiver.completeOneTransmission();
     const std::vector<uint8_t>& ping = receiver.transport.transmissions[0][0];
-    CHECK(ping[0] == 0x10);
-    CHECK(ping[SIGNALLING_HEADER_BYTES - 1] == 1);
-    CHECK(ping[SIGNALLING_HEADER_BYTES] == PING_FLAG_NO_AUTO_ACK);
+    CHECK((ping[0] >> 4) == 0x4); // a ping, Auto ACK off
     sender.receiveFrom(receiver.transport);
     CHECK(!sender.protocol.stationAutoAcks("VK3ABC"));
 
@@ -644,7 +648,7 @@ void testWaitingMessageEndsWhenTheStationSaysItWillNotAnswer()
     receiver.protocol.setAutoReplyEnabled(false);
     CHECK(receiver.protocol.sendMessage("CQ CQ", "", error));
     receiver.completeOneTransmission();
-    CHECK(receiver.transport.transmissions[0][0][0] == (0x22 | TYPE_NO_AUTO_ACK));
+    CHECK((receiver.transport.transmissions[0][0][0] >> 4) == 0xD); // a broadcast, Auto ACK off
     sender.receiveFrom(receiver.transport);
 
     sender.nowMs += ACK_TIMEOUT_MILLISECONDS * 4;
@@ -732,7 +736,7 @@ void testAckWaitDoesNotBlockTheQueue()
     Frame ack;
     ack.type = FrameType::MessageAck;
     ack.originCallsign = "VK3ABC";
-    ack.destinationCrc = FrameCodec::callsignCrc24("W1AW");
+    ack.destinationCrc = FrameCodec::callsignHash("W1AW");
     ack.airId = secondAirId;
     sender.protocol.onFrameReceived(ack, 5.0f);
 
@@ -1561,7 +1565,7 @@ void testFragmentsStillToComeReserveTheChannel()
     Station sender("W1AW");
 
     std::string error;
-    std::string body(TEXT_BYTES_PER_FRAGMENT * 2 + 10, 'A'); // three fragments
+    std::string body(perFragment('A') * 2 + 10, 'A'); // three fragments
     CHECK(sender.protocol.sendMessage(body, "VK3ABC", error));
     sender.completeOneTransmission();
     const auto& frames = sender.transport.transmissions[0];
@@ -1660,7 +1664,7 @@ void testRetransmittedFragmentsQueueOneAcknowledgement()
     Station receiver("VK3ABC");
 
     std::string error;
-    std::string body(TEXT_BYTES_PER_FRAGMENT * 2 + 10, 'A'); // three fragments
+    std::string body(perFragment('A') * 2 + 10, 'A'); // three fragments
     CHECK(sender.protocol.sendMessage(body, "VK3ABC", error));
     sender.completeOneTransmission();
     receiver.receiveFrom(sender.transport);
@@ -1747,7 +1751,7 @@ void testRetriesFillInAMessageOverTime()
 {
     Station sender("W1AW");
     std::string error;
-    std::string body(TEXT_BYTES_PER_FRAGMENT * 2 + 10, 'A'); // three fragments
+    std::string body(perFragment('A') * 2 + 10, 'A'); // three fragments
     CHECK(sender.protocol.sendMessage(body, "VK3ABC", error));
     sender.completeOneTransmission();
     const auto& frames = sender.transport.transmissions[0];
@@ -1803,9 +1807,9 @@ void testReservationFollowsTheBurstsStillToCome()
     std::string error;
     Frame resend;
     resend.type = FrameType::Message;
-    resend.destinationCrc = FrameCodec::callsignCrc24("K1ABC");
+    resend.destinationCrc = FrameCodec::callsignHash("K1ABC");
     resend.originCallsign = "DJ2LS";
-    resend.airId = 0x4242;
+    resend.airId = 0x242;
     resend.fragmentIndex = 1;
     resend.fragmentCount = 8;
     resend.burstsFollowing = 1; // fragment 6 comes next, then the keying ends
@@ -1823,9 +1827,9 @@ void testReservationFollowsTheBurstsStillToCome()
     // text that comes after it, allowing for the first fragment being lost.
     Frame ack;
     ack.type = FrameType::MessageAck;
-    ack.destinationCrc = FrameCodec::callsignCrc24("K1ABC");
+    ack.destinationCrc = FrameCodec::callsignHash("K1ABC");
     ack.originCallsign = "DJ2LS";
-    ack.airId = 0x4243;
+    ack.airId = 0x243;
     ack.burstsFollowing = 1;
 
     Station listener("VK3ABC");
@@ -1856,7 +1860,7 @@ void testMissingFragmentsAreAskedForAndResent()
     Station receiver("VK3ABC");
 
     std::string error;
-    std::string body(TEXT_BYTES_PER_FRAGMENT * 2 + 10, 'A'); // three fragments
+    std::string body(perFragment('A') * 2 + 10, 'A'); // three fragments
     CHECK(sender.protocol.sendMessage(body, "VK3ABC", error));
     int64_t id = sender.observer.added[0].id;
     sender.completeOneTransmission();
@@ -1918,7 +1922,7 @@ void testLostLastFragmentStillAsksForTheRest()
 {
     Station sender("W1AW");
     std::string error;
-    std::string body(TEXT_BYTES_PER_FRAGMENT * 2 + 10, 'A');
+    std::string body(perFragment('A') * 2 + 10, 'A');
     CHECK(sender.protocol.sendMessage(body, "VK3ABC", error));
     CHECK(sender.protocol.sendMessage(body, "", error)); // and as a broadcast
     sender.completeOneTransmission();
@@ -1964,7 +1968,7 @@ void testQueuedReportsStayCurrent()
 {
     Station sender("W1AW");
     std::string error;
-    std::string body(TEXT_BYTES_PER_FRAGMENT * 2 + 10, 'D'); // three fragments
+    std::string body(perFragment('D') * 2 + 10, 'D'); // three fragments
     CHECK(sender.protocol.sendMessage(body, "VK3ABC", error));
     sender.completeOneTransmission();
     std::vector<std::vector<uint8_t>> frames = sender.transport.transmissions.back();
@@ -2017,7 +2021,7 @@ void testProgressDoesNotUseUpRetries()
     Station receiver("VK3ABC");
 
     std::string error;
-    std::string body(TEXT_BYTES_PER_FRAGMENT * 4 + 10, 'B'); // five fragments
+    std::string body(perFragment('B') * 4 + 10, 'B'); // five fragments
     CHECK(sender.protocol.sendMessage(body, "VK3ABC", error));
     int64_t id = sender.observer.added[0].id;
     CHECK(5 > MAX_MESSAGE_RETRIES + 1);
@@ -2058,14 +2062,14 @@ void testPartialAckWithNoNewsCountsAsARetry()
 {
     Station sender("W1AW");
     std::string error;
-    std::string body(TEXT_BYTES_PER_FRAGMENT * 2 + 10, 'C'); // three fragments
+    std::string body(perFragment('C') * 2 + 10, 'C'); // three fragments
     CHECK(sender.protocol.sendMessage(body, "VK3ABC", error));
     int64_t id = sender.observer.added[0].id;
     sender.completeOneTransmission();
 
     Frame partial;
     partial.type = FrameType::MessagePartialAck;
-    partial.destinationCrc = FrameCodec::callsignCrc24("W1AW");
+    partial.destinationCrc = FrameCodec::callsignHash("W1AW");
     partial.originCallsign = "VK3ABC";
     partial.airId = sender.observer.added[0].airId;
     partial.payload.assign(1, 0x01);

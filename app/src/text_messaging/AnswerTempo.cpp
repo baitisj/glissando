@@ -17,7 +17,7 @@ void StationTempos::heard(const std::string& callsign, int tempo, uint64_t nowMs
     if (tempo <= 0) return;
     std::string normalized = FrameCodec::normalizeCallsign(callsign);
     if (normalized.empty()) return;
-    byCallsignCrc_[FrameCodec::callsignCrc24(normalized)] = {tempo, nowMs};
+    byCallsignCrc_[FrameCodec::callsignHash(normalized)] = {tempo, nowMs};
 }
 
 bool StationTempos::fresh(const Heard& heard, uint64_t nowMs) const

@@ -1094,11 +1094,12 @@ void MainFrame::applyChatModem_()
     }
 }
 
-double MainFrame::chatMessageAirSeconds(size_t textBytes)
+double MainFrame::chatMessageAirSeconds(const std::string& text)
 {
     // Data2G picks its own mode and says nothing about how long it will take.
     if (data2gChatActive_.load()) return 0.0;
-    return textMessagingModem().glissandoMessageSeconds(textBytes);
+    return textMessagingModem().glissandoMessageSeconds(
+        text, wxGetApp().appConfiguration.reportingConfiguration.reportingCallsign->ToStdString());
 }
 
 int MainFrame::chatTransmitGear()
