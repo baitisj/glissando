@@ -52,7 +52,7 @@
 <text x="546.4" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">f</text>
 <rect x="557.6" y="48" width="22.4" height="26" fill="#5A6477" stroke="#FFFFFF" stroke-width="1"/>
 <text x="568.8" y="65" font-size="11" text-anchor="middle" fill="#FFFFFF">f</text>
-<text x="20" y="118" font-size="12" fill="#1F2633">Ham-table Huffman: 133 bits</text>
+<text x="20" y="118" font-size="12" fill="#1F2633">Ham-table Huffman: 132 bits</text>
 <rect x="20.0" y="128" width="19.6" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
 <text x="29.8" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">7</text>
 <rect x="39.6" y="128" width="22.4" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
@@ -91,18 +91,18 @@
 <text x="284.6" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">␣</text>
 <rect x="288.8" y="128" width="11.2" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
 <text x="294.4" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">i</text>
-<rect x="300.0" y="128" width="14.0" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="307.0" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">s</text>
-<rect x="314.0" y="128" width="8.4" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="318.2" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">␣</text>
-<rect x="322.4" y="128" width="25.2" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="335.0" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">J</text>
-<rect x="347.6" y="128" width="11.2" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="353.2" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">e</text>
-<rect x="358.8" y="128" width="16.8" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="367.2" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">f</text>
-<rect x="375.6" y="128" width="16.8" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
-<text x="384.0" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">f</text>
+<rect x="300.0" y="128" width="11.2" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
+<text x="305.6" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">s</text>
+<rect x="311.2" y="128" width="8.4" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
+<text x="315.4" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">␣</text>
+<rect x="319.6" y="128" width="25.2" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
+<text x="332.2" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">J</text>
+<rect x="344.8" y="128" width="11.2" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
+<text x="350.4" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">e</text>
+<rect x="356.0" y="128" width="16.8" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
+<text x="364.4" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">f</text>
+<rect x="372.8" y="128" width="16.8" height="26" fill="#0E7383" stroke="#FFFFFF" stroke-width="1"/>
+<text x="381.2" y="145" font-size="11" text-anchor="middle" fill="#FFFFFF">f</text>
 <text x="20" y="96" font-size="10" fill="#5A6477">every character the same width</text>
 <text x="20" y="176" font-size="10" fill="#5A6477">space 3 bits, e 4, J 9: width is the cost</text>
 </g>

@@ -7,6 +7,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
+
+#include "HamTextTable.h"
 
 namespace TextMessaging
 {
@@ -40,57 +43,50 @@ namespace HamText
 namespace
 {
 
-// Symbols: printable ASCII 0x20-0x7E, then ESC (a raw byte follows) and
-// EMPTY (the rest of the block is padding).
+// Symbols: printable ASCII 0x20-0x7E, then the phrases, then ESC (a raw
+// byte follows) and EMPTY (the rest of the block is padding). The table of
+// phrases and code lengths is generated: see HamTextTable.h.
 constexpr int PRINTABLE = 95;
-constexpr int ESC = PRINTABLE;
-constexpr int EMPTY = PRINTABLE + 1;
-constexpr int SYMBOLS = PRINTABLE + 2;
-constexpr int MAX_BITS = 14;
-
-// Code lengths, from character counts in typical ham chat (70%) blended
-// with the prose of Glissando's own documents (30%), so ordinary English
-// is not penalised for being missing from a small sample. Built by
-// prototype/ham_table/gen_table.py; changing it is a protocol change, since
-// both ends must hold the same table. Space costs three bits;
-// e, t, a, o, i, n four; capitals and digits seven or eight.
-constexpr std::array<uint8_t, SYMBOLS> LENGTHS = {
-     3,  9, 12, 14, 13, 11, 13,  9, 10, 10, 13, 12,  6,  8,  7, 10, //  !"#$%&'()*+,-./
-     7,  7,  8,  8,  8,  8, 10,  7,  8,  8,  9, 12, 13, 13, 13,  8, // 0123456789:;<=>?
-    13,  7,  8,  7,  9,  8,  9,  7,  8,  8,  9,  9,  8,  8,  8,  8, // @ABCDEFGHIJKLMNO
-     8,  8,  7,  7,  7,  9, 10,  7,  9,  8, 10, 13, 13, 13, 13, 13, // PQRSTUVWXYZ[\]^_
-    13,  4,  7,  6,  5,  4,  6,  6,  5,  4, 12,  7,  5,  6,  4,  4, // `abcdefghijklmno
-     6,  9,  5,  5,  4,  6,  8,  7, 10,  6, 10, 13, 13, 13, 13, 12, // pqrstuvwxyz{|}~ ESC
-    14,                                                             // EMPTY
-};
+constexpr int FIRST_PHRASE = PRINTABLE;
+constexpr int ESC = SYMBOL_COUNT - 2;
+constexpr int EMPTY = SYMBOL_COUNT - 1;
+constexpr int LONGEST_CODE = 16; // bound on SYMBOL_BITS, for the decoder's arrays
 
 // Canonical codes, complemented: the shortest code is all ones and the
 // longest, EMPTY's, all zeros. So zero padding never completes a code until
-// MAX_BITS of it, and then it reads as EMPTY.
+// maxBits of it, and then it reads as EMPTY.
 struct Table
 {
-    std::array<uint16_t, SYMBOLS> code{};
+    std::array<uint16_t, SYMBOL_COUNT> code{};
+    int maxBits = 0;
     // For decoding: per length, the first canonical (uncomplemented) code,
     // how many codes have that length, and where they start in `sorted`.
-    std::array<int, MAX_BITS + 2> first{};
-    std::array<int, MAX_BITS + 2> count{};
-    std::array<int, MAX_BITS + 2> offset{};
-    std::array<int, SYMBOLS> sorted{};
+    std::array<int, LONGEST_CODE + 2> first{};
+    std::array<int, LONGEST_CODE + 2> count{};
+    std::array<int, LONGEST_CODE + 2> offset{};
+    std::array<int, SYMBOL_COUNT> sorted{};
+    // Phrase indices, longest phrase first, and each phrase's length.
+    std::array<int, PHRASE_COUNT> byLength{};
+    std::array<size_t, PHRASE_COUNT> phraseLength{};
 
     Table()
     {
-        for (int s = 0; s < SYMBOLS; s++) count[LENGTHS[(size_t)s]]++;
+        for (int s = 0; s < SYMBOL_COUNT; s++)
+        {
+            count[SYMBOL_BITS[s]]++;
+            maxBits = std::max(maxBits, (int)SYMBOL_BITS[s]);
+        }
         int at = 0;
-        for (int len = 1; len <= MAX_BITS; len++)
+        for (int len = 1; len <= maxBits; len++)
         {
             offset[(size_t)len] = at;
-            for (int s = 0; s < SYMBOLS; s++)
+            for (int s = 0; s < SYMBOL_COUNT; s++)
             {
-                if (LENGTHS[(size_t)s] == len) sorted[(size_t)at++] = s;
+                if (SYMBOL_BITS[s] == len) sorted[(size_t)at++] = s;
             }
         }
         int next = 0;
-        for (int len = 1; len <= MAX_BITS; len++)
+        for (int len = 1; len <= maxBits; len++)
         {
             next = (next + (len > 1 ? count[(size_t)len - 1] : 0)) << (len > 1 ? 1 : 0);
             first[(size_t)len] = next;
@@ -100,6 +96,24 @@ struct Table
                 code[(size_t)s] = (uint16_t)(~(next + i) & ((1 << len) - 1));
             }
         }
+
+        for (int k = 0; k < PHRASE_COUNT; k++)
+        {
+            byLength[(size_t)k] = k;
+            phraseLength[(size_t)k] = std::strlen(PHRASES[k]);
+        }
+        std::stable_sort(byLength.begin(), byLength.end(),
+                         [this](int a, int b) { return phraseLength[(size_t)a] > phraseLength[(size_t)b]; });
+    }
+
+    // The phrase that starts at text[i], longest first, or -1.
+    int phraseAt(const std::string& text, size_t i) const
+    {
+        for (int k : byLength)
+        {
+            if (text.compare(i, phraseLength[(size_t)k], PHRASES[k]) == 0) return k;
+        }
+        return -1;
     }
 };
 
@@ -124,7 +138,25 @@ int blockEnd(int bit, int endBit)
 int characterBits(unsigned char c)
 {
     int s = symbolOf(c);
-    return LENGTHS[(size_t)s] + (s == ESC ? 8 : 0);
+    return SYMBOL_BITS[s] + (s == ESC ? 8 : 0);
+}
+
+std::vector<PhraseSpan> phraseSpans(const std::string& text)
+{
+    const Table& t = table();
+    std::vector<PhraseSpan> spans;
+    for (size_t i = 0; i < text.size();)
+    {
+        int k = t.phraseAt(text, i);
+        if (k < 0)
+        {
+            i++;
+            continue;
+        }
+        spans.push_back({i, t.phraseLength[(size_t)k]});
+        i += t.phraseLength[(size_t)k];
+    }
+    return spans;
 }
 
 size_t encode(const std::string& text, size_t from, uint8_t* frame, int startBit, int endBit)
@@ -132,20 +164,24 @@ size_t encode(const std::string& text, size_t from, uint8_t* frame, int startBit
     const Table& t = table();
     int bit = startBit;
     size_t i = from;
-    for (; i < text.size(); i++)
+    while (i < text.size())
     {
+        // The longest phrase that starts here, else the character.
         unsigned char c = (unsigned char)text[i];
-        int bits = characterBits(c);
+        int phrase = t.phraseAt(text, i);
+        int s = phrase >= 0 ? FIRST_PHRASE + phrase : symbolOf(c);
+        int bits = SYMBOL_BITS[s] + (s == ESC ? 8 : 0);
         // A code that would cross into the next block starts there instead.
+        // A phrase that does not fit is left whole for the next frame.
         if (bit + bits > blockEnd(bit, endBit)) bit = (bit / TEXT_BLOCK_BITS + 1) * TEXT_BLOCK_BITS;
         if (bit + bits > endBit) break;
         if (frame != nullptr)
         {
-            int s = symbolOf(c);
-            putBits(frame, bit, t.code[(size_t)s], LENGTHS[(size_t)s]);
-            if (s == ESC) putBits(frame, bit + LENGTHS[(size_t)s], c, 8);
+            putBits(frame, bit, t.code[(size_t)s], SYMBOL_BITS[s]);
+            if (s == ESC) putBits(frame, bit + SYMBOL_BITS[s], c, 8);
         }
         bit += bits;
+        i += phrase >= 0 ? t.phraseLength[(size_t)phrase] : 1;
     }
     return i - from;
 }
@@ -161,7 +197,7 @@ std::string decode(const uint8_t* frame, int startBit, int endBit)
         int value = 0;
         int symbol = -1;
         int at = bit;
-        for (int len = 1; len <= MAX_BITS && at < end; len++)
+        for (int len = 1; len <= t.maxBits && at < end; len++)
         {
             // Codes are sent complemented.
             value = (value << 1) | (int)(1 - getBits(frame, at++, 1));
@@ -182,6 +218,10 @@ std::string decode(const uint8_t* frame, int startBit, int endBit)
         {
             text.push_back((char)getBits(frame, at, 8));
             at += 8;
+        }
+        else if (symbol >= FIRST_PHRASE)
+        {
+            text += PHRASES[symbol - FIRST_PHRASE];
         }
         else
         {

@@ -272,6 +272,43 @@ void testHamText()
     CHECK(HamText::decode(zeros.data(), 0, frameBits).empty());
 }
 
+// Phrases ride as one symbol each: found longest first, exactly (case and
+// leading space), the same ones the COMMS highlight shows, and cheaper than
+// spelling them out.
+void testHamTextPhrases()
+{
+    std::string text = "CQ CQ CQ de AG7EW, can you hear the beacon? The YOU and the";
+    std::vector<HamText::PhraseSpan> spans = HamText::phraseSpans(text);
+    std::vector<std::string> found;
+    for (const auto& span : spans) found.push_back(text.substr(span.start, span.length));
+    std::vector<std::string> expected = {"CQ CQ", " you", " the", " the"};
+    CHECK(found == expected);
+    CHECK(HamText::phraseSpans("the").empty());
+    CHECK(HamText::phraseSpans(" They").empty());
+
+    const int frameBits = 8 * TEXT_FRAME_BYTES;
+    std::vector<uint8_t> frame((size_t)TEXT_FRAME_BYTES, 0);
+    CHECK(HamText::encode(text, 0, frame.data(), 73, frameBits) == text.size());
+    CHECK(HamText::decode(frame.data(), 73, frameBits) == text);
+
+    // " the" costs less than its four characters.
+    int spelled = 0;
+    for (char c : std::string(" the")) spelled += HamText::characterBits((unsigned char)c);
+    std::vector<uint8_t> one((size_t)TEXT_FRAME_BYTES, 0);
+    CHECK(HamText::encode(" the", 0, one.data(), 0, spelled - 1) == 4);
+
+    // A phrase is never split between frames: it waits whole for the next.
+    bool cutAtPhrase = false;
+    for (size_t n = 1; n < 60; n++)
+    {
+        std::string longText = std::string(n, 'x') + " the end";
+        size_t fits = FrameCodec::textThatFits("AG7EW", longText, 0);
+        CHECK(fits <= n || fits >= n + 4);
+        cutAtPhrase = cutAtPhrase || fits == n;
+    }
+    CHECK(cutAtPhrase);
+}
+
 // Whether the sender acknowledges by itself rides in the type of its pings,
 // messages and broadcasts. Acknowledgements and pongs never carry it.
 void testAutoAckFlag()
@@ -562,6 +599,7 @@ int main()
     testRoundTrip();
     testSizes();
     testHamText();
+    testHamTextPhrases();
     testBurstsFollowing();
     testAutoAckFlag();
     testOldBuildsApart();

@@ -14,8 +14,14 @@
 // frame, which on Glissando are its 9-byte segments. A segment heard after
 // one that was lost still reads, as plain bytes did.
 //
+// A few whole phrases, such as " the" and "CQ CQ", are symbols of their
+// own (HamTextTable.h, generated from prototype/ham_table/phrases.txt).
+// The encoder codes the longest phrase that starts at each character, and
+// phraseSpans() finds the same ones, so the COMMS entry box can show which
+// parts of a message ride as one symbol.
+//
 // Characters outside printable ASCII (accents, UTF-8) go as an escape code
-// and the raw byte. The rarest code of all, fourteen zero bits, means "the
+// and the raw byte. The rarest code of all, all zero bits, means "the
 // rest of this block is empty": it is what zero padding reads as, so the
 // text needs no length field and no end marker.
 //=========================================================================
@@ -26,6 +32,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace TextMessaging
 {
@@ -44,6 +51,15 @@ constexpr int TEXT_BLOCK_BITS = 72;
 
 // How many bits a character costs, escape included.
 int characterBits(unsigned char c);
+
+// Where the encoder will code a phrase as one symbol: each phrase found
+// scanning text from the start, longest match first, as encode() scans it.
+struct PhraseSpan
+{
+    size_t start;
+    size_t length;
+};
+std::vector<PhraseSpan> phraseSpans(const std::string& text);
 
 // Codes text from character `from` into the bits [startBit, endBit) of a
 // zeroed frame, as many characters as fit, keeping each code inside its

@@ -238,6 +238,14 @@ Lesson 8 of [HOW_IT_HEARS.md](HOW_IT_HEARS.md). Glissando 0.3 and older
 cannot read these frames, and the type values keep each build from
 misreading the other's.
 
+A few whole phrases ("CQ CQ", " the", " you") are coded as one symbol each.
+As you type in the COMMS entry box, those phrases get a faint red
+background, so you can see what rides accelerated. The list is
+`prototype/ham_table/phrases.txt`; after editing it, run
+`python3 prototype/ham_table/gen_table.py --write` to regenerate
+`HamTextTable.h`. Builds with different phrase lists cannot read each
+other's text.
+
 The COMMS window's send button shows how long the message being typed will be
 on the air at the tempo it would go out at now, in red once that is longer
 than the transmit time-out (Preferences, Rig control; 180 s when the app's

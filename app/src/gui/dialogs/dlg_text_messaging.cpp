@@ -56,6 +56,7 @@
 #include "gui/glissando/GlissandoConsole.h"
 #include "text_messaging/DeliveryChip.h"
 #include "text_messaging/FrameCodec.h"
+#include "text_messaging/HamText.h"
 #include "text_messaging/HeardStationList.h"
 #include "text_messaging/MessageStore.h"
 #include "text_messaging/TextMessagingSession.h"
@@ -588,7 +589,7 @@ void TextMessagingDialog::buildControls()
     Panel* transmitPlate = new Panel(this, _("Transmitter"));
     wxBoxSizer* entrySizer = new wxBoxSizer(wxHORIZONTAL);
     m_txtEntry = new wxTextCtrl(transmitPlate, ID_ENTRY, wxEmptyString, wxDefaultPosition, wxSize(-1, 70),
-                                wxTE_MULTILINE | wxBORDER_SIMPLE);
+                                wxTE_MULTILINE | wxTE_RICH2 | wxBORDER_SIMPLE);
     darken(m_txtEntry);
     m_txtEntry->SetToolTip(_("Enter sends the message; Shift+Enter starts a new line."));
     entrySizer->Add(m_txtEntry, 1, wxEXPAND | wxRIGHT, 6);
@@ -1472,7 +1473,42 @@ void TextMessagingDialog::OnEntryKeyDown(wxKeyEvent& event)
 void TextMessagingDialog::OnEntryText(wxCommandEvent& event)
 {
     updateAirTime();
+    updatePhraseHighlight();
     event.Skip();
+}
+
+// The phrases the ham text table codes as one symbol (" the", "CQ CQ") get
+// a faint red background as they are typed, found the way the encoder will
+// find them in the text the protocol sends (trimmed).
+void TextMessagingDialog::updatePhraseHighlight()
+{
+    wxString text = m_txtEntry->GetValue();
+
+    // Phrases are plain ASCII, so a character outside it can only stand in
+    // the way of one: replace each with a byte no phrase holds, and byte i
+    // is character i.
+    std::string ascii;
+    ascii.reserve(text.length());
+    for (wxUniChar c : text) ascii.push_back(c.IsAscii() ? (char)c.GetValue() : '\x01');
+    size_t first = ascii.find_first_not_of(" \t\r\n");
+    size_t last = ascii.find_last_not_of(" \t\r\n");
+
+    std::vector<TextMessaging::HamText::PhraseSpan> spans;
+    if (first != std::string::npos)
+        spans = TextMessaging::HamText::phraseSpans(ascii.substr(first, last + 1 - first));
+    if (spans.empty() && !m_phraseHighlighted) return;
+
+    wxTextAttr plain;
+    plain.SetBackgroundColour(Chaotica::Colour::Bakelite);
+    m_txtEntry->SetStyle(0, m_txtEntry->GetLastPosition(), plain);
+    wxTextAttr accelerated;
+    accelerated.SetBackgroundColour(Chaotica::Colour::Accelerated);
+    for (const auto& span : spans)
+    {
+        long from = (long)(first + span.start);
+        m_txtEntry->SetStyle(from, from + (long)span.length, accelerated);
+    }
+    m_phraseHighlighted = !spans.empty();
 }
 
 void TextMessagingDialog::OnTimer(wxTimerEvent&)
