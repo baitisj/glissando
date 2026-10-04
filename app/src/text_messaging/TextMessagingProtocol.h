@@ -198,6 +198,11 @@ public:
     // transmitter to take it, and the operator is told so.
     bool hasQueuedTransmissions() const;
 
+    // Whether somebody else has the channel, as of the last tick: the
+    // receiver hears them, or a station said it has more bursts to come.
+    // Nothing of ours keys meanwhile.
+    bool channelHeld() const;
+
     // Whether the chat message with this id is one of them. A message left
     // queued when the app last closed is in the history but not the queue,
     // and engaging will not send it.
@@ -394,6 +399,7 @@ private:
     // Carrier sense bookkeeping, updated every tick whether or not anything
     // is queued, so a busy spell is measured from when it really began.
     bool channelBusy_;
+    bool channelHeld_ = false;        // channelFrozenLocked() at the last tick
     uint64_t channelBusySinceMs_;
     uint64_t channelReservedUntilMs_; // a fragmented message still on the air
     uint64_t lastTickMs_;

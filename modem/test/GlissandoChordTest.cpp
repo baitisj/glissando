@@ -392,6 +392,56 @@ void testFramesKeepTrackingGoing()
     CHECK(lastSounding < melodyEnds + ChordListener::HOLD_SECONDS + 1.0);
 }
 
+// What it reports holding the channel, for the visi-scope: the chord's two
+// notes at the tuning it was heard at, then the singing scale's eight.
+void testSoundingNotes()
+{
+    Random rng(20);
+    ModemSettings settings;
+    settings.gear = 4;
+    settings.scale = Scale::Diabolus;
+    settings.tuningOffsetHz = 7.0;
+    std::vector<float> frame = modulate({rng.payload()}, settings);
+    std::vector<float> opening = openingChord(settings);
+    std::vector<float> audio(2 * RATE, 0.0f);
+    audio.insert(audio.end(), opening.begin(), opening.end());
+    const size_t framesStart = audio.size();
+    audio.insert(audio.end(), frame.begin(), frame.end());
+    addNoise(audio, -3.0, meanSquare(frame), rng);
+
+    ChordListener listener;
+    CHECK(listener.soundingNotesHz().empty());
+    const int block = RATE / 100;
+    bool sawChord = false;
+    bool sawScale = false;
+    std::vector<double> lastScale;
+    const std::array<double, NOTES> scale = scaleNotes(Scale::Diabolus, 0);
+    for (size_t i = 0; i + block <= audio.size(); i += block)
+    {
+        listener.push(&audio[i], block);
+        std::vector<double> notes = listener.soundingNotesHz();
+        CHECK(notes.empty() != listener.isSounding());
+        if (notes.size() == 2)
+        {
+            sawChord = true;
+            CHECK(std::fabs(notes[0] - (329.63 + 7.0)) < 3.0);
+            CHECK(std::fabs(notes[1] - (587.33 + 7.0)) < 3.0);
+        }
+        else if (notes.size() == NOTES && i > framesStart)
+        {
+            sawScale = true;
+            lastScale = notes;
+        }
+    }
+    CHECK(sawChord);
+    CHECK(sawScale);
+
+    // Scales share notes, so which is singing can take a while to tell; by
+    // the end of a frame it is the one sung.
+    CHECK(lastScale.size() == NOTES);
+    for (size_t n = 0; n < lastScale.size(); n++) CHECK(std::fabs(lastScale[n] - (scale[n] + 7.0)) < 3.0);
+}
+
 } // namespace
 
 int main()
@@ -405,6 +455,7 @@ int main()
     testHearsATransmissionOnABusyBand();
     testTrackingEnds();
     testFramesKeepTrackingGoing();
+    testSoundingNotes();
     if (failures == 0) printf("PASS\n");
     return failures == 0 ? 0 : 1;
 }

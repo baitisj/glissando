@@ -114,6 +114,12 @@ public:
     void setLens(bool on);
     bool lens() const { return lens_; }
 
+    // What carrier sense hears holding the channel, from the next row on:
+    // the notes it counts are painted red, and while anything holds our
+    // transmit queue, notes or none (a station that said it has more
+    // bursts to come), both edges of the row are red.
+    void setCarrierSense(bool held, const std::vector<double>& notesHz);
+
     // Writes a decoded frame on the trace.
     void addHeard(const GlissandoScopeFrame& frame);
 
@@ -196,6 +202,12 @@ private:
     // Our own ships, laid out like history_ and scrolled with it, but kept
     // apart so the waterfall can be drawn over them.
     std::vector<unsigned char> ships_;
+    // Where carrier sense was listening, laid out like history_, and which
+    // rows were drawn while the queue was held.
+    std::vector<unsigned char> sensed_;
+    std::vector<unsigned char> heldRows_;
+    bool held_ = false;
+    std::vector<double> heldHz_;
     int historyWidth_;              // bins per row
     double historyNyquistHz_;
     int historyRows_;

@@ -66,6 +66,8 @@ struct GlissandoTelemetry
     bool swrKnown = false;          // a reading has come back since keying
     double swr = 0.0;
     bool chatUnread = false;        // a message has come in since the COMMS window was last open
+    bool channelHeld = false;       // somebody else has the channel: our transmit queue waits
+    std::vector<double> carrierHz;  // the notes carrier sense hears holding it, if it hears any
 };
 
 // The setup dialogs the console's Preferences button leads to.

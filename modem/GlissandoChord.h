@@ -70,6 +70,11 @@ public:
     // tuning, have sounded within the last HOLD. Safe from any thread.
     bool isSounding() const { return sounding_.load(std::memory_order_acquire); }
 
+    // While sounding, the notes that keep it so, tuning included: the
+    // chord's two until the melody behind it is heard, then every note of
+    // the scale singing. Empty while nothing is sounding. Not thread safe.
+    std::vector<double> soundingNotesHz() const;
+
     struct Heard
     {
         double offsetHz = 0.0;      // tuning offset the chord was heard at
@@ -145,6 +150,7 @@ private:
     Heard last_;
     long long chordsHeard_ = 0;
     bool tracking_ = false;
+    int singing_ = -1;              // the scale the melody is in, -1 until heard
     std::array<double, SCALE_COUNT> scaleEnergy_{}; // each scale's notes since the chord
     std::array<double, SCALE_COUNT> before_{};      // and their usual comb before it
     long long chordStartSample_ = 0;                // of the chord that started tracking, or the last frame heard since

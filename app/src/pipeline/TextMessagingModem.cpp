@@ -609,13 +609,36 @@ void TextMessagingModem::resetReceivers()
 
 bool TextMessagingModem::isReceiving() const
 {
-    if (!open_) return false;
+    return busyReason() != Busy::No;
+}
+
+TextMessagingModem::CarrierSense TextMessagingModem::carrierSense() const
+{
+    CarrierSense sense;
+    Busy why = busyReason();
+    sense.busy = why != Busy::No;
+    if (why == Busy::Chord)
+    {
+        std::lock_guard<std::mutex> lock(chordMutex_);
+        sense.notesHz = chordListener_.soundingNotesHz();
+    }
+    else if (why == Busy::Melody)
+    {
+        std::lock_guard<std::mutex> lock(glissandoMutex_);
+        sense.notesHz = lastHeardNotesHz_;
+    }
+    return sense;
+}
+
+TextMessagingModem::Busy TextMessagingModem::busyReason() const
+{
+    if (!open_) return Busy::No;
 
     if (glissandoOn_.load(std::memory_order_acquire))
     {
         // An opening chord heard, and the notes of its scale still sounding:
         // somebody has the channel, well before any frame of theirs decodes.
-        if (chordListener_.isSounding()) return true;
+        if (chordListener_.isSounding()) return Busy::Chord;
 
         int gear = 0;
         double tailSeconds = 0.0;
@@ -640,18 +663,20 @@ bool TextMessagingModem::isReceiving() const
         long long completed = completedFrameEnd_.load(std::memory_order_acquire);
         if (glissandoRx_->lastFrameEnd() == completed)
         {
-            if (chordStoppedAt_.load(std::memory_order_acquire) >= completed) return false;
-            return glissandoRx_->samplesReceived() < completed + (long long)(tailSeconds * Glissando::SAMPLE_RATE_HZ);
+            if (chordStoppedAt_.load(std::memory_order_acquire) >= completed) return Busy::No;
+            bool tail = glissandoRx_->samplesReceived() < completed + (long long)(tailSeconds * Glissando::SAMPLE_RATE_HZ);
+            return tail ? Busy::Melody : Busy::No;
         }
 
         // A frame of a burst decodes one frame length after the one before
         // it, plus the search; hold the channel across that gap.
         long long hold = (long long)(Glissando::gearInfo(gear).frameSamples() * 1.5);
-        return glissandoRx_->isBusy(hold);
+        return glissandoRx_->isBusy(hold) ? Busy::Melody : Busy::No;
     }
 
     uint64_t last = lastSyncMs_.load(std::memory_order_acquire);
-    return last != 0 && steadyMs() - last < (uint64_t)CHANNEL_BUSY_HOLD_MILLISECONDS;
+    bool synced = last != 0 && steadyMs() - last < (uint64_t)CHANNEL_BUSY_HOLD_MILLISECONDS;
+    return synced ? Busy::Codec2 : Busy::No;
 }
 
 void TextMessagingModem::setGlissando(const GlissandoConfig& config)
@@ -960,6 +985,14 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
             heard.voice = d.voice;
             heard.notesHz = Glissando::scaleNotes(d.scale, d.voice);
             for (double& hz : heard.notesHz) hz += glissando_.tuningOffsetHz + d.frequencyOffsetHz;
+
+            // Both voices of a duet frame start together; a new frame
+            // replaces the notes of the last.
+            uint64_t sinceLast = heard.startMs > lastHeardStartMs_ ? heard.startMs - lastHeardStartMs_
+                                                                   : lastHeardStartMs_ - heard.startMs;
+            if (sinceLast > 500) lastHeardNotesHz_.clear();
+            lastHeardStartMs_ = heard.startMs;
+            lastHeardNotesHz_.insert(lastHeardNotesHz_.end(), heard.notesHz.begin(), heard.notesHz.end());
             heard.melody = Glissando::payloadMelody(d.payload);
             heard.snrDb = d.report.snrDb;
             if (glissandoHeard_.size() >= GLISSANDO_HEARD_LIMIT) glissandoHeard_.erase(glissandoHeard_.begin());
