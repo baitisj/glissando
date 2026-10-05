@@ -57,11 +57,11 @@ constexpr double CAPTION_WIDTH = 0.62;
 // Blank rows of history between one row of ships and the next.
 constexpr int SHIP_GAP_ROWS = 2;
 
-// The smoke: puffs let off under the top flare that drift up out of the
-// screen over PUFF_SECONDS, one every PUFF_EVERY seconds or so at its
+// The smoke: puffs let off all round the screen's bezel that drift out
+// and up over PUFF_SECONDS, one every PUFF_EVERY seconds or so at its
 // thickest, no more than PUFF_ALPHA at their thickest.
 constexpr double PUFF_SECONDS = 7.0;
-constexpr double PUFF_EVERY = 0.9;
+constexpr double PUFF_EVERY = 0.3;
 constexpr double PUFF_ALPHA = 64.0;
 constexpr int SMOKE_FRAME_MS = 100;
 
@@ -225,25 +225,30 @@ void GlissandoScope::tickSmoke()
 
     if (smoke_ > 0.0 && now >= nextPuff_)
     {
-        // Let off between the notes rather than on them, so the smoke never
-        // sits on a note's column; a different gap each time, in no
-        // particular order.
-        std::vector<double> gaps;
-        double span = highHz_ - lowHz_;
-        for (size_t i = 0; i + 1 < notes_.size(); i++)
-        {
-            double mid = (notes_[i] + notes_[i + 1]) / 2.0;
-            if (mid > lowHz_ && mid < highHz_) gaps.push_back((mid - lowHz_) / span);
-        }
-        if (gaps.empty()) gaps = {0.3, 0.5, 0.7};
-
+        // Anywhere round the bezel, in no particular order; along the top,
+        // between the notes rather than on them, so the smoke never sits on
+        // a note's column.
         unsigned n = puffSerial_++;
         unsigned hash = n * 2654435761u;
         Puff puff;
-        puff.x = gaps[(hash >> 16) % gaps.size()];
+        puff.around = (hash >> 12 & 0xffff) / 65536.0;
         puff.born = now;
         puff.strength = smoke_;
         puff.seed = (hash >> 8 & 0xff) / 255.0 * 6.283185307179586;
+
+        wxRect trace = traceRect();
+        double perimeter = 2.0 * (trace.width + trace.height);
+        double along = puff.around * perimeter;
+        if (along < trace.width && notes_.size() > 1)
+        {
+            std::vector<double> gaps;
+            for (size_t i = 0; i + 1 < notes_.size(); i++)
+            {
+                double mid = (notes_[i] + notes_[i + 1]) / 2.0;
+                if (mid > lowHz_ && mid < highHz_) gaps.push_back(hzToX(mid) - trace.x);
+            }
+            if (!gaps.empty()) puff.around = gaps[(hash >> 4) % gaps.size()] / perimeter;
+        }
         puffs_.push_back(puff);
 
         // Thicker smoke comes in quicker puffs, a little irregularly.
@@ -257,13 +262,12 @@ void GlissandoScope::tickSmoke()
 
 void GlissandoScope::paintSmoke(wxGraphicsContext* gc, const wxRect& trace)
 {
-    // Each puff rises from just under the flare to out past the top of the
-    // control, swelling and wandering a little as it goes, there and gone
-    // softly rather than winking in and out.
+    // Each puff seeps out from under the bezel and rises, swelling and
+    // wandering a little as it goes, there and gone softly rather than
+    // winking in and out.
     double now = steadySeconds();
-
-    double from = trace.y + 34.0;
-    double rise = from + 12.0;
+    wxSize size = GetClientSize();
+    double perimeter = 2.0 * (trace.width + trace.height);
     gc->SetPen(*wxTRANSPARENT_PEN);
     for (const Puff& puff : puffs_)
     {
@@ -273,9 +277,32 @@ void GlissandoScope::paintSmoke(wxGraphicsContext* gc, const wxRect& trace)
         double alpha = PUFF_ALPHA * puff.strength * envelope;
         if (alpha < 1.0) continue;
 
-        double x = trace.x + puff.x * trace.width + 7.0 * std::sin(puff.seed + 0.9 * age) +
-                   10.0 * f * std::sin(puff.seed * 3.0);
-        double y = from - rise * f;
+        // Where on the bezel it came from, clockwise from the top left,
+        // and which way is out from there.
+        double along = puff.around * perimeter;
+        double x0, y0, outX = 0.0, outY = 0.0;
+        if (along < trace.width)
+        {
+            x0 = trace.x + along, y0 = trace.y, outY = -1.0;
+        }
+        else if ((along -= trace.width) < trace.height)
+        {
+            x0 = trace.x + trace.width, y0 = trace.y + along, outX = 1.0;
+        }
+        else if ((along -= trace.height) < trace.width)
+        {
+            x0 = trace.x + trace.width - along, y0 = trace.y + trace.height, outY = 1.0;
+        }
+        else
+        {
+            along -= trace.width;
+            x0 = trace.x, y0 = trace.y + trace.height - along, outX = -1.0;
+        }
+
+        // Out a little, then up, as smoke goes.
+        double out = 14.0 * std::sqrt(f);
+        double x = x0 + outX * out + 7.0 * std::sin(puff.seed + 0.9 * age) + 10.0 * f * std::sin(puff.seed * 3.0);
+        double y = y0 + outY * out - 44.0 * f;
         double radius = 10.0 + 26.0 * f;
 
         // A soft blob, and a smaller one trailing beside it for a wisp.
@@ -284,9 +311,12 @@ void GlissandoScope::paintSmoke(wxGraphicsContext* gc, const wxRect& trace)
             double px = part ? x - 0.5 * radius * std::cos(puff.seed + 0.6 * age) : x;
             double py = part ? y + 0.6 * radius : y;
             double pr = part ? 0.6 * radius : radius;
-            // Thinning out before the top of the control would cut it off.
-            double edge = std::clamp(py / pr, 0.0, 1.0);
+
+            // Thinning out before an edge of the control would cut it off.
+            double room = std::min(std::min(px, size.x - px), std::min(py, size.y - py));
+            double edge = std::clamp(room / pr, 0.0, 1.0);
             unsigned char a = (unsigned char)std::lround((part ? alpha * 0.7 : alpha) * edge);
+            if (a == 0) continue;
             gc->SetBrush(gc->CreateRadialGradientBrush(px, py, px, py, pr, wxColour(228, 226, 220, a),
                                                        wxColour(228, 226, 220, 0)));
             gc->DrawEllipse(px - pr, py - pr, 2 * pr, 2 * pr);
@@ -791,8 +821,8 @@ void GlissandoScope::OnPaint(wxPaintEvent&)
         gc->DrawText(names_[i], hzToX(notes_[i]) - tw / 2, trace.y - TOP_MARGIN + 2);
     }
 
-    // Smoke, if the transmitter has been pushed too hard, drifting up over
-    // the note names and out.
+    // Smoke, if the transmitter has been pushed too hard, seeping out all
+    // round the screen.
     if (!puffs_.empty()) paintSmoke(gc.get(), trace);
 
     // Frequency scale along the bottom, every 100 or 200 Hz.

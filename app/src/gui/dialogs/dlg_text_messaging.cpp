@@ -607,13 +607,6 @@ void TextMessagingDialog::buildControls()
     m_txtInhibited->Hide();
     transmitPlate->GetContentSizer()->Add(m_txtInhibited, 0, wxEXPAND | wxBOTTOM, 4);
 
-    // A word to the wise while the visi-scope smokes (see SmokeGauge).
-    m_txtSmoke = new WrappingText(transmitPlate);
-    m_txtSmoke->SetForegroundColour(Colour::Alarm);
-    m_txtSmoke->setText(_("Your rig might be on fire. Please check your finals."));
-    m_txtSmoke->Hide();
-    transmitPlate->GetContentSizer()->Add(m_txtSmoke, 0, wxEXPAND | wxBOTTOM, 4);
-
     // Which external modem chat goes through, and whether it is there.
     m_txtModem = new WrappingText(transmitPlate);
     m_txtModem->SetForegroundColour(Colour::Bone);
@@ -1530,13 +1523,21 @@ void TextMessagingDialog::OnTimer(wxTimerEvent&)
     updateAirTime();
 }
 
+// While the visi-scope smokes (see SmokeGauge), the status line says a word
+// to the wise after Transmitting.
+wxString TextMessagingDialog::transmittingStatus() const
+{
+    return m_smoking ? _("Transmitting. Your rig might be on fire. Please check your finals.")
+                     : _("Transmitting...");
+}
+
 void TextMessagingDialog::updateSmokeWarning()
 {
     MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
     bool smoking = frame != nullptr && frame->smokeLevel() > 0.0;
-    if (smoking == m_txtSmoke->IsShown()) return;
-    m_txtSmoke->Show(smoking);
-    Layout();
+    if (smoking == m_smoking) return;
+    m_smoking = smoking;
+    if (m_transmitting && m_statusKind == StatusKind::Activity) setStatus(transmittingStatus(), StatusKind::Activity);
 }
 
 void TextMessagingDialog::OnBlinkTimer(wxTimerEvent&)
@@ -1782,7 +1783,7 @@ void TextMessagingDialog::updateTransmitControls()
         m_transmitting = transmitting;
         if (transmitting)
         {
-            setStatus(_("Transmitting..."), StatusKind::Activity);
+            setStatus(transmittingStatus(), StatusKind::Activity);
         }
         else if (m_statusKind == StatusKind::Activity)
         {
