@@ -57,12 +57,14 @@ constexpr double CAPTION_WIDTH = 0.62;
 // Blank rows of history between one row of ships and the next.
 constexpr int SHIP_GAP_ROWS = 2;
 
-// The smoke: puffs let off all round the screen's bezel that drift out
-// and up over PUFF_SECONDS, one every PUFF_EVERY seconds or so at its
-// thickest, no more than PUFF_ALPHA at their thickest.
-constexpr double PUFF_SECONDS = 7.0;
-constexpr double PUFF_EVERY = 0.3;
-constexpr double PUFF_ALPHA = 64.0;
+// The smoke: FIRES hot spots round the bezel, more of them burning as the
+// smoke thickens, each letting off a puff every PUFF_EVERY seconds that
+// lives PUFF_SECONDS. A plume is many faint puffs over one another, so each
+// is no more than PUFF_ALPHA.
+constexpr int FIRES = 7;
+constexpr double PUFF_SECONDS = 6.5;
+constexpr double PUFF_EVERY = 0.12;
+constexpr double PUFF_ALPHA = 34.0;
 constexpr int SMOKE_FRAME_MS = 100;
 
 // Frames queued to be sent but still not played this long after we last
@@ -211,11 +213,7 @@ void GlissandoScope::setActivity(bool receiving, bool transmitting)
 void GlissandoScope::setSmoke(double level)
 {
     smoke_ = std::clamp(level, 0.0, 1.0);
-    if (smoke_ > 0.0 && !smokeTimer_.IsRunning())
-    {
-        nextPuff_ = steadySeconds();
-        smokeTimer_.Start(SMOKE_FRAME_MS);
-    }
+    if (smoke_ > 0.0 && !smokeTimer_.IsRunning()) smokeTimer_.Start(SMOKE_FRAME_MS);
 }
 
 void GlissandoScope::tickSmoke()
@@ -223,63 +221,84 @@ void GlissandoScope::tickSmoke()
     double now = steadySeconds();
     while (!puffs_.empty() && now - puffs_.front().born > PUFF_SECONDS) puffs_.pop_front();
 
-    if (smoke_ > 0.0 && now >= nextPuff_)
+    // Where the fires are, picked afresh each time the smoke starts: spread
+    // round the bezel in no particular order, and along the top between the
+    // notes rather than on them, so no plume sits on a note's column.
+    wxRect trace = traceRect();
+    double perimeter = 2.0 * (trace.width + trace.height);
+    if (fires_.empty() && smoke_ > 0.0)
     {
-        // Anywhere round the bezel, in no particular order; along the top,
-        // between the notes rather than on them, so the smoke never sits on
-        // a note's column.
-        unsigned n = puffSerial_++;
-        unsigned hash = n * 2654435761u;
+        std::vector<double> gaps;
+        for (size_t i = 0; i + 1 < notes_.size(); i++)
+        {
+            double mid = (notes_[i] + notes_[i + 1]) / 2.0;
+            if (mid > lowHz_ && mid < highHz_) gaps.push_back((hzToX(mid) - trace.x) / perimeter);
+        }
+        unsigned start = (unsigned)(now * 1000.0);
+        for (int i = 0; i < FIRES; i++)
+        {
+            unsigned hash = (start + (unsigned)i) * 2654435761u;
+            Fire fire;
+            fire.around = (i + 0.2 + 0.6 * ((hash >> 12 & 0xffff) / 65536.0)) / FIRES;
+            if (fire.around * perimeter < trace.width && !gaps.empty())
+                fire.around = gaps[(hash >> 4) % gaps.size()];
+            fire.phase = (hash >> 8 & 0xff) / 255.0 * 6.283185307179586;
+            fire.nextPuff = now;
+            fires_.push_back(fire);
+        }
+        // The first to catch is the first in the list; shuffle so it isn't
+        // always the top left.
+        std::rotate(fires_.begin(), fires_.begin() + start % FIRES, fires_.end());
+    }
+
+    // More fires burn as the smoke thickens: one at the faintest, all of
+    // them at its thickest.
+    int burning = smoke_ > 0.0 ? 1 + (int)std::floor(smoke_ * (FIRES - 1) + 0.5) : 0;
+    for (int i = 0; i < burning && i < (int)fires_.size(); i++)
+    {
+        Fire& fire = fires_[i];
+        if (now < fire.nextPuff) continue;
+        unsigned hash = puffSerial_++ * 2654435761u;
         Puff puff;
-        puff.around = (hash >> 12 & 0xffff) / 65536.0;
+        puff.fire = (size_t)i;
         puff.born = now;
         puff.strength = smoke_;
         puff.seed = (hash >> 8 & 0xff) / 255.0 * 6.283185307179586;
-
-        wxRect trace = traceRect();
-        double perimeter = 2.0 * (trace.width + trace.height);
-        double along = puff.around * perimeter;
-        if (along < trace.width && notes_.size() > 1)
-        {
-            std::vector<double> gaps;
-            for (size_t i = 0; i + 1 < notes_.size(); i++)
-            {
-                double mid = (notes_[i] + notes_[i + 1]) / 2.0;
-                if (mid > lowHz_ && mid < highHz_) gaps.push_back(hzToX(mid) - trace.x);
-            }
-            if (!gaps.empty()) puff.around = gaps[(hash >> 4) % gaps.size()] / perimeter;
-        }
         puffs_.push_back(puff);
-
-        // Thicker smoke comes in quicker puffs, a little irregularly.
-        double jitter = 0.75 + 0.5 * ((hash >> 4 & 0xff) / 255.0);
-        nextPuff_ = now + PUFF_EVERY * jitter / (0.4 + 0.6 * smoke_);
+        fire.nextPuff = now + PUFF_EVERY * (0.7 + 0.6 * ((hash >> 16 & 0xff) / 255.0));
     }
 
-    if (smoke_ <= 0.0 && puffs_.empty()) smokeTimer_.Stop();
+    if (smoke_ <= 0.0 && puffs_.empty())
+    {
+        fires_.clear();
+        smokeTimer_.Stop();
+    }
     Refresh(false);
 }
 
 void GlissandoScope::paintSmoke(wxGraphicsContext* gc, const wxRect& trace)
 {
-    // Each puff seeps out from under the bezel and rises, swelling and
-    // wandering a little as it goes, there and gone softly rather than
-    // winking in and out.
+    // Each puff is pushed out from under the bezel, then rises, faster as
+    // it goes, swelling and paling as it thins. Its sideways drift depends
+    // on its height and on when it was let off, so a plume winds like a
+    // snake and the whole of it sways slowly.
     double now = steadySeconds();
     wxSize size = GetClientSize();
     double perimeter = 2.0 * (trace.width + trace.height);
     gc->SetPen(*wxTRANSPARENT_PEN);
     for (const Puff& puff : puffs_)
     {
+        if (puff.fire >= fires_.size()) continue;
+        const Fire& fire = fires_[puff.fire];
         double age = now - puff.born;
         double f = std::clamp(age / PUFF_SECONDS, 0.0, 1.0);
-        double envelope = std::min(1.0, f / 0.2) * std::pow(1.0 - f, 1.3);
-        double alpha = PUFF_ALPHA * puff.strength * envelope;
-        if (alpha < 1.0) continue;
+        double envelope = std::min(1.0, age / 0.5) * std::pow(1.0 - f, 1.6);
+        double alpha = PUFF_ALPHA * (0.35 + 0.65 * puff.strength) * envelope;
+        if (alpha < 0.5) continue;
 
-        // Where on the bezel it came from, clockwise from the top left,
-        // and which way is out from there.
-        double along = puff.around * perimeter;
+        // Where on the bezel its fire is, clockwise from the top left, and
+        // which way is out from there.
+        double along = fire.around * perimeter;
         double x0, y0, outX = 0.0, outY = 0.0;
         if (along < trace.width)
         {
@@ -299,28 +318,49 @@ void GlissandoScope::paintSmoke(wxGraphicsContext* gc, const wxRect& trace)
             x0 = trace.x, y0 = trace.y + trace.height - along, outX = -1.0;
         }
 
-        // Out a little, then up, as smoke goes.
-        double out = 14.0 * std::sqrt(f);
-        double x = x0 + outX * out + 7.0 * std::sin(puff.seed + 0.9 * age) + 10.0 * f * std::sin(puff.seed * 3.0);
-        double y = y0 + outY * out - 44.0 * f;
-        double radius = 10.0 + 26.0 * f;
+        double out = 16.0 * (1.0 - std::exp(-age / 0.7));
+        double rise = 7.0 * age + 1.6 * age * age;
+        double born = puff.born - std::floor(puff.born / 1000.0) * 1000.0;
+        double sway = (4.0 + 7.0 * age) * std::sin(0.11 * rise + 0.9 * born + fire.phase) +
+                      (2.0 + 3.0 * age) * std::sin(0.27 * rise - 1.7 * born + 2.0 * fire.phase) +
+                      1.5 * std::sin(puff.seed + 1.3 * age);
+        double x = x0 + outX * out + sway + 4.0 * age * std::sin(fire.phase);
+        double y = y0 + outY * out - rise;
+        double radius = 4.0 + 6.5 * age;
 
-        // A soft blob, and a smaller one trailing beside it for a wisp.
-        for (int part = 0; part < 2; part++)
-        {
-            double px = part ? x - 0.5 * radius * std::cos(puff.seed + 0.6 * age) : x;
-            double py = part ? y + 0.6 * radius : y;
-            double pr = part ? 0.6 * radius : radius;
+        // Dark and close by the fire, paler as it spreads.
+        double pale = std::min(1.0, age / 3.0);
+        unsigned char r = (unsigned char)std::lround(120 + 95 * pale);
+        unsigned char g = (unsigned char)std::lround(112 + 99 * pale);
+        unsigned char b = (unsigned char)std::lround(104 + 102 * pale);
 
-            // Thinning out before an edge of the control would cut it off.
-            double room = std::min(std::min(px, size.x - px), std::min(py, size.y - py));
-            double edge = std::clamp(room / pr, 0.0, 1.0);
-            unsigned char a = (unsigned char)std::lround((part ? alpha * 0.7 : alpha) * edge);
-            if (a == 0) continue;
-            gc->SetBrush(gc->CreateRadialGradientBrush(px, py, px, py, pr, wxColour(228, 226, 220, a),
-                                                       wxColour(228, 226, 220, 0)));
-            gc->DrawEllipse(px - pr, py - pr, 2 * pr, 2 * pr);
-        }
+        // Thinning out before an edge of the control would cut it off.
+        double room = std::min(std::min(x, size.x - x), std::min(y, size.y - y));
+        double edge = std::clamp(room / radius, 0.0, 1.0);
+        unsigned char a = (unsigned char)std::lround(alpha * edge);
+        if (a == 0) continue;
+        gc->SetBrush(gc->CreateRadialGradientBrush(x, y, x, y, radius, wxColour(r, g, b, a), wxColour(r, g, b, 0)));
+        gc->DrawEllipse(x - radius, y - radius, 2 * radius, 2 * radius);
+    }
+
+    // And where each fire burns, a faint warm glow along the bezel, swelling
+    // and easing slowly.
+    int burning = smoke_ > 0.0 ? 1 + (int)std::floor(smoke_ * (FIRES - 1) + 0.5) : 0;
+    for (int i = 0; i < burning && i < (int)fires_.size(); i++)
+    {
+        const Fire& fire = fires_[i];
+        double along = fire.around * perimeter;
+        double x, y;
+        if (along < trace.width) x = trace.x + along, y = trace.y - 4;
+        else if ((along -= trace.width) < trace.height) x = trace.x + trace.width + 4, y = trace.y + along;
+        else if ((along -= trace.height) < trace.width) x = trace.x + trace.width - along, y = trace.y + trace.height + 4;
+        else x = trace.x - 4, y = trace.y + trace.height - (along - trace.width);
+        double glow = 0.7 + 0.3 * std::sin(0.8 * now + 3.0 * fire.phase);
+        unsigned char a = (unsigned char)std::lround(34.0 * smoke_ * glow);
+        double radius = 14.0;
+        gc->SetBrush(gc->CreateRadialGradientBrush(x, y, x, y, radius, wxColour(255, 140, 60, a),
+                                                   wxColour(255, 90, 30, 0)));
+        gc->DrawEllipse(x - radius, y - radius, 2 * radius, 2 * radius);
     }
 }
 
