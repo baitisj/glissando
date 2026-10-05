@@ -65,6 +65,10 @@ struct GlissandoTelemetry
     bool showSwr = false;           // the meter reads the radio's SWR rather than the signal
     bool swrKnown = false;          // a reading has come back since keying
     double swr = 0.0;
+    double driveDb = -12.0;         // the transmit level, as the DRIVE knob shows it
+    bool driveAuto = false;         // DRIVE pushed in: the radio's ALC turns it down
+    bool driveAutoDeaf = false;     // pushed in, but the radio connected can't report ALC
+    bool alcOver = false;           // the ALC read over target just now
     bool chatUnread = false;        // a message has come in since the COMMS window was last open
     bool channelHeld = false;       // somebody else has the channel: our transmit queue waits
     std::vector<double> carrierHz;  // the notes carrier sense hears holding it, if it hears any
@@ -103,6 +107,11 @@ public:
     // message is dropped, not retried. The audio keeps running.
     virtual void glissandoAbortTransmit() = 0;
     virtual void glissandoSetRigFrequency(double hz) = 0;
+
+    // The DRIVE knob: the transmit level in dB (-30 to -12), and whether
+    // it is pushed in, letting the radio's ALC turn it down.
+    virtual void glissandoSetDrive(double db) = 0;
+    virtual void glissandoSetDriveAuto(bool automatic) = 0;
 
     // The operator's list of favourite dial frequencies, in Hz.
     virtual std::vector<double> glissandoFrequencyPresets() = 0;
@@ -156,6 +165,7 @@ private:
     void enterRigFrequency();
     void showFrequencyPresets();
     void updateBandWidthWarning(const GlissandoTelemetry& t);
+    void updateDrive(const GlissandoTelemetry& t);
     void showPreferences();
 
     void OnTimer(wxTimerEvent& event);
@@ -163,13 +173,15 @@ private:
 
     IGlissandoHost* host_;
     GlissandoConsoleSettings settings_;
-    int sendingGear_;               // the tempo transmitting now, from telemetry
+    int sendingGear_;
+    int minimumWidth_ = 0;          // as narrow as the console can be               // the tempo transmitting now, from telemetry
     wxTimer timer_;
 
     wxPanel* marquee_;
     GlissandoScope* scope_;
     Chaotica::Dial* tuningDial_;
     Chaotica::Dial* scanRateDial_;
+    Chaotica::Dial* driveDial_;
     Chaotica::Readout* rigReadout_;
     Chaotica::Button* presetsButton_;
     Chaotica::Button* rigButton_;
@@ -181,6 +193,7 @@ private:
     Chaotica::Readout* frameReadout_;
     std::vector<Chaotica::Button*> gearButtons_;
     std::vector<Chaotica::Button*> scaleButtons_;
+    std::vector<wxWindow*> critters_;    // the tortoise over Adagio, the hare over Duet
     Chaotica::Button* autoButton_;
     Chaotica::Button* listenAllButton_;
     Chaotica::Button* wideButton_;
@@ -189,6 +202,7 @@ private:
     bool engageAborts_ = false;     // the button reads Abort
     bool meterShowsSwr_ = false;    // the telemetry meter has its SWR face on
     wxString bandWidthTip_;         // why the dial's caption warns, empty while it doesn't
+    wxString driveTip_;             // the DRIVE knob's tooltip as last set
     Chaotica::Button* chatButton_;
     Chaotica::Button* snoopButton_;
     Chaotica::Button* preferencesButton_;

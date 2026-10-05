@@ -564,6 +564,9 @@ void MainFrame::loadConfiguration_()
     scaleFactor = exp(dbLoss/20.0 * log(10.0));
     g_tuneLevelScale.store(scaleFactor, std::memory_order_release);
 
+    // Brings a saved level above the top of the console's DRIVE knob down to it.
+    applyTxLevel();
+
     // Adjust frequency entry labels
     wxListItem colInfo;
     m_lastReportedCallsignListView->GetColumn(1, colInfo);
@@ -1388,7 +1391,7 @@ void MainFrame::OnTimer(wxTimerEvent &evt)
             log_debug("update freq and mode ...."); 
             wxGetApp().rigFrequencyController->requestCurrentFrequencyMode();
         }
-        pollRigSwr_();
+        pollRigMeters_();
      }
       else if (timerId == ID_TIMER_DEMOD_IN)
       {

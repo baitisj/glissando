@@ -71,6 +71,9 @@
 #define TX_ATTENUATION_DEFAULT TX_ATTENUATION_MAX
 #define TX_ATTENUATION_SMALL_STEP (2) /* 0.2 dB */
 #define TX_ATTENUATION_LARGE_STEP (10) /* 1 dB */
+// The console's DRIVE knob tops out here: full scale from the sound card
+// drives most radios deep into ALC.
+#define TX_DRIVE_TOP (-120) /* -12 dB */
 
 // Real-time memory block size
 #define CODEC2_REAL_TIME_MEMORY_SIZE (512*1024)

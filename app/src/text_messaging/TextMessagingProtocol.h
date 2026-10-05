@@ -216,7 +216,7 @@ public:
     std::vector<QueuedWait> queuedWaits() const;
 
     // Sends a chat message waiting for its first turn on the air at the
-    // given Glissando tempo, whatever the console or Auto shift picks, or
+    // given Glissando tempo, whatever the console or Auto picks, or
     // with 0 at whichever tempo is set when it keys. Its retries keep it.
     // False if the message is not waiting for its first turn.
     bool setMessageTempo(int64_t messageId, int gear);

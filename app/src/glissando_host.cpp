@@ -29,6 +29,7 @@
 extern paCallBackData* g_rxUserdata;
 
 extern std::atomic<bool> g_tx;
+extern int g_txLevel;
 extern std::atomic<bool> endingTx;
 extern float g_avmag_waterfall[MODEM_STATS_NSPEC];
 
@@ -46,6 +47,9 @@ constexpr double SWR_ABORT_ABOVE = 3.0;
 // After high SWR aborts, the meter keeps showing it this long, so the
 // operator sees why the radio let go.
 constexpr uint64_t SWR_ABORT_HOLD_MS = 5000;
+
+// The DRIVE knob's ring shows red this long after the ALC read over target.
+constexpr uint64_t ALC_OVER_SHOW_MS = 1500;
 
 // Set while MainFrame closes the console on its way out, so the console
 // closing does not in turn try to close MainFrame.
@@ -263,31 +267,72 @@ GlissandoTelemetry MainFrame::glissandoTelemetry()
     telemetry.rigFrequencyKnown = frequency > 0;
     telemetry.rigFrequencyHz = (double)frequency;
 
-    auto swrMeter = std::dynamic_pointer_cast<IRigSwrMeter>(wxGetApp().rigFrequencyController);
+    auto& rig = wxGetApp().appConfiguration.rigControlConfiguration;
+    auto meters = std::dynamic_pointer_cast<IRigTransmitMeters>(wxGetApp().rigFrequencyController);
     bool holding = rigSwrAbortAtMs_ != 0 && steadyNowMs() - rigSwrAbortAtMs_ < SWR_ABORT_HOLD_MS;
-    telemetry.showSwr = wxGetApp().appConfiguration.rigControlConfiguration.swrMeter && swrMeter &&
-                        swrMeter->canReadSwr() && (telemetry.transmitting || holding);
+    telemetry.showSwr = rig.swrMeter && meters && meters->canReadSwr() && (telemetry.transmitting || holding);
     telemetry.swrKnown = !std::isnan(rigSwr_);
     telemetry.swr = telemetry.swrKnown ? rigSwr_ : 0.0;
+
+    telemetry.driveDb = g_txLevel / 10.0;
+    telemetry.driveAuto = rig.driveAuto;
+    // Until a radio is connected there is no telling; once one is, it has
+    // to say it reports ALC.
+    bool connected = wxGetApp().rigFrequencyController && wxGetApp().rigFrequencyController->isConnected();
+    telemetry.driveAutoDeaf = connected && !(meters && meters->canReadAlc());
+    telemetry.alcOver = alcOverAtMs_ != 0 && steadyNowMs() - alcOverAtMs_ < ALC_OVER_SHOW_MS;
     return telemetry;
 }
 
-void MainFrame::pollRigSwr_()
+void MainFrame::pollRigMeters_()
 {
     // Called once a second while audio runs. Only while transmitting: the
-    // reading means nothing otherwise, and a new keying starts with a blank
+    // readings mean nothing otherwise, and a new keying starts with a blank
     // meter rather than the last one's reading.
     bool transmitting = g_tx.load(std::memory_order_acquire);
     if (!transmitting)
     {
         bool holding = rigSwrAbortAtMs_ != 0 && steadyNowMs() - rigSwrAbortAtMs_ < SWR_ABORT_HOLD_MS;
         if (!holding) rigSwr_ = NAN;
+        driveServo_.restart();
         return;
     }
 
-    auto swrMeter = std::dynamic_pointer_cast<IRigSwrMeter>(wxGetApp().rigFrequencyController);
-    if (!wxGetApp().appConfiguration.rigControlConfiguration.swrMeter || !swrMeter) return;
-    swrMeter->requestSwr();
+    auto& rig = wxGetApp().appConfiguration.rigControlConfiguration;
+    auto meters = std::dynamic_pointer_cast<IRigTransmitMeters>(wxGetApp().rigFrequencyController);
+    if (meters) meters->requestMeters(rig.swrMeter, rig.driveAuto);
+}
+
+void MainFrame::onRigAlcReading_(double alc)
+{
+    // A reading asked for just before the radio let go can land after it.
+    auto& rig = wxGetApp().appConfiguration.rigControlConfiguration;
+    if (!g_tx.load(std::memory_order_acquire) || !rig.driveAuto) return;
+
+    driveServo_.setTarget(rig.alcTarget);
+    if (alc > rig.alcTarget) alcOverAtMs_ = steadyNowMs();
+    int level = driveServo_.reading(alc, g_txLevel);
+    if (level == g_txLevel) return;
+
+    log_info("ALC %.2f is over %.2f: DRIVE turned down to %.1f dB", alc, (double)rig.alcTarget, level / 10.0);
+    g_txLevel = level;
+    applyTxLevel();
+}
+
+void MainFrame::glissandoSetDrive(double db)
+{
+    g_txLevel = (int)std::lround(db * 10.0);
+    applyTxLevel();
+}
+
+void MainFrame::glissandoSetDriveAuto(bool automatic)
+{
+    // Pushed in, the knob holds where it is as the most it will ever send.
+    auto& rig = wxGetApp().appConfiguration.rigControlConfiguration;
+    if (automatic) rig.driveCeiling = g_txLevel;
+    rig.driveAuto = automatic;
+    driveServo_.restart();
+    applyTxLevel();
 }
 
 void MainFrame::onRigSwrReading_(double swr)

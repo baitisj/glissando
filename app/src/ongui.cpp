@@ -483,8 +483,11 @@ bool MainFrame::OpenHamlibRig() {
             onFrequencyModeChange_(ptr, freq, mode);
         };
 
-        tmp->onSwrReading += [this](IRigSwrMeter*, double swr) {
+        tmp->onSwrReading += [this](IRigTransmitMeters*, double swr) {
             CallAfter([this, swr]() { onRigSwrReading_(swr); });
+        };
+        tmp->onAlcReading += [this](IRigTransmitMeters*, double alc) {
+            CallAfter([this, alc]() { onRigAlcReading_(alc); });
         };
         wxGetApp().rigFrequencyController->connect();
         return true;
@@ -694,8 +697,12 @@ void MainFrame::applyTxLevel()
     bool isTuning = m_btnTogTune->GetValue();
     wxString fmtString;
 
+    // The console's DRIVE knob runs from -30 dB to -12 dB; pushed in, it
+    // never goes above where it was when it was pushed in.
+    auto& rig = wxGetApp().appConfiguration.rigControlConfiguration;
+    int txTop = rig.driveAuto ? std::min<int>(TX_DRIVE_TOP, rig.driveCeiling) : TX_DRIVE_TOP;
     if (g_txLevel < TX_ATTENUATION_MIN) g_txLevel = TX_ATTENUATION_MIN;
-    if (g_txLevel > TX_ATTENUATION_MAX) g_txLevel = TX_ATTENUATION_MAX;
+    if (g_txLevel > txTop) g_txLevel = txTop;
     g_txLevelScale.store(exp(g_txLevel / 10.0 / 20.0 * log(10.0)), std::memory_order_release);
 
     if (g_tuneLevel < TX_ATTENUATION_MIN) g_tuneLevel = TX_ATTENUATION_MIN;

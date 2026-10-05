@@ -19,6 +19,7 @@
 //
 //==========================================================================
 
+#include "../defines.h"
 #include "RigControlConfiguration.h"
 
 RigControlConfiguration::RigControlConfiguration()
@@ -55,6 +56,9 @@ RigControlConfiguration::RigControlConfiguration()
     , totTimerSecs("/Rig/TotTimerSecs", 180)
     , swrMeter("/Rig/SwrMeter", true)
     , swrAutoAbort("/Rig/SwrAutoAbort", false)
+    , driveAuto("/Rig/DriveAuto", false)
+    , driveCeiling("/Rig/DriveCeiling", TX_DRIVE_TOP)
+    , alcTarget("/Rig/AlcTarget", 0.5f)
 {
     // empty
 }
@@ -101,6 +105,9 @@ void RigControlConfiguration::load(wxConfigBase* config)
     load_(config, totTimerSecs);
     load_(config, swrMeter);
     load_(config, swrAutoAbort);
+    load_(config, driveAuto);
+    load_(config, driveCeiling);
+    load_(config, alcTarget);
 }
 
 void RigControlConfiguration::save(wxConfigBase* config)
@@ -139,4 +146,7 @@ void RigControlConfiguration::save(wxConfigBase* config)
     save_(config, totTimerSecs);
     save_(config, swrMeter);
     save_(config, swrAutoAbort);
+    save_(config, driveAuto);
+    save_(config, driveCeiling);
+    save_(config, alcTarget);
 }

@@ -70,6 +70,14 @@ public:
     ConfigurationDataElement<bool> swrMeter;
     ConfigurationDataElement<bool> swrAutoAbort;
 
+    // The console's DRIVE knob pushed in: the radio's ALC, read while
+    // transmitting, turns the transmit level down to keep the ALC at or
+    // under alcTarget, never louder than driveCeiling (tenths of a dB, the
+    // level when it was pushed in).
+    ConfigurationDataElement<bool> driveAuto;
+    ConfigurationDataElement<int> driveCeiling;
+    ConfigurationDataElement<float> alcTarget;
+
     virtual void load(wxConfigBase* config) override;
     virtual void save(wxConfigBase* config) override;
 };

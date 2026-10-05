@@ -128,6 +128,17 @@ public:
     // hundredth of the range, or one step with shift.
     void SetWheelSteps(double plain, double shift, double control);
 
+    // A push-pull knob: a click that doesn't turn it pushes it in or pops it
+    // out, and sends wxEVT_TOGGLEBUTTON (GetInt() 1 for in). Double clicks
+    // are two pushes rather than a return to the default.
+    void SetPushable(bool pushable) { pushable_ = pushable; }
+    bool IsPushed() const { return pushed_; }
+    void SetPushed(bool pushed);
+    // Pushed in, the ring around the knob is lit; dim says it is pushed in
+    // but has nothing to go on, alarm lights it red.
+    void SetRing(bool dim, bool alarm);
+    bool IsDragging() const { return dragging_; }
+
 protected:
     virtual void paint(wxGraphicsContext* gc, const wxSize& size) override;
 
@@ -153,6 +164,11 @@ private:
     bool dragging_;
     int dragY_;
     double dragValue_;
+    bool pushable_ = false;
+    bool pushed_ = false;
+    bool ringDim_ = false;
+    bool ringAlarm_ = false;
+    bool turned_ = false;           // the knob turned since the button went down
 };
 
 // A round lamp with a caption beside it.

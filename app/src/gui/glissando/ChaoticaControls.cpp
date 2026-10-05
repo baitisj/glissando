@@ -349,18 +349,43 @@ void Dial::change(double value)
     ProcessWindowEvent(changed);
 }
 
+void Dial::SetPushed(bool pushed)
+{
+    if (pushed_ == pushed) return;
+    pushed_ = pushed;
+    Refresh();
+}
+
+void Dial::SetRing(bool dim, bool alarm)
+{
+    if (ringDim_ == dim && ringAlarm_ == alarm) return;
+    ringDim_ = dim;
+    ringAlarm_ = alarm;
+    Refresh();
+}
+
 void Dial::OnMouseDown(wxMouseEvent& event)
 {
     dragging_ = true;
+    turned_ = false;
     dragY_ = event.GetY();
     dragValue_ = value_;
-    CaptureMouse();
+    if (!HasCapture()) CaptureMouse();
 }
 
-void Dial::OnMouseUp(wxMouseEvent&)
+void Dial::OnMouseUp(wxMouseEvent& event)
 {
+    bool clicked = dragging_ && !turned_ && std::abs(event.GetY() - dragY_) < 3;
     dragging_ = false;
     if (HasCapture()) ReleaseMouse();
+    if (!pushable_ || !clicked) return;
+
+    pushed_ = !pushed_;
+    Refresh();
+    wxCommandEvent toggled(wxEVT_TOGGLEBUTTON, GetId());
+    toggled.SetEventObject(this);
+    toggled.SetInt(pushed_ ? 1 : 0);
+    ProcessWindowEvent(toggled);
 }
 
 void Dial::OnMouseMove(wxMouseEvent& event)
@@ -373,7 +398,10 @@ void Dial::OnMouseMove(wxMouseEvent& event)
     // Catch on the default for a few pixels either side, so it can be found
     // again by hand.
     if (std::fabs(value - defaultValue_) <= 4.0 * perPixel) value = defaultValue_;
-    change(value);
+    // A push-pull knob has to move a few pixels before it turns, so a click
+    // that wobbles is still a push.
+    if (!pushable_ || std::abs(event.GetY() - dragY_) >= 3) turned_ = true;
+    if (turned_) change(value);
 }
 
 void Dial::OnMouseWheel(wxMouseEvent& event)
@@ -397,8 +425,14 @@ void Dial::OnMouseWheel(wxMouseEvent& event)
     change(value_ + clicks * stepBy);
 }
 
-void Dial::OnDoubleClick(wxMouseEvent&)
+void Dial::OnDoubleClick(wxMouseEvent& event)
 {
+    // A push-pull knob takes the second click of a double click as a click.
+    if (pushable_)
+    {
+        OnMouseDown(event);
+        return;
+    }
     change(defaultValue_);
 }
 
@@ -425,8 +459,17 @@ void Dial::paint(wxGraphicsContext* gc, const wxSize& size)
                        cx + radius * 0.96 * std::cos(a), cy + radius * 0.96 * std::sin(a));
     }
 
-    // The knob: a fluted chrome skirt and a dark cap.
-    double knob = radius * 0.72;
+    // The knob: a fluted chrome skirt and a dark cap. Pushed in, it sits a
+    // little lower in the panel, with a lit ring around its skirt.
+    double knob = radius * (pushed_ ? 0.66 : 0.72);
+    if (pushed_)
+    {
+        wxColour ring = ringAlarm_ ? Colour::Alarm : ringDim_ ? Colour::Dim : Colour::Glow;
+        if (!ringDim_) drawGlow(gc, cx, cy, radius * 0.82, ringAlarm_ ? 0.6 : 0.45);
+        gc->SetPen(wxPen(ring, 2));
+        gc->SetBrush(*wxTRANSPARENT_BRUSH);
+        gc->DrawEllipse(cx - radius * 0.74, cy - radius * 0.74, radius * 1.48, radius * 1.48);
+    }
     gc->SetPen(*wxTRANSPARENT_PEN);
     gc->SetBrush(gc->CreateRadialGradientBrush(cx - knob * 0.3, cy - knob * 0.3, cx, cy, knob,
                                                Colour::Chrome, Colour::PlateShadow));
