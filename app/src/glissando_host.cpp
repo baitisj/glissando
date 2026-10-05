@@ -282,9 +282,12 @@ GlissandoTelemetry MainFrame::glissandoTelemetry()
     telemetry.driveAutoDeaf = connected && !(meters && meters->canReadAlc());
     telemetry.alcOver = alcOverAtMs_ != 0 && steadyNowMs() - alcOverAtMs_ < ALC_OVER_SHOW_MS;
 
-    telemetry.keyedSeconds = telemetry.transmitting && keyedAtMs_ != 0 ? (steadyNowMs() - keyedAtMs_) / 1000.0 : 0.0;
-    telemetry.rfPower = wxGetApp().appConfiguration.glissandoSmoke ? rigRfPower_ : NAN;
-    telemetry.timeOutSeconds = chatTimeOutSeconds();
+    // The console asks four times a second, so this is where the smoke
+    // thickens and clears; COMMS reads the same level for its warning.
+    double keyedSeconds = telemetry.transmitting && keyedAtMs_ != 0 ? (steadyNowMs() - keyedAtMs_) / 1000.0 : 0.0;
+    double rfPower = wxGetApp().appConfiguration.glissandoSmoke ? rigRfPower_ : NAN;
+    telemetry.smoke = smokeGauge_.update(steadyNowMs() / 1000.0, keyedSeconds, rfPower,
+                                         wxGetApp().appConfiguration.glissandoSmokeSeconds);
     return telemetry;
 }
 

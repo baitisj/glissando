@@ -262,18 +262,6 @@ void GlissandoScope::paintSmoke(wxGraphicsContext* gc, const wxRect& trace)
     // softly rather than winking in and out.
     double now = steadySeconds();
 
-    // And a word to the wise, as long as the smoke is still coming.
-    if (smoke_ > 0.0)
-    {
-        gc->SetFont(font(FontRole::Caption),
-                    wxColour(Colour::Bone.Red(), Colour::Bone.Green(), Colour::Bone.Blue(),
-                             (unsigned char)std::lround(200.0 * std::min(1.0, 2.0 * smoke_))));
-        wxString warning = _("Your rig might be on fire. Please check your finals.");
-        double tw = 0, th = 0;
-        gc->GetTextExtent(warning, &tw, &th);
-        gc->DrawText(warning, trace.x + (trace.width - tw) / 2.0, trace.y + 36.0);
-    }
-
     double from = trace.y + 34.0;
     double rise = from + 12.0;
     gc->SetPen(*wxTRANSPARENT_PEN);

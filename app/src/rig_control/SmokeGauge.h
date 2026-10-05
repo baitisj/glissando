@@ -25,34 +25,30 @@
 #include <cmath>
 
 // An easter egg: a transmitter held keyed near full power for most of the
-// time-out timer starts to smoke. The smoke starts two thirds of the way to
-// the time-out (120 s of 180), is at its thickest eight ninths of the way
-// (160 s, where chat lets go of a keying anyway), and clears over a while
-// once the radio is let go or turned down. Its level runs from 0 (none) to 1.
+// time-out timer starts to smoke. By default the smoke starts at 120 s of
+// the usual 180, is at its thickest 40 s later (160 s, where chat lets go of
+// a keying anyway), and clears over a while once the radio is let go or
+// turned down. Its level runs from 0 (none) to 1.
 class SmokeGauge
 {
 public:
     static constexpr double POWER_OVER = 0.8;   // RFPOWER, as Hamlib scales it 0 to 1
-    static constexpr double START = 2.0 / 3.0;  // of the time-out
-    static constexpr double FULL = 8.0 / 9.0;
+    static constexpr int DEFAULT_START_SECONDS = 120;
+    static constexpr double THICKEN_SECONDS = 40.0;
     static constexpr double CLEAR_SECONDS = 20.0;
 
     // now: any steady clock, in seconds. keyedSeconds: how long the radio
     // has been keyed without a break (0 while it isn't). rfPower: the
     // radio's power setting, NaN when it can't be told; such a radio never
-    // smokes.
-    double update(double now, double keyedSeconds, double rfPower, int timeOutSeconds)
+    // smokes. startSeconds: keyed this long, it starts to smoke.
+    double update(double now, double keyedSeconds, double rfPower, int startSeconds)
     {
         double dt = std::isnan(lastNow_) ? 0.0 : std::max(0.0, now - lastNow_);
         lastNow_ = now;
 
         double target = 0.0;
-        if (keyedSeconds > 0.0 && rfPower > POWER_OVER && timeOutSeconds > 0)
-        {
-            double start = START * timeOutSeconds;
-            double full = FULL * timeOutSeconds;
-            target = std::clamp((keyedSeconds - start) / (full - start), 0.0, 1.0);
-        }
+        if (keyedSeconds > 0.0 && rfPower > POWER_OVER)
+            target = std::clamp((keyedSeconds - std::max(0, startSeconds)) / THICKEN_SECONDS, 0.0, 1.0);
 
         // Thickens as fast as the keying goes on; clears slowly.
         if (target >= level_)

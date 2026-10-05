@@ -19,6 +19,7 @@
 //
 //==========================================================================
 
+#include <algorithm>
 #include <wx/gbsizer.h>
 #include <wx/numformatter.h>
 #include "GlissandoCw.h"
@@ -403,10 +404,16 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
         _("Turn off on a small screen: the console gets shorter by the title's height."));
     sbSizer_textChat->Add(m_ckboxGlissandoShowMarquee, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
 
-    // No tooltip, on purpose: it's an easter egg.
+    // No tooltips, on purpose: it's an easter egg.
+    wxBoxSizer* smokeSizer = new wxBoxSizer(wxHORIZONTAL);
     m_ckboxGlissandoSmoke = new wxCheckBox(
         sb_textChat, wxID_ANY, _("Smoke"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    sbSizer_textChat->Add(m_ckboxGlissandoSmoke, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
+    smokeSizer->Add(m_ckboxGlissandoSmoke, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 10);
+    m_txtGlissandoSmokeSeconds = new wxTextCtrl(sb_textChat, wxID_ANY, wxEmptyString, wxDefaultPosition,
+                                                wxSize(60, -1), 0, wxTextValidator(wxFILTER_DIGITS));
+    smokeSizer->Add(m_txtGlissandoSmokeSeconds, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+    smokeSizer->Add(new wxStaticText(sb_textChat, wxID_ANY, _("seconds")), 0, wxALIGN_CENTER_VERTICAL);
+    sbSizer_textChat->Add(smokeSizer, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
 
     // Data2G: an external modem program the operator runs; chat reaches it
     // over TCP (docs/DATA2G.md).
@@ -666,6 +673,8 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         m_ckboxGlissandoTransmitShips->SetValue(wxGetApp().appConfiguration.glissandoTransmitShips);
         m_ckboxGlissandoShowMarquee->SetValue(wxGetApp().appConfiguration.glissandoShowMarquee);
         m_ckboxGlissandoSmoke->SetValue(wxGetApp().appConfiguration.glissandoSmoke);
+        m_txtGlissandoSmokeSeconds->SetValue(
+            wxString::Format("%d", wxGetApp().appConfiguration.glissandoSmokeSeconds.get()));
         m_ckboxData2G->SetValue(wxGetApp().appConfiguration.data2gEnabled);
         m_txtData2GHost->SetValue(wxGetApp().appConfiguration.data2gHost);
         m_txtData2GKissPort->SetValue(wxString::Format("%d", wxGetApp().appConfiguration.data2gKissPort.get()));
@@ -753,6 +762,9 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         wxGetApp().appConfiguration.glissandoTransmitShips = m_ckboxGlissandoTransmitShips->GetValue();
         wxGetApp().appConfiguration.glissandoShowMarquee = m_ckboxGlissandoShowMarquee->GetValue();
         wxGetApp().appConfiguration.glissandoSmoke = m_ckboxGlissandoSmoke->GetValue();
+        long smokeSeconds = 0;
+        if (m_txtGlissandoSmokeSeconds->GetValue().ToLong(&smokeSeconds))
+            wxGetApp().appConfiguration.glissandoSmokeSeconds = (int)std::min(smokeSeconds, 100000L);
         wxGetApp().appConfiguration.data2gEnabled = m_ckboxData2G->GetValue();
         wxString data2gHost = m_txtData2GHost->GetValue().Strip(wxString::both);
         wxGetApp().appConfiguration.data2gHost = data2gHost.IsEmpty() ? wxString("127.0.0.1") : data2gHost;
