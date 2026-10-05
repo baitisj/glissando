@@ -262,10 +262,17 @@ bool HamlibRigController::canReadSwr()
     return isConnected() && canReadSwr_.load(std::memory_order_acquire);
 }
 
-void HamlibRigController::requestSwr()
+bool HamlibRigController::canReadAlc()
 {
-    if (!canReadSwr() || swrRequestPending_.exchange(true, std::memory_order_acq_rel)) return;
-    enqueue_(std::bind(&HamlibRigController::requestSwrImpl_, this));
+    return isConnected() && canReadAlc_.load(std::memory_order_acquire);
+}
+
+void HamlibRigController::requestMeters(bool swr, bool alc)
+{
+    swr = swr && canReadSwr();
+    alc = alc && canReadAlc();
+    if ((!swr && !alc) || metersRequestPending_.exchange(true, std::memory_order_acq_rel)) return;
+    enqueue_(std::bind(&HamlibRigController::requestMetersImpl_, this, swr, alc));
 }
 
 int HamlibRigController::getRigResponseTimeMicroseconds()
@@ -490,6 +497,8 @@ void HamlibRigController::connectImpl_()
 
         canReadSwr_.store(rig_has_get_level(tmpRig, RIG_LEVEL_SWR) != 0, std::memory_order_release);
         log_info("Radio %s report SWR", canReadSwr_.load() ? "can" : "cannot");
+        canReadAlc_.store(rig_has_get_level(tmpRig, RIG_LEVEL_ALC) != 0, std::memory_order_release);
+        log_info("Radio %s report ALC", canReadAlc_.load() ? "can" : "cannot");
 
         // Make sure PTT is not enabled as there have been reports of some 
         // radios starting off in this state.
@@ -769,25 +778,37 @@ void HamlibRigController::setModeImpl_(IRigFrequencyController::Mode mode)
     }
 }
 
-void HamlibRigController::requestSwrImpl_()
+void HamlibRigController::requestMetersImpl_(bool swr, bool alc)
 {
-    swrRequestPending_.store(false, std::memory_order_release);
+    metersRequestPending_.store(false, std::memory_order_release);
 
-    // Unlike the frequency and mode, this is read during TX on purpose: the
-    // meter has nothing to show otherwise. Only radios whose Hamlib backend
-    // says they report SWR are ever asked.
+    // Unlike the frequency and mode, these are read during TX on purpose:
+    // the meters have nothing to show otherwise. Only radios whose Hamlib
+    // backend says they report a meter are ever asked for it.
     auto tmpRig = rig_.load(std::memory_order_acquire);
     if (tmpRig == nullptr || destroying_) return;
 
-    value_t value;
-    value.f = 0;
-    int result = rig_get_level(tmpRig, RIG_VFO_CURR, RIG_LEVEL_SWR, &value);
-    if (result != RIG_OK)
+    if (swr)
     {
-        log_debug("rig_get_level(SWR): error = %s ", rigerror(result));
-        return;
+        value_t value;
+        value.f = 0;
+        int result = rig_get_level(tmpRig, RIG_VFO_CURR, RIG_LEVEL_SWR, &value);
+        if (result == RIG_OK)
+            onSwrReading(this, value.f);
+        else
+            log_debug("rig_get_level(SWR): error = %s ", rigerror(result));
     }
-    onSwrReading(this, value.f);
+
+    if (alc)
+    {
+        value_t value;
+        value.f = 0;
+        int result = rig_get_level(tmpRig, RIG_VFO_CURR, RIG_LEVEL_ALC, &value);
+        if (result == RIG_OK)
+            onAlcReading(this, value.f);
+        else
+            log_debug("rig_get_level(ALC): error = %s ", rigerror(result));
+    }
 }
 
 void HamlibRigController::requestCurrentFrequencyModeImpl_()

@@ -1518,7 +1518,7 @@ void TextMessagingDialog::OnTimer(wxTimerEvent&)
     updateAckWaitStatus();
     updateModemStatus();
 
-    // Auto shift can change the tempo while the text sits there.
+    // Auto can change the tempo while the text sits there.
     updateAirTime();
 }
 

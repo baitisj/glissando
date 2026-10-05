@@ -32,6 +32,10 @@ public:
 
     wxSizer* GetContentSizer() const { return content_; }
 
+    // Centres the title over part of the contents (a sizer inside this
+    // plate) rather than over the whole plate.
+    void CentreTitleOver(wxSizer* span) { titleSpan_ = span; Refresh(); }
+
 protected:
     // Never narrower than the nameplate, so a narrow window cannot cut the
     // title off.
@@ -42,6 +46,7 @@ private:
 
     wxString title_;
     wxSizer* content_;
+    wxSizer* titleSpan_ = nullptr;
     int titleWidth_;
 };
 
@@ -127,12 +132,30 @@ public:
     // shift or control held. Until this is called the wheel moves a
     // hundredth of the range, or one step with shift.
     void SetWheelSteps(double plain, double shift, double control);
+    // The value with the pointer straight up; until this is called, halfway
+    // between minimum and maximum. Either side of it the dial turns evenly,
+    // so a knob can spend more of its sweep on one side.
+    void SetCentre(double value) { centre_ = value; Refresh(); }
+
+    // A push-pull knob: a click that doesn't turn it pushes it in or pops it
+    // out, and sends wxEVT_TOGGLEBUTTON (GetInt() 1 for in). Double clicks
+    // are two pushes rather than a return to the default.
+    void SetPushable(bool pushable) { pushable_ = pushable; }
+    bool IsPushed() const { return pushed_; }
+    void SetPushed(bool pushed);
+    // Pushed in, the ring around the knob is lit; dim says it is pushed in
+    // but has nothing to go on, alarm lights it red.
+    void SetRing(bool dim, bool alarm);
+    bool IsDragging() const { return dragging_; }
 
 protected:
     virtual void paint(wxGraphicsContext* gc, const wxSize& size) override;
 
 private:
     void change(double value);
+    // Where value sits along the sweep, 0 to 1, and back.
+    double fractionOf(double value) const;
+    double valueAt(double fraction) const;
     void OnMouseDown(wxMouseEvent& event);
     void OnMouseUp(wxMouseEvent& event);
     void OnMouseMove(wxMouseEvent& event);
@@ -145,6 +168,7 @@ private:
     double step_;
     double value_;
     double defaultValue_;
+    double centre_ = NAN;
     Formatter formatter_;
     double wheelPlain_ = 0.0;
     double wheelShift_ = 0.0;
@@ -153,6 +177,11 @@ private:
     bool dragging_;
     int dragY_;
     double dragValue_;
+    bool pushable_ = false;
+    bool pushed_ = false;
+    bool ringDim_ = false;
+    bool ringAlarm_ = false;
+    bool turned_ = false;           // the knob turned since the button went down
 };
 
 // A round lamp with a caption beside it.

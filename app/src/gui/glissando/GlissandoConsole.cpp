@@ -164,6 +164,145 @@ wxString taglineFor(Glissando::Scale scale)
 
 wxBoxSizer* row() { return new wxBoxSizer(wxHORIZONTAL); }
 
+// The DRIVE knob's range in dB, with -12 dB straight up: full scale from the
+// sound card overdrives most radios' ALC, so the upper end gets less sweep.
+constexpr double DRIVE_TOP_DB = 0.0;
+constexpr double DRIVE_UPRIGHT_DB = -12.0;
+constexpr double DRIVE_BOTTOM_DB = -30.0;
+
+// Little engraved animals over the slowest and fastest tempos, the tortoise
+// and the hare, the way a tractor's throttle lever is marked, with a dashed
+// track between them. Each sits centred over its end button, columnWidth
+// wide, and lights with its tempo.
+class Racetrack : public Control
+{
+public:
+    static constexpr int HEIGHT = 22;
+
+    Racetrack(wxWindow* parent, int width, int columnWidth)
+        : Control(parent, wxID_ANY, wxSize(width, HEIGHT))
+        , columnWidth_(columnWidth)
+    {
+        // empty
+    }
+
+    void SetLit(bool tortoise, bool hare)
+    {
+        if (tortoiseLit_ == tortoise && hareLit_ == hare) return;
+        tortoiseLit_ = tortoise;
+        hareLit_ = hare;
+        Refresh();
+    }
+
+protected:
+    virtual void paint(wxGraphicsContext* gc, const wxSize& size) override
+    {
+        // Each animal is drawn on a 48 by 22 grid, facing right: the way the
+        // music runs.
+        const double ANIMAL = 48.0;
+        double tortoiseX = columnWidth_ / 2.0 - ANIMAL / 2.0;
+        double hareX = size.x - columnWidth_ / 2.0 - ANIMAL / 2.0;
+
+        // The track: faint dashes from the tortoise's nose to the hare's tail.
+        gc->SetPen(wxPen(wxColour(76, 74, 70), 1));
+        const double DASH = 5.0, GAP = 5.0, TRACK_Y = 15.5;
+        for (double x = tortoiseX + ANIMAL + 2; x + DASH <= hareX + 2; x += DASH + GAP)
+            gc->StrokeLine(x, TRACK_Y, x + DASH, TRACK_Y);
+
+        gc->PushState();
+        gc->Translate(tortoiseX, (size.y - HEIGHT) / 2.0);
+        wxColour ink = tortoiseLit_ ? Colour::Bone : Colour::Dim;
+        gc->SetPen(*wxTRANSPARENT_PEN);
+        gc->SetBrush(wxBrush(ink));
+        paintTortoise(gc, ink);
+        gc->PopState();
+
+        gc->PushState();
+        gc->Translate(hareX, (size.y - HEIGHT) / 2.0);
+        gc->SetPen(*wxTRANSPARENT_PEN);
+        gc->SetBrush(wxBrush(hareLit_ ? Colour::Bone : Colour::Dim));
+        paintHare(gc);
+        gc->PopState();
+    }
+
+private:
+    static void paintTortoise(wxGraphicsContext* gc, const wxColour& ink)
+    {
+        // Feet, tail and head under and around a domed shell.
+        gc->DrawRoundedRectangle(13, 14, 5, 6, 2);
+        gc->DrawRoundedRectangle(28, 14, 5, 6, 2);
+        wxGraphicsPath tail = gc->CreatePath();
+        tail.MoveToPoint(10, 14);
+        tail.AddLineToPoint(5, 16);
+        tail.AddLineToPoint(10, 16.5);
+        tail.CloseSubpath();
+        gc->FillPath(tail);
+        gc->DrawRoundedRectangle(33, 10, 7, 4, 2);     // neck
+        gc->DrawEllipse(37, 7, 8, 7);                   // head
+
+        wxGraphicsPath shell = gc->CreatePath();
+        shell.MoveToPoint(9, 16);
+        shell.AddCurveToPoint(9, 1, 37, 1, 37, 16);
+        shell.CloseSubpath();
+        gc->FillPath(shell);
+
+        // The shell's plates, cut in.
+        gc->SetPen(wxPen(Colour::Plate, 1));
+        gc->SetBrush(*wxTRANSPARENT_BRUSH);
+        gc->StrokeLine(9.5, 13, 36.5, 13);
+        gc->StrokeLine(18, 13, 16, 6.5);
+        gc->StrokeLine(28, 13, 30, 6.5);
+        gc->StrokeLine(17, 8, 29, 8);
+        gc->SetPen(*wxTRANSPARENT_PEN);
+        gc->SetBrush(wxBrush(ink));
+        gc->SetBrush(wxBrush(Colour::Plate));
+        gc->DrawEllipse(41, 9, 1.8, 1.8);               // eye
+    }
+
+    static void paintHare(wxGraphicsContext* gc)
+    {
+        // In full stride: body stretched out, ears laid back.
+        wxGraphicsPath body = gc->CreatePath();
+        body.MoveToPoint(8, 12);
+        body.AddCurveToPoint(10, 5, 28, 4, 34, 8);
+        body.AddCurveToPoint(36, 10, 34, 14, 30, 14);
+        body.AddCurveToPoint(22, 15, 14, 16, 8, 12);
+        body.CloseSubpath();
+        gc->FillPath(body);
+
+        gc->DrawEllipse(32, 4, 9, 7);                   // head
+        wxGraphicsPath ears = gc->CreatePath();
+        ears.MoveToPoint(34, 6);
+        ears.AddCurveToPoint(30, 1, 24, 0, 20, 1);
+        ears.AddCurveToPoint(25, 2, 30, 4, 32, 7);
+        ears.CloseSubpath();
+        gc->FillPath(ears);
+
+        gc->DrawEllipse(5, 8, 5, 5);                    // tail
+
+        // Hind legs flung back, forelegs reaching.
+        wxGraphicsPath legs = gc->CreatePath();
+        legs.MoveToPoint(12, 13);
+        legs.AddLineToPoint(3, 19);
+        legs.AddLineToPoint(6, 20);
+        legs.AddLineToPoint(16, 14);
+        legs.CloseSubpath();
+        legs.MoveToPoint(29, 13);
+        legs.AddLineToPoint(44, 17);
+        legs.AddLineToPoint(44, 19);
+        legs.AddLineToPoint(27, 15);
+        legs.CloseSubpath();
+        gc->FillPath(legs);
+
+        gc->SetBrush(wxBrush(Colour::Plate));
+        gc->DrawEllipse(37, 6, 1.8, 1.8);               // eye
+    }
+
+    int columnWidth_;
+    bool tortoiseLit_ = false;
+    bool hareLit_ = false;
+};
+
 } // namespace
 
 wxString GlissandoConsole::gearLabel(int gear)
@@ -214,8 +353,13 @@ GlissandoConsole::GlissandoConsole(wxWindow* parent, IGlissandoHost* host,
 
     if (position.GetWidth() <= 0 || position.GetHeight() <= 0)
     {
-        SetSize(wxSize(1100, 790));
+        SetSize(wxSize(std::max(1100, minimumWidth_), 790));
         Centre();
+    }
+    else if (GetSize().x < minimumWidth_)
+    {
+        // Saved narrower than the console now lays out.
+        SetSize(minimumWidth_, GetSize().y);
     }
 
     Bind(wxEVT_TIMER, &GlissandoConsole::OnTimer, this);
@@ -237,7 +381,7 @@ void GlissandoConsole::showMarquee(bool show, bool resize)
     // The console grows or shrinks by the title's height, so the scope
     // keeps its size; a maximised console just lays itself out again.
     int height = MARQUEE_HEIGHT + MARQUEE_MARGIN;
-    SetMinSize(wxSize(MINIMUM_SIZE.x, MINIMUM_SIZE.y - (show ? 0 : height)));
+    SetMinSize(wxSize(minimumWidth_, MINIMUM_SIZE.y - (show ? 0 : height)));
     if (resize && !IsMaximized() && !IsFullScreen())
     {
         wxSize size = GetSize();
@@ -340,40 +484,72 @@ void GlissandoConsole::buildControls()
     // --- Bottom: modulation, and the master switches.
     auto* bottom = row();
 
+    // Modulation: DRIVE on the left; to its right the tempos, slowest to
+    // fastest with the tortoise and the hare over the ends and AUTO after
+    // them, and the scales under them across the same width.
     auto* modulationPlate = new Panel(page, _("Modulation"));
+    auto* modulationRow = row();
+
+    const int TEMPO_WIDTH = 94;
+    const int AUTO_WIDTH = 76;
+    const int BUTTON_HEIGHT = 34;
+    const int BUTTON_GAP = 4;
+    const int AUTO_GAP = 8;
+    const int GEARS = Glissando::MAX_GEAR - Glissando::MIN_GEAR + 1;
+    const int ROW_WIDTH = GEARS * (TEMPO_WIDTH + BUTTON_GAP) + AUTO_GAP + AUTO_WIDTH;
+    const int SCALES = 4;
+    const int SCALE_WIDTH = (ROW_WIDTH - (SCALES - 1) * BUTTON_GAP) / SCALES;
+
+    driveDial_ = new Dial(modulationPlate, wxID_ANY, _("Drive"), DRIVE_BOTTOM_DB, DRIVE_TOP_DB, 0.1,
+                          DRIVE_UPRIGHT_DB, wxSize(110, 124));
+    driveDial_->SetCentre(DRIVE_UPRIGHT_DB);
+    driveDial_->SetFormatter([](double v) { return wxString::Format("%.1f dB", v); });
+    driveDial_->SetWheelSteps(0.5, 0.1, 0.1);
+    driveDial_->SetPushable(true);
+    modulationRow->Add(driveDial_, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
+
+    auto* buttons = new wxBoxSizer(wxVERTICAL);
+    auto* racetrack = new Racetrack(modulationPlate, GEARS * (TEMPO_WIDTH + BUTTON_GAP) - BUTTON_GAP, TEMPO_WIDTH);
+    racetrack_ = racetrack;
+    buttons->Add(racetrack_, 0);
     auto* tempoRow = row();
     for (int gear = Glissando::MIN_GEAR; gear <= Glissando::MAX_GEAR; gear++)
     {
         const Glissando::GearInfo& info = Glissando::gearInfo(gear);
-        auto* button = new Button(modulationPlate, wxID_ANY, gearLabel(gear), true, wxSize(92, 34));
+        auto* button = new Button(modulationPlate, wxID_ANY, gearLabel(gear), true,
+                                  wxSize(TEMPO_WIDTH, BUTTON_HEIGHT));
         button->SetToolTip(wxString::Format(_("%s: %.0f ms notes, %.0f s per frame%s"),
                                             info.tempo, info.symbolSeconds * 1000.0,
                                             info.frameSeconds(),
                                             info.voices > 1 ? _(", two voices") : wxString()));
         button->Bind(wxEVT_TOGGLEBUTTON, [this, gear](wxCommandEvent&) { selectGear(gear); });
         gearButtons_.push_back(button);
-        tempoRow->Add(button, 0, wxRIGHT, 4);
+        tempoRow->Add(button, 0, wxRIGHT, BUTTON_GAP);
     }
-    tempoRow->AddSpacer(10);
-    autoButton_ = new Button(modulationPlate, wxID_ANY, _("Auto shift"), true, wxSize(110, 34));
-    autoButton_->SetToolTip(_("Pick the tempo from the signal and fading measured on the last "
+    tempoRow->AddSpacer(AUTO_GAP - BUTTON_GAP);
+    autoButton_ = new Button(modulationPlate, wxID_ANY, _("Auto"), true, wxSize(AUTO_WIDTH, BUTTON_HEIGHT));
+    autoButton_->SetToolTip(_("Shift tempo automatically, from the signal and fading measured on the last "
                               "frame heard. The lit tempo is the one being sent; the one chosen "
                               "by hand glows faintly and is used until something has been heard."));
     tempoRow->Add(autoButton_, 0);
-    modulationPlate->GetContentSizer()->Add(tempoRow, 0, wxBOTTOM, 8);
+    buttons->Add(tempoRow, 0, wxBOTTOM, 8);
 
     auto* scaleRow = row();
     const Glissando::Scale scales[] = {Glissando::Scale::Pentatonic, Glissando::Scale::WholeTone,
                                        Glissando::Scale::Diminished, Glissando::Scale::Diabolus};
     for (Glissando::Scale scale : scales)
     {
-        auto* button = new Button(modulationPlate, wxID_ANY, scaleLabel(scale), true, wxSize(128, 34));
+        auto* button = new Button(modulationPlate, wxID_ANY, scaleLabel(scale), true,
+                                  wxSize(SCALE_WIDTH, BUTTON_HEIGHT));
         button->SetToolTip(taglineFor(scale));
         button->Bind(wxEVT_TOGGLEBUTTON, [this, scale](wxCommandEvent&) { selectScale(scale); });
         scaleButtons_.push_back(button);
-        scaleRow->Add(button, 0, wxRIGHT, 4);
+        scaleRow->Add(button, 0, scale == Glissando::Scale::Diabolus ? 0 : wxRIGHT, BUTTON_GAP);
     }
-    modulationPlate->GetContentSizer()->Add(scaleRow, 0);
+    buttons->Add(scaleRow, 0);
+    modulationRow->Add(buttons, 0, wxALIGN_CENTER_VERTICAL);
+    modulationPlate->GetContentSizer()->Add(modulationRow, 0);
+    modulationPlate->CentreTitleOver(buttons);
     bottom->Add(modulationPlate, 1, wxEXPAND | wxRIGHT, 6);
 
     // Command: the master switches beside the radio's dial.
@@ -434,7 +610,9 @@ void GlissandoConsole::buildControls()
     auto* frameSizer = new wxBoxSizer(wxVERTICAL);
     frameSizer->Add(page, 1, wxEXPAND);
     SetSizer(frameSizer);
-    SetMinSize(MINIMUM_SIZE);
+    // Never so narrow that the row along the bottom is cut off.
+    minimumWidth_ = std::max(MINIMUM_SIZE.x, bottom->GetMinSize().x + 12);
+    SetMinSize(wxSize(minimumWidth_, MINIMUM_SIZE.y));
     Layout();
 
     // --- Events.
@@ -454,6 +632,20 @@ void GlissandoConsole::buildControls()
             double low = Glissando::scaleNotes(settings_.scale, 0)[0];
             setTuning(event.GetInt() / 10.0 - low);
         }
+    });
+    driveDial_->Bind(wxEVT_SLIDER, [this](wxCommandEvent&) {
+        // Turning it by hand takes over from the ALC, as grabbing a knob
+        // takes it from a servo: it pops out.
+        if (driveDial_->IsPushed())
+        {
+            driveDial_->SetPushed(false);
+            host_->glissandoSetDriveAuto(false);
+        }
+        host_->glissandoSetDrive(driveDial_->GetValue());
+    });
+    driveDial_->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& event) {
+        host_->glissandoSetDriveAuto(event.GetInt() != 0);
+        refreshTelemetry();
     });
     autoButton_->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& event) {
         settings_.autoGear = event.GetInt() != 0;
@@ -617,6 +809,8 @@ void GlissandoConsole::updateGearButtons()
         gearButtons_[i]->SetChecked(gear == lit);
         gearButtons_[i]->SetHinted(settings_.autoGear && gear == settings_.gear && gear != lit);
     }
+    // The tortoise and the hare light with their tempos.
+    static_cast<Racetrack*>(racetrack_)->SetLit(lit == Glissando::MIN_GEAR, lit == Glissando::MAX_GEAR);
 }
 
 void GlissandoConsole::updateStaff()
@@ -702,6 +896,8 @@ void GlissandoConsole::refreshTelemetry()
         updateStaff();
     }
 
+    updateDrive(t);
+
     rigReadout_->SetText(t.rigFrequencyKnown ? wxString::Format("%.3f kHz", t.rigFrequencyHz / 1000.0)
                                              : wxString("---"));
     updateBandWidthWarning(t);
@@ -738,6 +934,35 @@ void GlissandoConsole::updateBandWidthWarning(const GlissandoTelemetry& t)
         rigReadout_->SetToolTip(tip);
     else
         rigReadout_->UnsetToolTip();
+}
+
+void GlissandoConsole::updateDrive(const GlissandoTelemetry& t)
+{
+    // The knob shows the level the host has, so it turns itself while the
+    // ALC turns it down; not while the operator has hold of it.
+    if (!driveDial_->IsDragging())
+    {
+        driveDial_->SetValue(t.driveDb);
+        driveDial_->SetPushed(t.driveAuto);
+    }
+    driveDial_->SetRing(t.driveAutoDeaf, t.driveAuto && t.alcOver);
+
+    wxString tip;
+    if (t.driveAuto && t.driveAutoDeaf)
+        tip = _("Pushed in, but this radio doesn't report its ALC, so nothing turns it down. "
+                "Click to pop it out.");
+    else if (t.driveAuto)
+        tip = _("Pushed in: while transmitting, the radio's ALC is read once a second and the level is turned "
+                "down whenever it reads over the target in Preferences, Rig control. It never turns up on its "
+                "own. Click to pop it out, or turn it to take over.");
+    else
+        tip = _("Transmit audio level. Drag up or down, or turn the mouse wheel (0.5 dB a click, 0.1 dB with "
+                "shift). Click to push it in, and the radio's ALC turns it down from there as needed.");
+    if (tip != driveTip_)
+    {
+        driveTip_ = tip;
+        driveDial_->SetToolTip(tip);
+    }
 }
 
 void GlissandoConsole::OnTimer(wxTimerEvent&)

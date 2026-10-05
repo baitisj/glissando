@@ -79,6 +79,7 @@
 #include "text_messaging/TextMessagingTypes.h"
 #include "sndfile.h"
 #include "comp_prim.h"
+#include "rig_control/DriveServo.h"
 #include "rig_control/HamlibRigController.h"
 #include "rig_control/SerialPortOutRigController.h"
 #include "rig_control/SerialPortInRigController.h"
@@ -354,7 +355,7 @@ public:
     void createChatWindow();
 
     // The Glissando tempo a chat keying would go out at now, from the
-    // console or Auto shift; 0 when chat goes over codec2 or Data2G.
+    // console or Auto; 0 when chat goes over codec2 or Data2G.
     int chatTransmitGear();
 
     // How much of the chat transmission on the air has been sent, 0 to 1;
@@ -395,6 +396,8 @@ public:
     virtual void glissandoSetAudioRunning(bool running) override;
     virtual void glissandoAbortTransmit() override;
     virtual void glissandoSetRigFrequency(double hz) override;
+    virtual void glissandoSetDrive(double db) override;
+    virtual void glissandoSetDriveAuto(bool automatic) override;
     virtual std::vector<double> glissandoFrequencyPresets() override;
     virtual void glissandoShowChat(bool show) override;
     virtual bool glissandoChatShown() override;
@@ -572,12 +575,15 @@ private:
         std::atomic<bool> operatorFrequencyPending_;
         void refreshRigFrequencyBeforeKeying_();
 
-        // The radio's SWR while transmitting (see glissando_host.cpp). Touched
-        // on the GUI thread only.
-        void pollRigSwr_();
+        // The radio's SWR and ALC while transmitting (see glissando_host.cpp).
+        // Touched on the GUI thread only.
+        void pollRigMeters_();
         void onRigSwrReading_(double swr);
+        void onRigAlcReading_(double alc);
         double rigSwr_ = NAN;               // NaN until a reading comes back on this keying
         uint64_t rigSwrAbortAtMs_ = 0;      // when high SWR last aborted a transmission
+        DriveServo driveServo_{TX_ATTENUATION_MIN, 0.5};
+        uint64_t alcOverAtMs_ = 0;          // when the ALC last read over the DRIVE target
         FilterFrequency lastBand_;
         // Restore-point: the TX/tune level that was active when we entered the
         // current band (or when Enable was first clicked for that band). Restore

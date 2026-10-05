@@ -96,7 +96,9 @@ void Panel::OnPaint(wxPaintEvent&)
         // An engraved nameplate: a darker inset strip, chrome lettering.
         gc->SetFont(font(FontRole::Plate), Colour::Chrome);
         double w = spacedTextWidth(gc.get(), title_, 3.0) + PLATE_NAME_PADDING;
-        double x = (size.x - w) / 2.0;
+        double cx = size.x / 2.0;
+        if (titleSpan_ != nullptr) cx = titleSpan_->GetPosition().x + titleSpan_->GetSize().x / 2.0;
+        double x = cx - w / 2.0;
         gc->SetPen(wxPen(Colour::PlateEdge, 1));
         gc->SetBrush(wxBrush(Colour::PlateShadow));
         gc->DrawRoundedRectangle(x, 7, w, PLATE_TITLE_HEIGHT - 6, 3);
@@ -110,7 +112,7 @@ void Panel::OnPaint(wxPaintEvent&)
             gc->StrokeLine(x + w + 8, y, size.x - 20, y);
         }
 
-        drawSpacedTextCentred(gc.get(), title_, size.x / 2.0, 10, 3.0);
+        drawSpacedTextCentred(gc.get(), title_, cx, 10, 3.0);
     }
 }
 
@@ -334,6 +336,21 @@ void Dial::SetWheelSteps(double plain, double shift, double control)
     wheelControl_ = control;
 }
 
+double Dial::fractionOf(double value) const
+{
+    double span = std::max(1e-9, maximum_ - minimum_);
+    if (std::isnan(centre_)) return (value - minimum_) / span;
+    if (value <= centre_) return 0.5 * (value - minimum_) / std::max(1e-9, centre_ - minimum_);
+    return 0.5 + 0.5 * (value - centre_) / std::max(1e-9, maximum_ - centre_);
+}
+
+double Dial::valueAt(double fraction) const
+{
+    if (std::isnan(centre_)) return minimum_ + fraction * (maximum_ - minimum_);
+    if (fraction <= 0.5) return minimum_ + fraction * 2.0 * (centre_ - minimum_);
+    return centre_ + (fraction - 0.5) * 2.0 * (maximum_ - centre_);
+}
+
 void Dial::change(double value)
 {
     value = std::round(value / step_) * step_;
@@ -349,18 +366,43 @@ void Dial::change(double value)
     ProcessWindowEvent(changed);
 }
 
+void Dial::SetPushed(bool pushed)
+{
+    if (pushed_ == pushed) return;
+    pushed_ = pushed;
+    Refresh();
+}
+
+void Dial::SetRing(bool dim, bool alarm)
+{
+    if (ringDim_ == dim && ringAlarm_ == alarm) return;
+    ringDim_ = dim;
+    ringAlarm_ = alarm;
+    Refresh();
+}
+
 void Dial::OnMouseDown(wxMouseEvent& event)
 {
     dragging_ = true;
+    turned_ = false;
     dragY_ = event.GetY();
     dragValue_ = value_;
-    CaptureMouse();
+    if (!HasCapture()) CaptureMouse();
 }
 
-void Dial::OnMouseUp(wxMouseEvent&)
+void Dial::OnMouseUp(wxMouseEvent& event)
 {
+    bool clicked = dragging_ && !turned_ && std::abs(event.GetY() - dragY_) < 3;
     dragging_ = false;
     if (HasCapture()) ReleaseMouse();
+    if (!pushable_ || !clicked) return;
+
+    pushed_ = !pushed_;
+    Refresh();
+    wxCommandEvent toggled(wxEVT_TOGGLEBUTTON, GetId());
+    toggled.SetEventObject(this);
+    toggled.SetInt(pushed_ ? 1 : 0);
+    ProcessWindowEvent(toggled);
 }
 
 void Dial::OnMouseMove(wxMouseEvent& event)
@@ -368,12 +410,17 @@ void Dial::OnMouseMove(wxMouseEvent& event)
     if (!dragging_) return;
     // A full sweep of the dial for 300 pixels of travel, a tenth of that with
     // shift held.
-    double perPixel = (maximum_ - minimum_) / 300.0 * (event.ShiftDown() ? 0.1 : 1.0);
-    double value = dragValue_ + (dragY_ - event.GetY()) * perPixel;
+    double perPixel = 1.0 / 300.0 * (event.ShiftDown() ? 0.1 : 1.0);
+    double fraction = fractionOf(dragValue_) + (dragY_ - event.GetY()) * perPixel;
+    fraction = std::min(1.0, std::max(0.0, fraction));
+    double value = valueAt(fraction);
     // Catch on the default for a few pixels either side, so it can be found
     // again by hand.
-    if (std::fabs(value - defaultValue_) <= 4.0 * perPixel) value = defaultValue_;
-    change(value);
+    if (std::fabs(fraction - fractionOf(defaultValue_)) <= 4.0 * perPixel) value = defaultValue_;
+    // A push-pull knob has to move a few pixels before it turns, so a click
+    // that wobbles is still a push.
+    if (!pushable_ || std::abs(event.GetY() - dragY_) >= 3) turned_ = true;
+    if (turned_) change(value);
 }
 
 void Dial::OnMouseWheel(wxMouseEvent& event)
@@ -397,8 +444,14 @@ void Dial::OnMouseWheel(wxMouseEvent& event)
     change(value_ + clicks * stepBy);
 }
 
-void Dial::OnDoubleClick(wxMouseEvent&)
+void Dial::OnDoubleClick(wxMouseEvent& event)
 {
+    // A push-pull knob takes the second click of a double click as a click.
+    if (pushable_)
+    {
+        OnMouseDown(event);
+        return;
+    }
     change(defaultValue_);
 }
 
@@ -413,20 +466,30 @@ void Dial::paint(wxGraphicsContext* gc, const wxSize& size)
     gc->SetFont(font(FontRole::Caption), Colour::Dim);
     drawSpacedTextCentred(gc, caption_, cx, 2, 2.0);
 
-    // Engraved ticks around the knob: 27 minor, every third one major.
+    // Engraved ticks around the knob: 28 minor, every seventh one major,
+    // one of them straight up.
     double start = -PI / 2.0 - DIAL_SWEEP / 2.0;
-    for (int i = 0; i <= 27; i++)
+    for (int i = 0; i <= 28; i++)
     {
-        double a = start + DIAL_SWEEP * i / 27.0;
-        bool major = i % 9 == 0;
+        double a = start + DIAL_SWEEP * i / 28.0;
+        bool major = i % 7 == 0;
         double inner = radius * (major ? 0.80 : 0.86);
         gc->SetPen(wxPen(major ? Colour::Chrome : Colour::Dim, major ? 2 : 1));
         gc->StrokeLine(cx + inner * std::cos(a), cy + inner * std::sin(a),
                        cx + radius * 0.96 * std::cos(a), cy + radius * 0.96 * std::sin(a));
     }
 
-    // The knob: a fluted chrome skirt and a dark cap.
-    double knob = radius * 0.72;
+    // The knob: a fluted chrome skirt and a dark cap. Pushed in, it sits a
+    // little lower in the panel, with a lit ring around its skirt.
+    double knob = radius * (pushed_ ? 0.66 : 0.72);
+    if (pushed_)
+    {
+        wxColour ring = ringAlarm_ ? Colour::Alarm : ringDim_ ? Colour::Dim : Colour::Glow;
+        if (!ringDim_) drawGlow(gc, cx, cy, radius * 0.82, ringAlarm_ ? 0.6 : 0.45);
+        gc->SetPen(wxPen(ring, 2));
+        gc->SetBrush(*wxTRANSPARENT_BRUSH);
+        gc->DrawEllipse(cx - radius * 0.74, cy - radius * 0.74, radius * 1.48, radius * 1.48);
+    }
     gc->SetPen(*wxTRANSPARENT_PEN);
     gc->SetBrush(gc->CreateRadialGradientBrush(cx - knob * 0.3, cy - knob * 0.3, cx, cy, knob,
                                                Colour::Chrome, Colour::PlateShadow));
@@ -447,8 +510,7 @@ void Dial::paint(wxGraphicsContext* gc, const wxSize& size)
     gc->DrawEllipse(cx - cap, cy - cap, cap * 2, cap * 2);
 
     // The pointer, a lit slot in the cap.
-    double fraction = (value_ - minimum_) / std::max(1e-9, maximum_ - minimum_);
-    double a = start + DIAL_SWEEP * fraction;
+    double a = start + DIAL_SWEEP * fractionOf(value_);
     gc->SetPen(wxPen(Colour::Glow, 3, wxPENSTYLE_SOLID));
     gc->StrokeLine(cx + cap * 0.25 * std::cos(a), cy + cap * 0.25 * std::sin(a),
                    cx + cap * 0.92 * std::cos(a), cy + cap * 0.92 * std::sin(a));

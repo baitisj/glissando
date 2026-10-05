@@ -1,6 +1,6 @@
 //=========================================================================
-// Name:            IRigSwrMeter.h
-// Purpose:         Interface for reading a radio's SWR meter.
+// Name:            IRigTransmitMeters.h
+// Purpose:         Interface for reading a radio's SWR and ALC meters.
 //
 // License:
 //
@@ -17,29 +17,34 @@
 //
 //=========================================================================
 
-#ifndef I_RIG_SWR_METER_H
-#define I_RIG_SWR_METER_H
+#ifndef I_RIG_TRANSMIT_METERS_H
+#define I_RIG_TRANSMIT_METERS_H
 
 #include "EventHandler.h"
 
-class IRigSwrMeter
+class IRigTransmitMeters
 {
 public:
-    virtual ~IRigSwrMeter() = default;
+    virtual ~IRigTransmitMeters() = default;
 
     // A reading as the radio's meter gives it (1.0 is a perfect match).
-    EventHandler<IRigSwrMeter*, double> onSwrReading;
+    EventHandler<IRigTransmitMeters*, double> onSwrReading;
 
-    // Whether the radio connected now says it can report SWR.
+    // The ALC as Hamlib scales it, 0 to 1 (on Icoms, the ALC zone of the
+    // radio's meter).
+    EventHandler<IRigTransmitMeters*, double> onAlcReading;
+
+    // Whether the radio connected now says it can report SWR, or ALC.
     virtual bool canReadSwr() = 0;
+    virtual bool canReadAlc() = 0;
 
-    // Asks the radio for its SWR; the answer comes back on onSwrReading.
-    // Meant for while transmitting: a request made while one is still
+    // Asks the radio for the meters wanted; each answer comes back on its
+    // event. Meant for while transmitting: a request made while one is still
     // waiting for the radio is dropped rather than queued behind it.
-    virtual void requestSwr() = 0;
+    virtual void requestMeters(bool swr, bool alc) = 0;
 
 protected:
-    IRigSwrMeter() = default;
+    IRigTransmitMeters() = default;
 };
 
-#endif // I_RIG_SWR_METER_H
+#endif // I_RIG_TRANSMIT_METERS_H
