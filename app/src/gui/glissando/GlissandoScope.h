@@ -110,7 +110,7 @@ public:
 
     void clear();
 
-    // Smoke curling up out of the top of the screen, 0 for none to 1 at its
+    // Smoke seeping out all round the screen, 0 for none to 1 at its
     // thickest: an easter egg for a transmitter kept keyed too long (see
     // SmokeGauge). Even at its thickest it is faint.
     void setSmoke(double level);
@@ -265,7 +265,7 @@ private:
     // The smoke, each puff drifting up from where it was let off.
     struct Puff
     {
-        double x;                   // across the trace, 0 to 1
+        double around;              // where round the bezel, 0 to 1 clockwise from the top left
         double born;                // steady clock seconds
         double strength;            // the smoke's level when it was let off
         double seed;                // its own wobble
