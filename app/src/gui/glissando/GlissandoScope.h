@@ -178,8 +178,8 @@ private:
     void renderTrace(wxImage& image);
     void paintHeard(wxGraphicsContext* gc, const wxRect& trace);
 
-    // Lets off puffs of smoke while there is any, forgets the ones gone,
-    // and stops its timer once the last has.
+    // Lights the fires when smoke starts, lets off puffs while there is
+    // any, forgets the ones gone, and stops its timer once the last has.
     void tickSmoke();
     void paintSmoke(wxGraphicsContext* gc, const wxRect& trace);
 
@@ -262,18 +262,26 @@ private:
     int rowsGathering_;              // rows since the first of gatheringHz_
     int shipSerial_;
 
-    // The smoke, each puff drifting up from where it was let off.
-    struct Puff
+    // The smoke: a few hot spots behind the bezel, each sending up a plume
+    // of puffs. A puff is placed afresh from its age every frame, so the
+    // puffs of one plume trace a winding column that sways as it goes.
+    struct Fire
     {
         double around;              // where round the bezel, 0 to 1 clockwise from the top left
+        double phase;               // its own sway
+        double nextPuff = 0.0;      // steady clock seconds
+    };
+    struct Puff
+    {
+        size_t fire;
         double born;                // steady clock seconds
         double strength;            // the smoke's level when it was let off
         double seed;                // its own wobble
     };
     wxTimer smokeTimer_;
     double smoke_ = 0.0;
-    double nextPuff_ = 0.0;
     unsigned puffSerial_ = 0;
+    std::vector<Fire> fires_;
     std::deque<Puff> puffs_;
 };
 
