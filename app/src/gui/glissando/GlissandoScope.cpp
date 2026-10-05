@@ -166,7 +166,11 @@ GlissandoScope::GlissandoScope(wxWindow* parent, wxWindowID id)
     Bind(wxEVT_LEFT_DCLICK, &GlissandoScope::OnDoubleClick, this);
     Bind(wxEVT_MOUSEWHEEL, &GlissandoScope::OnWheel, this);
     Bind(wxEVT_MOTION, &GlissandoScope::OnMotion, this);
-    Bind(wxEVT_LEAVE_WINDOW, [this](wxMouseEvent&) { hoverX_ = -1; Refresh(); });
+    Bind(wxEVT_LEAVE_WINDOW, [this](wxMouseEvent&) {
+        hoverX_ = -1;
+        mouse_ = wxPoint(-1, -1);
+        Refresh();
+    });
 
     setScanRate(scanRate_);
 }
@@ -273,14 +277,101 @@ void GlissandoScope::tickSmoke()
         puff.fire = (size_t)i;
         puff.along = (hash >> 12 & 0xffff) / 32768.0 - 1.0;
         puff.born = now;
-        puff.strength = smoke_ * seepDensity(all[i], puff.along, now);
+        puff.density = seepDensity(all[i], puff.along, now);
+        puff.strength = smoke_ * puff.density;
         puff.seed = (hash >> 8 & 0xff) / 255.0 * 6.283185307179586;
         if (puff.strength > 0.02) puffs_.push_back(puff);
         nextPuff_[i] = now + PUFF_EVERY * (0.7 + 0.6 * ((hash >> 4 & 0xff) / 255.0));
     }
 
+    // The mouse moving through the smoke shoves the puffs near it along
+    // with it, the more the nearer; they drift on a little and settle, as
+    // smoke does when a hand passes through it.
+    double dt = std::clamp(now - lastSmokeTick_, 0.0, 0.3);
+    lastSmokeTick_ = now;
+    double moveX = 0.0, moveY = 0.0;
+    if (dt > 0.0 && mouse_.x >= 0)
+    {
+        moveX = mouseMovedX_ / dt;
+        moveY = mouseMovedY_ / dt;
+    }
+    mouseMovedX_ = mouseMovedY_ = 0.0;
+    double settle = std::exp(-dt / 0.7);
+    wxRect trace = traceRect();
+    for (Puff& puff : puffs_)
+    {
+        if (moveX != 0.0 || moveY != 0.0)
+        {
+            double x, y, rx, ry;
+            placePuff(puff, trace, now, x, y, rx, ry);
+            double reach = std::max(rx, ry) + 30.0;
+            double d = std::hypot(x - mouse_.x, y - mouse_.y);
+            if (d < reach)
+            {
+                double w = (1.0 - d / reach) * (1.0 - d / reach);
+                puff.driftX += 0.5 * w * moveX;
+                puff.driftY += 0.5 * w * moveY;
+                double speed = std::hypot(puff.driftX, puff.driftY);
+                if (speed > 300.0)
+                {
+                    puff.driftX *= 300.0 / speed;
+                    puff.driftY *= 300.0 / speed;
+                }
+            }
+        }
+        puff.pushX += puff.driftX * dt;
+        puff.pushY += puff.driftY * dt;
+        puff.driftX *= settle;
+        puff.driftY *= settle;
+    }
+
     if (smoke_ <= 0.0 && puffs_.empty()) smokeTimer_.Stop();
     Refresh(false);
+}
+
+void GlissandoScope::seamPoint(const wxRect& trace, const Fire& fire, double along, double& x, double& y,
+                               double& outX, double& outY, double& length)
+{
+    // Where along the seam, and which way is out from there.
+    double at = std::clamp(fire.centre + along * fire.halfLength, 0.0, 1.0);
+    x = trace.x, y = trace.y, outX = outY = 0.0, length = trace.width;
+    switch (fire.edge)
+    {
+        case Edge::Top: x = trace.x + at * trace.width, y = trace.y, outY = -1.0, length = trace.width; break;
+        case Edge::Bottom:
+            x = trace.x + at * trace.width, y = trace.y + trace.height, outY = 1.0, length = trace.width;
+            break;
+        case Edge::Right:
+            x = trace.x + trace.width, y = trace.y + at * trace.height, outX = 1.0, length = trace.height;
+            break;
+        case Edge::Left: x = trace.x, y = trace.y + at * trace.height, outX = -1.0, length = trace.height; break;
+    }
+}
+
+void GlissandoScope::placePuff(const Puff& puff, const wxRect& trace, double now, double& x, double& y,
+                               double& rx, double& ry) const
+{
+    const Fire& fire = fires()[puff.fire];
+    double age = now - puff.born;
+    double x0, y0, outX, outY, length;
+    seamPoint(trace, fire, puff.along, x0, y0, outX, outY, length);
+
+    // Out of the seam, then up quickly, curling over as it goes: each puff
+    // turns about a centre that rises with it, the turn widening.
+    double out = 12.0 * (1.0 - std::exp(-age / 0.5));
+    double rise = 11.0 * age + 3.5 * age * age;
+    double curl = 2.0 + 5.0 * age;
+    double turn = puff.seed + (puff.seed > 3.14159 ? 1.9 : -1.9) * age;
+    x = x0 + outX * out + curl * std::sin(turn) + puff.pushX;
+    y = y0 + outY * out - rise + 0.6 * curl * (std::cos(turn) - 1.0) + puff.pushY;
+
+    // A flat sheet along the seam, thickening as it spreads: wide off the
+    // top and bottom, tall off the sides.
+    double longR = 0.12 * fire.halfLength * length + 10.0 + 9.0 * age;
+    double shortR = 3.0 + 4.5 * age;
+    bool across = fire.edge == Edge::Top || fire.edge == Edge::Bottom;
+    rx = across ? longR : shortR;
+    ry = across ? shortR : longR;
 }
 
 void GlissandoScope::paintSmoke(wxGraphicsContext* gc, const wxRect& trace)
@@ -292,50 +383,22 @@ void GlissandoScope::paintSmoke(wxGraphicsContext* gc, const wxRect& trace)
     const std::vector<Fire>& all = fires();
     gc->SetPen(*wxTRANSPARENT_PEN);
 
-    // Where along the seam, and which way is out from there.
-    auto seam = [&trace](const Fire& fire, double along, double& x, double& y, double& outX, double& outY,
-                         double& length) {
-        double at = std::clamp(fire.centre + along * fire.halfLength, 0.0, 1.0);
-        x = trace.x, y = trace.y, outX = outY = 0.0, length = trace.width;
-        switch (fire.edge)
-        {
-            case Edge::Top: x = trace.x + at * trace.width, y = trace.y, outY = -1.0, length = trace.width; break;
-            case Edge::Bottom:
-                x = trace.x + at * trace.width, y = trace.y + trace.height, outY = 1.0, length = trace.width;
-                break;
-            case Edge::Right:
-                x = trace.x + trace.width, y = trace.y + at * trace.height, outX = 1.0, length = trace.height;
-                break;
-            case Edge::Left: x = trace.x, y = trace.y + at * trace.height, outX = -1.0, length = trace.height; break;
-        }
-    };
-
     for (const Puff& puff : puffs_)
     {
-        const Fire& fire = all[puff.fire];
         double age = now - puff.born;
         double f = std::clamp(age / PUFF_SECONDS, 0.0, 1.0);
-        double envelope = std::min(1.0, age / 0.6) * std::pow(1.0 - f, 1.5);
+
+        // Where the seam seeps thickest the smoke comes out dense right at
+        // the base, and only spreads thin higher up; elsewhere it gathers
+        // more gently.
+        double hot = std::clamp((puff.density - 0.6) / 0.4, 0.0, 1.0);
+        double envelope = std::min(1.0, age / (0.6 - 0.45 * hot)) * std::pow(1.0 - f, 1.5) *
+                          (1.0 + 1.6 * hot * std::exp(-age / 0.7));
         double alpha = PUFF_ALPHA * puff.strength * envelope;
         if (alpha < 0.5) continue;
 
-        double x0, y0, outX, outY, length;
-        seam(fire, puff.along, x0, y0, outX, outY, length);
-        // Out of the seam, then up quickly, curling over as it goes: each
-        // puff turns about a centre that rises with it, the turn widening.
-        double out = 12.0 * (1.0 - std::exp(-age / 0.5));
-        double rise = 11.0 * age + 3.5 * age * age;
-        double curl = 2.0 + 5.0 * age;
-        double turn = puff.seed + (puff.seed > 3.14159 ? 1.9 : -1.9) * age;
-        double x = x0 + outX * out + curl * std::sin(turn);
-        double y = y0 + outY * out - rise + 0.6 * curl * (std::cos(turn) - 1.0);
-
-        // A flat sheet along the seam, thickening as it spreads: wide off
-        // the top and bottom, tall off the sides.
-        double longR = 0.12 * fire.halfLength * length + 10.0 + 9.0 * age;
-        double shortR = 3.0 + 4.5 * age;
-        bool across = fire.edge == Edge::Top || fire.edge == Edge::Bottom;
-        double rx = across ? longR : shortR, ry = across ? shortR : longR;
+        double x, y, rx, ry;
+        placePuff(puff, trace, now, x, y, rx, ry);
 
         // Dark and close by the fire, paler as it spreads.
         double pale = std::min(1.0, age / 3.0);
@@ -368,7 +431,7 @@ void GlissandoScope::paintSmoke(wxGraphicsContext* gc, const wxRect& trace)
         {
             double along = k / 4.5;
             double x, y, outX, outY, length;
-            seam(fire, along, x, y, outX, outY, length);
+            seamPoint(trace, fire, along, x, y, outX, outY, length);
             x += 4.0 * outX, y += 4.0 * outY;
             unsigned char a = (unsigned char)std::lround(30.0 * smoke_ * seepDensity(fire, along, now));
             if (a == 0) continue;
@@ -767,6 +830,12 @@ void GlissandoScope::OnWheel(wxMouseEvent& event)
 void GlissandoScope::OnMotion(wxMouseEvent& event)
 {
     hoverX_ = traceRect().Contains(event.GetPosition()) ? event.GetX() : -1;
+    if (mouse_.x >= 0 && smokeTimer_.IsRunning())
+    {
+        mouseMovedX_ += event.GetX() - mouse_.x;
+        mouseMovedY_ += event.GetY() - mouse_.y;
+    }
+    mouse_ = event.GetPosition();
     Refresh(false);
 }
 

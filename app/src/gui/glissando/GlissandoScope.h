@@ -282,14 +282,30 @@ private:
         double along;               // where on its fire's stretch, -1 to 1
         double born;                // steady clock seconds
         double strength;            // how thick the smoke was there, then
+        double density;             // how thick that part of the seam was seeping, 0 to 1
         double seed;                // its own wobble
+        double pushX = 0.0;         // how far the mouse has pushed it, pixels
+        double pushY = 0.0;
+        double driftX = 0.0;        // and how fast it is still drifting from that, pixels a second
+        double driftY = 0.0;
     };
     wxTimer smokeTimer_;
     double smoke_ = 0.0;
     unsigned puffSerial_ = 0;
     std::deque<Puff> puffs_;
 
+    double lastSmokeTick_ = 0.0;
+    // The mouse, moving through the smoke, pushes it about like air.
+    wxPoint mouse_{-1, -1};         // where it is over the control, or -1 when it isn't
+    double mouseMovedX_ = 0.0;      // how far it has moved since the last smoke tick
+    double mouseMovedY_ = 0.0;
+
     static const std::vector<Fire>& fires();
+    static void seamPoint(const wxRect& trace, const Fire& fire, double along, double& x, double& y,
+                          double& outX, double& outY, double& length);
+    // Where a puff is now and how big, mouse pushes included.
+    void placePuff(const Puff& puff, const wxRect& trace, double now, double& x, double& y, double& rx,
+                   double& ry) const;
     static double seepDensity(const Fire& fire, double along, double now);
     std::vector<double> nextPuff_;   // per fire, steady clock seconds
 };
