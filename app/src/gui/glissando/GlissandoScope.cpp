@@ -61,8 +61,8 @@ constexpr int SHIP_GAP_ROWS = 2;
 // thickens, each letting off a puff every PUFF_EVERY seconds that lives
 // PUFF_SECONDS. A plume is many faint puffs over one another, so each is
 // no more than PUFF_ALPHA.
-constexpr double PUFF_SECONDS = 5.5;
-constexpr double PUFF_EVERY = 0.06;
+constexpr double PUFF_SECONDS = 4.0;
+constexpr double PUFF_EVERY = 0.09;
 constexpr double PUFF_ALPHA = 60.0;
 constexpr int SMOKE_FRAME_MS = 100;
 
@@ -209,18 +209,32 @@ void GlissandoScope::setActivity(bool receiving, bool transmitting)
     Refresh();
 }
 
+// How many of the fires burn: a couple at the first wisp, more catching
+// quickly at first and then more slowly, all of them at the thickest.
+static int burningFires(double smoke, int fires)
+{
+    if (smoke <= 0.0) return 0;
+    return std::min(fires, 2 + (int)std::floor(std::sqrt(smoke) * (fires - 2) + 0.5));
+}
+
 const std::vector<GlissandoScope::Fire>& GlissandoScope::fires()
 {
     // Where they are never changes: the first to catch, then the rest in
     // the order they catch as the smoke thickens.
     static const std::vector<Fire> FIRES = {
-        {Edge::Bottom, 0.62, 0.22, 0.0},
-        {Edge::Top, 0.30, 0.20, 1.7},
-        {Edge::Right, 0.70, 0.18, 3.1},
-        {Edge::Bottom, 0.18, 0.14, 4.4},
-        {Edge::Left, 0.40, 0.16, 5.2},
-        {Edge::Top, 0.78, 0.16, 2.5},
-        {Edge::Right, 0.22, 0.12, 0.9},
+        {Edge::Bottom, 0.62, 0.16, 0.0},
+        {Edge::Top, 0.30, 0.14, 1.7},
+        {Edge::Right, 0.70, 0.14, 3.1},
+        {Edge::Left, 0.40, 0.14, 5.2},
+        {Edge::Bottom, 0.20, 0.12, 4.4},
+        {Edge::Top, 0.78, 0.12, 2.5},
+        {Edge::Right, 0.25, 0.10, 0.9},
+        {Edge::Left, 0.82, 0.10, 3.8},
+        {Edge::Bottom, 0.88, 0.08, 1.2},
+        {Edge::Top, 0.55, 0.08, 4.9},
+        {Edge::Top, 0.06, 0.05, 2.2},
+        {Edge::Bottom, 0.40, 0.07, 5.8},
+        {Edge::Left, 0.10, 0.07, 0.4},
     };
     return FIRES;
 }
@@ -248,11 +262,9 @@ void GlissandoScope::tickSmoke()
     double now = steadySeconds();
     while (!puffs_.empty() && now - puffs_.front().born > PUFF_SECONDS) puffs_.pop_front();
 
-    // More fires burn as the smoke thickens: one at the faintest, all of
-    // them at its thickest.
     const std::vector<Fire>& all = fires();
     nextPuff_.resize(all.size(), 0.0);
-    int burning = smoke_ > 0.0 ? 1 + (int)std::floor(smoke_ * (all.size() - 1) + 0.5) : 0;
+    int burning = burningFires(smoke_, (int)all.size());
     for (int i = 0; i < burning; i++)
     {
         if (now < nextPuff_[i]) continue;
@@ -309,16 +321,19 @@ void GlissandoScope::paintSmoke(wxGraphicsContext* gc, const wxRect& trace)
 
         double x0, y0, outX, outY, length;
         seam(fire, puff.along, x0, y0, outX, outY, length);
-        double out = 12.0 * (1.0 - std::exp(-age / 0.8));
-        double rise = 5.0 * age + 1.3 * age * age;
-        double drift = (1.5 + 2.5 * age) * std::sin(puff.seed + 0.7 * age);
-        double x = x0 + outX * out + drift;
-        double y = y0 + outY * out - rise;
+        // Out of the seam, then up quickly, curling over as it goes: each
+        // puff turns about a centre that rises with it, the turn widening.
+        double out = 12.0 * (1.0 - std::exp(-age / 0.5));
+        double rise = 11.0 * age + 3.5 * age * age;
+        double curl = 2.0 + 5.0 * age;
+        double turn = puff.seed + (puff.seed > 3.14159 ? 1.9 : -1.9) * age;
+        double x = x0 + outX * out + curl * std::sin(turn);
+        double y = y0 + outY * out - rise + 0.6 * curl * (std::cos(turn) - 1.0);
 
         // A flat sheet along the seam, thickening as it spreads: wide off
         // the top and bottom, tall off the sides.
-        double longR = 0.12 * fire.halfLength * length + 10.0 + 7.0 * age;
-        double shortR = 3.0 + 3.0 * age;
+        double longR = 0.12 * fire.halfLength * length + 10.0 + 9.0 * age;
+        double shortR = 3.0 + 4.5 * age;
         bool across = fire.edge == Edge::Top || fire.edge == Edge::Bottom;
         double rx = across ? longR : shortR, ry = across ? shortR : longR;
 
@@ -345,7 +360,7 @@ void GlissandoScope::paintSmoke(wxGraphicsContext* gc, const wxRect& trace)
 
     // And along each burning stretch, a faint warm glow in the seam, as
     // thick and thin as the smoke coming out of it.
-    int burning = smoke_ > 0.0 ? 1 + (int)std::floor(smoke_ * (all.size() - 1) + 0.5) : 0;
+    int burning = burningFires(smoke_, (int)all.size());
     for (int i = 0; i < burning; i++)
     {
         const Fire& fire = all[i];
