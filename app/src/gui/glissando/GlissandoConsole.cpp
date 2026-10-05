@@ -857,6 +857,7 @@ void GlissandoConsole::refreshTelemetry()
     receivingLamp_->SetLit(t.receiving);
     transmittingLamp_->SetLit(t.transmitting);
     scope_->setActivity(t.receiving, t.transmitting);
+    scope_->setSmoke(t.smoke);
     scope_->setCarrierSense(t.channelHeld, t.carrierHz);
     for (const GlissandoScopeFrame& frame : host_->glissandoHeardFrames()) scope_->addHeard(frame);
     for (const GlissandoScopeSent& frame : host_->glissandoSentFrames()) scope_->addSent(frame);

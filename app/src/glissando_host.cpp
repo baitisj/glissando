@@ -281,6 +281,13 @@ GlissandoTelemetry MainFrame::glissandoTelemetry()
     bool connected = wxGetApp().rigFrequencyController && wxGetApp().rigFrequencyController->isConnected();
     telemetry.driveAutoDeaf = connected && !(meters && meters->canReadAlc());
     telemetry.alcOver = alcOverAtMs_ != 0 && steadyNowMs() - alcOverAtMs_ < ALC_OVER_SHOW_MS;
+
+    // The console asks four times a second, so this is where the smoke
+    // thickens and clears; COMMS reads the same level for its warning.
+    double keyedSeconds = telemetry.transmitting && keyedAtMs_ != 0 ? (steadyNowMs() - keyedAtMs_) / 1000.0 : 0.0;
+    double rfPower = wxGetApp().appConfiguration.glissandoSmoke ? rigRfPower_ : NAN;
+    telemetry.smoke = smokeGauge_.update(steadyNowMs() / 1000.0, keyedSeconds, rfPower,
+                                         wxGetApp().appConfiguration.glissandoSmokeSeconds);
     return telemetry;
 }
 
@@ -295,12 +302,15 @@ void MainFrame::pollRigMeters_()
         bool holding = rigSwrAbortAtMs_ != 0 && steadyNowMs() - rigSwrAbortAtMs_ < SWR_ABORT_HOLD_MS;
         if (!holding) rigSwr_ = NAN;
         driveServo_.restart();
+        keyedAtMs_ = 0;
         return;
     }
+    if (keyedAtMs_ == 0) keyedAtMs_ = steadyNowMs();
 
+    // The power setting only for the smoke, an easter egg (see SmokeGauge).
     auto& rig = wxGetApp().appConfiguration.rigControlConfiguration;
     auto meters = std::dynamic_pointer_cast<IRigTransmitMeters>(wxGetApp().rigFrequencyController);
-    if (meters) meters->requestMeters(rig.swrMeter, rig.driveAuto);
+    if (meters) meters->requestMeters(rig.swrMeter, rig.driveAuto, wxGetApp().appConfiguration.glissandoSmoke);
 }
 
 void MainFrame::onRigAlcReading_(double alc)

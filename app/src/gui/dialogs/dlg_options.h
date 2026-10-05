@@ -134,6 +134,8 @@ class OptionsDlg : public wxDialog
         void updateCwTailControls_();
         wxCheckBox*  m_ckboxGlissandoTransmitShips;
         wxCheckBox*  m_ckboxGlissandoShowMarquee;
+        wxCheckBox*  m_ckboxGlissandoSmoke;
+        wxTextCtrl*  m_txtGlissandoSmokeSeconds;
         wxCheckBox*  m_ckboxData2G;
         wxTextCtrl*  m_txtData2GHost;
         wxTextCtrl*  m_txtData2GKissPort;

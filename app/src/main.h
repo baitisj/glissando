@@ -80,6 +80,7 @@
 #include "sndfile.h"
 #include "comp_prim.h"
 #include "rig_control/DriveServo.h"
+#include "rig_control/SmokeGauge.h"
 #include "rig_control/HamlibRigController.h"
 #include "rig_control/SerialPortOutRigController.h"
 #include "rig_control/SerialPortInRigController.h"
@@ -365,6 +366,8 @@ public:
     // The keying length past which the time-out timer cuts in: the app's,
     // or 180 s, the usual setting on a rig, when the app's is off.
     int chatTimeOutSeconds();
+    // The smoke off the visi-scope, 0 for none to 1 (see SmokeGauge).
+    double smokeLevel() const { return smokeGauge_.level(); }
 
     // True when chat goes through our own modem and the console is
     // disengaged: there is no transmitter, so anything queued waits for the
@@ -581,6 +584,9 @@ private:
         void onRigSwrReading_(double swr);
         void onRigAlcReading_(double alc);
         double rigSwr_ = NAN;               // NaN until a reading comes back on this keying
+        double rigRfPower_ = NAN;           // the radio's power setting as last read, NaN never read
+        uint64_t keyedAtMs_ = 0;            // when the radio was keyed, as the meter poll saw it; 0 unkeyed
+        SmokeGauge smokeGauge_;             // the easter egg: smoke on a long keying at high power
         uint64_t rigSwrAbortAtMs_ = 0;      // when high SWR last aborted a transmission
         DriveServo driveServo_{TX_ATTENUATION_MIN, 0.5};
         uint64_t alcOverAtMs_ = 0;          // when the ALC last read over the DRIVE target

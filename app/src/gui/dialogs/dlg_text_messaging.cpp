@@ -607,6 +607,13 @@ void TextMessagingDialog::buildControls()
     m_txtInhibited->Hide();
     transmitPlate->GetContentSizer()->Add(m_txtInhibited, 0, wxEXPAND | wxBOTTOM, 4);
 
+    // A word to the wise while the visi-scope smokes (see SmokeGauge).
+    m_txtSmoke = new WrappingText(transmitPlate);
+    m_txtSmoke->SetForegroundColour(Colour::Alarm);
+    m_txtSmoke->setText(_("Your rig might be on fire. Please check your finals."));
+    m_txtSmoke->Hide();
+    transmitPlate->GetContentSizer()->Add(m_txtSmoke, 0, wxEXPAND | wxBOTTOM, 4);
+
     // Which external modem chat goes through, and whether it is there.
     m_txtModem = new WrappingText(transmitPlate);
     m_txtModem->SetForegroundColour(Colour::Bone);
@@ -1517,9 +1524,19 @@ void TextMessagingDialog::OnTimer(wxTimerEvent&)
     updateTransmitControls();
     updateAckWaitStatus();
     updateModemStatus();
+    updateSmokeWarning();
 
     // Auto can change the tempo while the text sits there.
     updateAirTime();
+}
+
+void TextMessagingDialog::updateSmokeWarning()
+{
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    bool smoking = frame != nullptr && frame->smokeLevel() > 0.0;
+    if (smoking == m_txtSmoke->IsShown()) return;
+    m_txtSmoke->Show(smoking);
+    Layout();
 }
 
 void TextMessagingDialog::OnBlinkTimer(wxTimerEvent&)

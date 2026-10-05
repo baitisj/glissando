@@ -145,6 +145,7 @@ private:
     void setStatus(const wxString& status, StatusKind kind = StatusKind::Sticky);
     void updateAckWaitStatus();
     void updateModemStatus();
+    void updateSmokeWarning();
 
     // Writes how long the message being typed would take on the air under
     // the send button, in red past the time-out timer. Nothing for codec2
@@ -192,6 +193,7 @@ private:
     WrappingText* m_txtStatus;
     WrappingText* m_txtInhibited;
     WrappingText* m_txtModem;       // Data2G's connection, while chat uses it
+    WrappingText* m_txtSmoke;       // the warning while the visi-scope smokes
     wxTimer m_refreshTimer;
     wxTimer m_blinkTimer;
 

@@ -267,12 +267,18 @@ bool HamlibRigController::canReadAlc()
     return isConnected() && canReadAlc_.load(std::memory_order_acquire);
 }
 
-void HamlibRigController::requestMeters(bool swr, bool alc)
+bool HamlibRigController::canReadRfPower()
+{
+    return isConnected() && canReadRfPower_.load(std::memory_order_acquire);
+}
+
+void HamlibRigController::requestMeters(bool swr, bool alc, bool rfPower)
 {
     swr = swr && canReadSwr();
     alc = alc && canReadAlc();
-    if ((!swr && !alc) || metersRequestPending_.exchange(true, std::memory_order_acq_rel)) return;
-    enqueue_(std::bind(&HamlibRigController::requestMetersImpl_, this, swr, alc));
+    rfPower = rfPower && canReadRfPower();
+    if ((!swr && !alc && !rfPower) || metersRequestPending_.exchange(true, std::memory_order_acq_rel)) return;
+    enqueue_(std::bind(&HamlibRigController::requestMetersImpl_, this, swr, alc, rfPower));
 }
 
 int HamlibRigController::getRigResponseTimeMicroseconds()
@@ -499,6 +505,8 @@ void HamlibRigController::connectImpl_()
         log_info("Radio %s report SWR", canReadSwr_.load() ? "can" : "cannot");
         canReadAlc_.store(rig_has_get_level(tmpRig, RIG_LEVEL_ALC) != 0, std::memory_order_release);
         log_info("Radio %s report ALC", canReadAlc_.load() ? "can" : "cannot");
+        canReadRfPower_.store(rig_has_get_level(tmpRig, RIG_LEVEL_RFPOWER) != 0, std::memory_order_release);
+        log_info("Radio %s report its power setting", canReadRfPower_.load() ? "can" : "cannot");
 
         // Make sure PTT is not enabled as there have been reports of some 
         // radios starting off in this state.
@@ -778,7 +786,7 @@ void HamlibRigController::setModeImpl_(IRigFrequencyController::Mode mode)
     }
 }
 
-void HamlibRigController::requestMetersImpl_(bool swr, bool alc)
+void HamlibRigController::requestMetersImpl_(bool swr, bool alc, bool rfPower)
 {
     metersRequestPending_.store(false, std::memory_order_release);
 
@@ -808,6 +816,17 @@ void HamlibRigController::requestMetersImpl_(bool swr, bool alc)
             onAlcReading(this, value.f);
         else
             log_debug("rig_get_level(ALC): error = %s ", rigerror(result));
+    }
+
+    if (rfPower)
+    {
+        value_t value;
+        value.f = 0;
+        int result = rig_get_level(tmpRig, RIG_VFO_CURR, RIG_LEVEL_RFPOWER, &value);
+        if (result == RIG_OK)
+            onRfPowerReading(this, value.f);
+        else
+            log_debug("rig_get_level(RFPOWER): error = %s ", rigerror(result));
     }
 }
 

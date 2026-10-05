@@ -69,6 +69,7 @@ struct GlissandoTelemetry
     bool driveAuto = false;         // DRIVE pushed in: the radio's ALC turns it down
     bool driveAutoDeaf = false;     // pushed in, but the radio connected can't report ALC
     bool alcOver = false;           // the ALC read over target just now
+    double smoke = 0.0;             // the easter egg: smoke off the scope, 0 to 1 (see SmokeGauge)
     bool chatUnread = false;        // a message has come in since the COMMS window was last open
     bool channelHeld = false;       // somebody else has the channel: our transmit queue waits
     std::vector<double> carrierHz;  // the notes carrier sense hears holding it, if it hears any
