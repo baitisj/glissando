@@ -581,6 +581,8 @@ private:
         void onRigSwrReading_(double swr);
         void onRigAlcReading_(double alc);
         double rigSwr_ = NAN;               // NaN until a reading comes back on this keying
+        double rigRfPower_ = NAN;           // the radio's power setting as last read, NaN never read
+        uint64_t keyedAtMs_ = 0;            // when the radio was keyed, as the meter poll saw it; 0 unkeyed
         uint64_t rigSwrAbortAtMs_ = 0;      // when high SWR last aborted a transmission
         DriveServo driveServo_{TX_ATTENUATION_MIN, 0.5};
         uint64_t alcOverAtMs_ = 0;          // when the ALC last read over the DRIVE target

@@ -63,7 +63,8 @@ public:
     virtual void requestCurrentFrequencyMode() override;
     virtual bool canReadSwr() override;
     virtual bool canReadAlc() override;
-    virtual void requestMeters(bool swr, bool alc) override;
+    virtual bool canReadRfPower() override;
+    virtual void requestMeters(bool swr, bool alc, bool rfPower) override;
 
     static void InitializeHamlibLibrary();
     static int RigNameToIndex(std::string const& rigName);
@@ -104,6 +105,7 @@ private:
     // Set on connect from the rig's capabilities.
     std::atomic<bool> canReadSwr_{false};
     std::atomic<bool> canReadAlc_{false};
+    std::atomic<bool> canReadRfPower_{false};
     std::atomic<bool> metersRequestPending_{false};
   
     // Tracks errors encountered during/after rig_open() so that
@@ -130,7 +132,7 @@ private:
     void setFrequencyImpl_(uint64_t frequencyHz);
     void setModeImpl_(IRigFrequencyController::Mode mode);
     void requestCurrentFrequencyModeImpl_();
-    void requestMetersImpl_(bool swr, bool alc);
+    void requestMetersImpl_(bool swr, bool alc, bool rfPower);
     
     static RigList RigList_;
     static RigNameList RigNameList_;

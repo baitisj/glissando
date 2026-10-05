@@ -14,6 +14,7 @@
 #ifndef GUI_GLISSANDO__GLISSANDO_CONSOLE_H
 #define GUI_GLISSANDO__GLISSANDO_CONSOLE_H
 
+#include <cmath>
 #include <vector>
 
 #include <wx/frame.h>
@@ -22,6 +23,7 @@
 
 #include "GlissandoModem.h"
 #include "GlissandoScope.h"
+#include "rig_control/SmokeGauge.h"
 
 namespace Chaotica
 {
@@ -69,6 +71,9 @@ struct GlissandoTelemetry
     bool driveAuto = false;         // DRIVE pushed in: the radio's ALC turns it down
     bool driveAutoDeaf = false;     // pushed in, but the radio connected can't report ALC
     bool alcOver = false;           // the ALC read over target just now
+    double keyedSeconds = 0.0;      // how long the radio has been keyed without a break
+    double rfPower = NAN;           // the radio's power setting 0 to 1, NaN unknown (or smoke turned off)
+    int timeOutSeconds = 180;       // the transmit time-out the smoke is timed against
     bool chatUnread = false;        // a message has come in since the COMMS window was last open
     bool channelHeld = false;       // somebody else has the channel: our transmit queue waits
     std::vector<double> carrierHz;  // the notes carrier sense hears holding it, if it hears any
@@ -179,6 +184,7 @@ private:
 
     wxPanel* marquee_;
     GlissandoScope* scope_;
+    SmokeGauge smoke_;              // the easter egg: smoke on a long keying at high power
     Chaotica::Dial* tuningDial_;
     Chaotica::Dial* scanRateDial_;
     Chaotica::Dial* driveDial_;

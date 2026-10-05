@@ -103,6 +103,7 @@ public:
     ConfigurationDataElement<bool> glissandoShowMarquee;    // the GLISSANDO title card above the scope
     ConfigurationDataElement<bool> glissandoChatOpen;       // the COMMS window was open when the app closed
     ConfigurationDataElement<bool> glissandoSnoopOpen;      // and the snooping window
+    ConfigurationDataElement<bool> glissandoSmoke;          // the scope smokes on a long keying at high power
     ConfigurationDataElement<long> glissandoWindowLeft;
     ConfigurationDataElement<long> glissandoWindowTop;
     ConfigurationDataElement<long> glissandoWindowWidth;

@@ -85,6 +85,7 @@ FreeDVConfiguration::FreeDVConfiguration()
     , glissandoShowMarquee("/Glissando/ShowMarquee", true)
     , glissandoChatOpen("/Glissando/ChatOpen", true)
     , glissandoSnoopOpen("/Glissando/SnoopOpen", true)
+    , glissandoSmoke("/Glissando/Smoke", true)
     , glissandoWindowLeft("/Glissando/WindowLeft", -1)
     , glissandoWindowTop("/Glissando/WindowTop", -1)
     , glissandoWindowWidth("/Glissando/WindowWidth", 1040)
@@ -174,6 +175,7 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     load_(config, glissandoShowMarquee);
     load_(config, glissandoChatOpen);
     load_(config, glissandoSnoopOpen);
+    load_(config, glissandoSmoke);
     load_(config, glissandoWindowLeft);
     load_(config, glissandoWindowTop);
     load_(config, glissandoWindowWidth);
@@ -257,6 +259,7 @@ void FreeDVConfiguration::save(wxConfigBase* config)
     save_(config, glissandoShowMarquee);
     save_(config, glissandoChatOpen);
     save_(config, glissandoSnoopOpen);
+    save_(config, glissandoSmoke);
     save_(config, glissandoWindowLeft);
     save_(config, glissandoWindowTop);
     save_(config, glissandoWindowWidth);

@@ -34,14 +34,19 @@ public:
     // radio's meter).
     EventHandler<IRigTransmitMeters*, double> onAlcReading;
 
-    // Whether the radio connected now says it can report SWR, or ALC.
+    // The radio's power setting as Hamlib scales it, 0 to 1.
+    EventHandler<IRigTransmitMeters*, double> onRfPowerReading;
+
+    // Whether the radio connected now says it can report SWR, ALC, or its
+    // power setting.
     virtual bool canReadSwr() = 0;
     virtual bool canReadAlc() = 0;
+    virtual bool canReadRfPower() = 0;
 
     // Asks the radio for the meters wanted; each answer comes back on its
     // event. Meant for while transmitting: a request made while one is still
     // waiting for the radio is dropped rather than queued behind it.
-    virtual void requestMeters(bool swr, bool alc) = 0;
+    virtual void requestMeters(bool swr, bool alc, bool rfPower) = 0;
 
 protected:
     IRigTransmitMeters() = default;

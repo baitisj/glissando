@@ -110,6 +110,11 @@ public:
 
     void clear();
 
+    // Smoke curling up out of the top of the screen, 0 for none to 1 at its
+    // thickest: an easter egg for a transmitter kept keyed too long (see
+    // SmokeGauge). Even at its thickest it is faint.
+    void setSmoke(double level);
+
     // The time lens; see above.
     void setLens(bool on);
     bool lens() const { return lens_; }
@@ -172,6 +177,11 @@ private:
     void sizeHistory();
     void renderTrace(wxImage& image);
     void paintHeard(wxGraphicsContext* gc, const wxRect& trace);
+
+    // Lets off puffs of smoke while there is any, forgets the ones gone,
+    // and stops its timer once the last has.
+    void tickSmoke();
+    void paintSmoke(wxGraphicsContext* gc, const wxRect& trace);
 
     // Plays the queued sent frames forward to the transmit clock, gathering
     // the notes sung for the next row of ships.
@@ -251,6 +261,20 @@ private:
     int rowsSinceStamp_;
     int rowsGathering_;              // rows since the first of gatheringHz_
     int shipSerial_;
+
+    // The smoke, each puff drifting up from where it was let off.
+    struct Puff
+    {
+        double x;                   // across the trace, 0 to 1
+        double born;                // steady clock seconds
+        double strength;            // the smoke's level when it was let off
+        double seed;                // its own wobble
+    };
+    wxTimer smokeTimer_;
+    double smoke_ = 0.0;
+    double nextPuff_ = 0.0;
+    unsigned puffSerial_ = 0;
+    std::deque<Puff> puffs_;
 };
 
 #endif // GUI_GLISSANDO__GLISSANDO_SCOPE_H

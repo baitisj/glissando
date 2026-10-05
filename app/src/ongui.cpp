@@ -489,6 +489,9 @@ bool MainFrame::OpenHamlibRig() {
         tmp->onAlcReading += [this](IRigTransmitMeters*, double alc) {
             CallAfter([this, alc]() { onRigAlcReading_(alc); });
         };
+        tmp->onRfPowerReading += [this](IRigTransmitMeters*, double power) {
+            CallAfter([this, power]() { rigRfPower_ = power; });
+        };
         wxGetApp().rigFrequencyController->connect();
         return true;
     }

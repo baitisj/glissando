@@ -281,6 +281,10 @@ GlissandoTelemetry MainFrame::glissandoTelemetry()
     bool connected = wxGetApp().rigFrequencyController && wxGetApp().rigFrequencyController->isConnected();
     telemetry.driveAutoDeaf = connected && !(meters && meters->canReadAlc());
     telemetry.alcOver = alcOverAtMs_ != 0 && steadyNowMs() - alcOverAtMs_ < ALC_OVER_SHOW_MS;
+
+    telemetry.keyedSeconds = telemetry.transmitting && keyedAtMs_ != 0 ? (steadyNowMs() - keyedAtMs_) / 1000.0 : 0.0;
+    telemetry.rfPower = wxGetApp().appConfiguration.glissandoSmoke ? rigRfPower_ : NAN;
+    telemetry.timeOutSeconds = chatTimeOutSeconds();
     return telemetry;
 }
 
@@ -295,12 +299,15 @@ void MainFrame::pollRigMeters_()
         bool holding = rigSwrAbortAtMs_ != 0 && steadyNowMs() - rigSwrAbortAtMs_ < SWR_ABORT_HOLD_MS;
         if (!holding) rigSwr_ = NAN;
         driveServo_.restart();
+        keyedAtMs_ = 0;
         return;
     }
+    if (keyedAtMs_ == 0) keyedAtMs_ = steadyNowMs();
 
+    // The power setting only for the smoke, an easter egg (see SmokeGauge).
     auto& rig = wxGetApp().appConfiguration.rigControlConfiguration;
     auto meters = std::dynamic_pointer_cast<IRigTransmitMeters>(wxGetApp().rigFrequencyController);
-    if (meters) meters->requestMeters(rig.swrMeter, rig.driveAuto);
+    if (meters) meters->requestMeters(rig.swrMeter, rig.driveAuto, wxGetApp().appConfiguration.glissandoSmoke);
 }
 
 void MainFrame::onRigAlcReading_(double alc)
