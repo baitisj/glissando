@@ -262,27 +262,36 @@ private:
     int rowsGathering_;              // rows since the first of gatheringHz_
     int shipSerial_;
 
-    // The smoke: a few hot spots behind the bezel, each sending up a plume
-    // of puffs. A puff is placed afresh from its age every frame, so the
-    // puffs of one plume trace a winding column that sways as it goes.
+    // The smoke: a few fires behind the bezel, always in the same places,
+    // each seeping smoke out of a stretch of the seam between bezel and
+    // screen. Along that stretch the smoke is thicker in places and thinner
+    // in others, and the pattern shifts slowly. Each puff is a flat sheet
+    // lying along the seam it came from: wide off the top and bottom, tall
+    // off the sides. A puff is placed afresh from its age every frame.
+    enum class Edge { Top, Right, Bottom, Left };
     struct Fire
     {
-        double around;              // where round the bezel, 0 to 1 clockwise from the top left
-        double phase;               // its own sway
-        double nextPuff = 0.0;      // steady clock seconds
+        Edge edge;
+        double centre;              // along its edge, 0 to 1
+        double halfLength;          // of the stretch it seeps from, as a fraction of the edge
+        double phase;               // its own pattern of thick and thin
     };
     struct Puff
     {
         size_t fire;
+        double along;               // where on its fire's stretch, -1 to 1
         double born;                // steady clock seconds
-        double strength;            // the smoke's level when it was let off
+        double strength;            // how thick the smoke was there, then
         double seed;                // its own wobble
     };
     wxTimer smokeTimer_;
     double smoke_ = 0.0;
     unsigned puffSerial_ = 0;
-    std::vector<Fire> fires_;
     std::deque<Puff> puffs_;
+
+    static const std::vector<Fire>& fires();
+    static double seepDensity(const Fire& fire, double along, double now);
+    std::vector<double> nextPuff_;   // per fire, steady clock seconds
 };
 
 #endif // GUI_GLISSANDO__GLISSANDO_SCOPE_H
