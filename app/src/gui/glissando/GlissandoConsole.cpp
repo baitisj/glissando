@@ -164,50 +164,65 @@ wxString taglineFor(Glissando::Scale scale)
 
 wxBoxSizer* row() { return new wxBoxSizer(wxHORIZONTAL); }
 
-// The DRIVE knob's range in dB: full scale from the sound card overdrives
-// most radios' ALC, so the top is well down from it.
-constexpr double DRIVE_TOP_DB = -12.0;
+// The DRIVE knob's range in dB, with -12 dB straight up: full scale from the
+// sound card overdrives most radios' ALC, so the upper end gets less sweep.
+constexpr double DRIVE_TOP_DB = 0.0;
+constexpr double DRIVE_UPRIGHT_DB = -12.0;
 constexpr double DRIVE_BOTTOM_DB = -30.0;
 
-// A little engraved animal over the slowest and fastest tempos, the tortoise
-// and the hare, the way a tractor's throttle lever is marked.
-class Critter : public Control
+// Little engraved animals over the slowest and fastest tempos, the tortoise
+// and the hare, the way a tractor's throttle lever is marked, with a dashed
+// track between them. Each sits centred over its end button, columnWidth
+// wide, and lights with its tempo.
+class Racetrack : public Control
 {
 public:
-    enum class Kind
-    {
-        Tortoise,
-        Hare,
-    };
-
     static constexpr int HEIGHT = 22;
 
-    Critter(wxWindow* parent, Kind kind)
-        : Control(parent, wxID_ANY, wxSize(48, HEIGHT))
-        , kind_(kind)
+    Racetrack(wxWindow* parent, int width, int columnWidth)
+        : Control(parent, wxID_ANY, wxSize(width, HEIGHT))
+        , columnWidth_(columnWidth)
     {
         // empty
     }
 
-    void SetLit(bool lit)
+    void SetLit(bool tortoise, bool hare)
     {
-        if (lit_ == lit) return;
-        lit_ = lit;
+        if (tortoiseLit_ == tortoise && hareLit_ == hare) return;
+        tortoiseLit_ = tortoise;
+        hareLit_ = hare;
         Refresh();
     }
 
 protected:
     virtual void paint(wxGraphicsContext* gc, const wxSize& size) override
     {
-        // Drawn on a 48 by 22 grid, centred, facing right: the way the music runs.
-        gc->Translate((size.x - 48) / 2.0, (size.y - HEIGHT) / 2.0);
-        wxColour ink = lit_ ? Colour::Bone : Colour::Dim;
+        // Each animal is drawn on a 48 by 22 grid, facing right: the way the
+        // music runs.
+        const double ANIMAL = 48.0;
+        double tortoiseX = columnWidth_ / 2.0 - ANIMAL / 2.0;
+        double hareX = size.x - columnWidth_ / 2.0 - ANIMAL / 2.0;
+
+        // The track: faint dashes from the tortoise's nose to the hare's tail.
+        gc->SetPen(wxPen(wxColour(76, 74, 70), 1));
+        const double DASH = 5.0, GAP = 5.0, TRACK_Y = 15.5;
+        for (double x = tortoiseX + ANIMAL + 2; x + DASH <= hareX + 2; x += DASH + GAP)
+            gc->StrokeLine(x, TRACK_Y, x + DASH, TRACK_Y);
+
+        gc->PushState();
+        gc->Translate(tortoiseX, (size.y - HEIGHT) / 2.0);
+        wxColour ink = tortoiseLit_ ? Colour::Bone : Colour::Dim;
         gc->SetPen(*wxTRANSPARENT_PEN);
         gc->SetBrush(wxBrush(ink));
-        if (kind_ == Kind::Tortoise)
-            paintTortoise(gc, ink);
-        else
-            paintHare(gc);
+        paintTortoise(gc, ink);
+        gc->PopState();
+
+        gc->PushState();
+        gc->Translate(hareX, (size.y - HEIGHT) / 2.0);
+        gc->SetPen(*wxTRANSPARENT_PEN);
+        gc->SetBrush(wxBrush(hareLit_ ? Colour::Bone : Colour::Dim));
+        paintHare(gc);
+        gc->PopState();
     }
 
 private:
@@ -283,8 +298,9 @@ private:
         gc->DrawEllipse(37, 6, 1.8, 1.8);               // eye
     }
 
-    Kind kind_;
-    bool lit_ = false;
+    int columnWidth_;
+    bool tortoiseLit_ = false;
+    bool hareLit_ = false;
 };
 
 } // namespace
@@ -485,29 +501,21 @@ void GlissandoConsole::buildControls()
     const int SCALE_WIDTH = (ROW_WIDTH - (SCALES - 1) * BUTTON_GAP) / SCALES;
 
     driveDial_ = new Dial(modulationPlate, wxID_ANY, _("Drive"), DRIVE_BOTTOM_DB, DRIVE_TOP_DB, 0.1,
-                          DRIVE_TOP_DB, wxSize(110, 124));
+                          DRIVE_UPRIGHT_DB, wxSize(110, 124));
+    driveDial_->SetCentre(DRIVE_UPRIGHT_DB);
     driveDial_->SetFormatter([](double v) { return wxString::Format("%.1f dB", v); });
     driveDial_->SetWheelSteps(0.5, 0.1, 0.1);
     driveDial_->SetPushable(true);
     modulationRow->Add(driveDial_, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
 
     auto* buttons = new wxBoxSizer(wxVERTICAL);
+    auto* racetrack = new Racetrack(modulationPlate, GEARS * (TEMPO_WIDTH + BUTTON_GAP) - BUTTON_GAP, TEMPO_WIDTH);
+    racetrack_ = racetrack;
+    buttons->Add(racetrack_, 0);
     auto* tempoRow = row();
     for (int gear = Glissando::MIN_GEAR; gear <= Glissando::MAX_GEAR; gear++)
     {
         const Glissando::GearInfo& info = Glissando::gearInfo(gear);
-        auto* column = new wxBoxSizer(wxVERTICAL);
-        if (gear == Glissando::MIN_GEAR || gear == Glissando::MAX_GEAR)
-        {
-            auto kind = gear == Glissando::MIN_GEAR ? Critter::Kind::Tortoise : Critter::Kind::Hare;
-            auto* critter = new Critter(modulationPlate, kind);
-            critters_.push_back(critter);
-            column->Add(critter, 0, wxALIGN_CENTER_HORIZONTAL);
-        }
-        else
-        {
-            column->AddSpacer(Critter::HEIGHT);
-        }
         auto* button = new Button(modulationPlate, wxID_ANY, gearLabel(gear), true,
                                   wxSize(TEMPO_WIDTH, BUTTON_HEIGHT));
         button->SetToolTip(wxString::Format(_("%s: %.0f ms notes, %.0f s per frame%s"),
@@ -516,15 +524,14 @@ void GlissandoConsole::buildControls()
                                             info.voices > 1 ? _(", two voices") : wxString()));
         button->Bind(wxEVT_TOGGLEBUTTON, [this, gear](wxCommandEvent&) { selectGear(gear); });
         gearButtons_.push_back(button);
-        column->Add(button, 0);
-        tempoRow->Add(column, 0, wxRIGHT, BUTTON_GAP);
+        tempoRow->Add(button, 0, wxRIGHT, BUTTON_GAP);
     }
     tempoRow->AddSpacer(AUTO_GAP - BUTTON_GAP);
     autoButton_ = new Button(modulationPlate, wxID_ANY, _("Auto"), true, wxSize(AUTO_WIDTH, BUTTON_HEIGHT));
     autoButton_->SetToolTip(_("Shift tempo automatically, from the signal and fading measured on the last "
                               "frame heard. The lit tempo is the one being sent; the one chosen "
                               "by hand glows faintly and is used until something has been heard."));
-    tempoRow->Add(autoButton_, 0, wxALIGN_BOTTOM);
+    tempoRow->Add(autoButton_, 0);
     buttons->Add(tempoRow, 0, wxBOTTOM, 8);
 
     auto* scaleRow = row();
@@ -802,11 +809,7 @@ void GlissandoConsole::updateGearButtons()
         gearButtons_[i]->SetHinted(settings_.autoGear && gear == settings_.gear && gear != lit);
     }
     // The tortoise and the hare light with their tempos.
-    if (critters_.size() == 2)
-    {
-        static_cast<Critter*>(critters_[0])->SetLit(lit == Glissando::MIN_GEAR);
-        static_cast<Critter*>(critters_[1])->SetLit(lit == Glissando::MAX_GEAR);
-    }
+    static_cast<Racetrack*>(racetrack_)->SetLit(lit == Glissando::MIN_GEAR, lit == Glissando::MAX_GEAR);
 }
 
 void GlissandoConsole::updateStaff()

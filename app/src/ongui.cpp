@@ -697,7 +697,7 @@ void MainFrame::applyTxLevel()
     bool isTuning = m_btnTogTune->GetValue();
     wxString fmtString;
 
-    // The console's DRIVE knob runs from -30 dB to -12 dB; pushed in, it
+    // The console's DRIVE knob runs from -30 dB to 0 dB; pushed in, it
     // never goes above where it was when it was pushed in.
     auto& rig = wxGetApp().appConfiguration.rigControlConfiguration;
     int txTop = rig.driveAuto ? std::min<int>(TX_DRIVE_TOP, rig.driveCeiling) : TX_DRIVE_TOP;

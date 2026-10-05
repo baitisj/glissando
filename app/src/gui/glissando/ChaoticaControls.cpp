@@ -334,6 +334,21 @@ void Dial::SetWheelSteps(double plain, double shift, double control)
     wheelControl_ = control;
 }
 
+double Dial::fractionOf(double value) const
+{
+    double span = std::max(1e-9, maximum_ - minimum_);
+    if (std::isnan(centre_)) return (value - minimum_) / span;
+    if (value <= centre_) return 0.5 * (value - minimum_) / std::max(1e-9, centre_ - minimum_);
+    return 0.5 + 0.5 * (value - centre_) / std::max(1e-9, maximum_ - centre_);
+}
+
+double Dial::valueAt(double fraction) const
+{
+    if (std::isnan(centre_)) return minimum_ + fraction * (maximum_ - minimum_);
+    if (fraction <= 0.5) return minimum_ + fraction * 2.0 * (centre_ - minimum_);
+    return centre_ + (fraction - 0.5) * 2.0 * (maximum_ - centre_);
+}
+
 void Dial::change(double value)
 {
     value = std::round(value / step_) * step_;
@@ -393,11 +408,13 @@ void Dial::OnMouseMove(wxMouseEvent& event)
     if (!dragging_) return;
     // A full sweep of the dial for 300 pixels of travel, a tenth of that with
     // shift held.
-    double perPixel = (maximum_ - minimum_) / 300.0 * (event.ShiftDown() ? 0.1 : 1.0);
-    double value = dragValue_ + (dragY_ - event.GetY()) * perPixel;
+    double perPixel = 1.0 / 300.0 * (event.ShiftDown() ? 0.1 : 1.0);
+    double fraction = fractionOf(dragValue_) + (dragY_ - event.GetY()) * perPixel;
+    fraction = std::min(1.0, std::max(0.0, fraction));
+    double value = valueAt(fraction);
     // Catch on the default for a few pixels either side, so it can be found
     // again by hand.
-    if (std::fabs(value - defaultValue_) <= 4.0 * perPixel) value = defaultValue_;
+    if (std::fabs(fraction - fractionOf(defaultValue_)) <= 4.0 * perPixel) value = defaultValue_;
     // A push-pull knob has to move a few pixels before it turns, so a click
     // that wobbles is still a push.
     if (!pushable_ || std::abs(event.GetY() - dragY_) >= 3) turned_ = true;
@@ -447,12 +464,13 @@ void Dial::paint(wxGraphicsContext* gc, const wxSize& size)
     gc->SetFont(font(FontRole::Caption), Colour::Dim);
     drawSpacedTextCentred(gc, caption_, cx, 2, 2.0);
 
-    // Engraved ticks around the knob: 27 minor, every third one major.
+    // Engraved ticks around the knob: 28 minor, every seventh one major,
+    // one of them straight up.
     double start = -PI / 2.0 - DIAL_SWEEP / 2.0;
-    for (int i = 0; i <= 27; i++)
+    for (int i = 0; i <= 28; i++)
     {
-        double a = start + DIAL_SWEEP * i / 27.0;
-        bool major = i % 9 == 0;
+        double a = start + DIAL_SWEEP * i / 28.0;
+        bool major = i % 7 == 0;
         double inner = radius * (major ? 0.80 : 0.86);
         gc->SetPen(wxPen(major ? Colour::Chrome : Colour::Dim, major ? 2 : 1));
         gc->StrokeLine(cx + inner * std::cos(a), cy + inner * std::sin(a),
@@ -490,8 +508,7 @@ void Dial::paint(wxGraphicsContext* gc, const wxSize& size)
     gc->DrawEllipse(cx - cap, cy - cap, cap * 2, cap * 2);
 
     // The pointer, a lit slot in the cap.
-    double fraction = (value_ - minimum_) / std::max(1e-9, maximum_ - minimum_);
-    double a = start + DIAL_SWEEP * fraction;
+    double a = start + DIAL_SWEEP * fractionOf(value_);
     gc->SetPen(wxPen(Colour::Glow, 3, wxPENSTYLE_SOLID));
     gc->StrokeLine(cx + cap * 0.25 * std::cos(a), cy + cap * 0.25 * std::sin(a),
                    cx + cap * 0.92 * std::cos(a), cy + cap * 0.92 * std::sin(a));

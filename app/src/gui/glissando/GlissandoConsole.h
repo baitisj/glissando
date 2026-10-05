@@ -65,7 +65,7 @@ struct GlissandoTelemetry
     bool showSwr = false;           // the meter reads the radio's SWR rather than the signal
     bool swrKnown = false;          // a reading has come back since keying
     double swr = 0.0;
-    double driveDb = -12.0;         // the transmit level, as the DRIVE knob shows it
+    double driveDb = 0.0;           // the transmit level, as the DRIVE knob shows it
     bool driveAuto = false;         // DRIVE pushed in: the radio's ALC turns it down
     bool driveAutoDeaf = false;     // pushed in, but the radio connected can't report ALC
     bool alcOver = false;           // the ALC read over target just now
@@ -108,7 +108,7 @@ public:
     virtual void glissandoAbortTransmit() = 0;
     virtual void glissandoSetRigFrequency(double hz) = 0;
 
-    // The DRIVE knob: the transmit level in dB (-30 to -12), and whether
+    // The DRIVE knob: the transmit level in dB (-30 to 0), and whether
     // it is pushed in, letting the radio's ALC turn it down.
     virtual void glissandoSetDrive(double db) = 0;
     virtual void glissandoSetDriveAuto(bool automatic) = 0;
@@ -193,7 +193,7 @@ private:
     Chaotica::Readout* frameReadout_;
     std::vector<Chaotica::Button*> gearButtons_;
     std::vector<Chaotica::Button*> scaleButtons_;
-    std::vector<wxWindow*> critters_;    // the tortoise over Adagio, the hare over Duet
+    wxWindow* racetrack_;           // the tortoise over Adagio, the hare over Duet
     Chaotica::Button* autoButton_;
     Chaotica::Button* listenAllButton_;
     Chaotica::Button* wideButton_;

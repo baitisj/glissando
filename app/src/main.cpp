@@ -564,7 +564,7 @@ void MainFrame::loadConfiguration_()
     scaleFactor = exp(dbLoss/20.0 * log(10.0));
     g_tuneLevelScale.store(scaleFactor, std::memory_order_release);
 
-    // Brings a saved level above the top of the console's DRIVE knob down to it.
+    // Brings a saved level pushed in above its ceiling down to it.
     applyTxLevel();
 
     // Adjust frequency entry labels

@@ -127,6 +127,10 @@ public:
     // shift or control held. Until this is called the wheel moves a
     // hundredth of the range, or one step with shift.
     void SetWheelSteps(double plain, double shift, double control);
+    // The value with the pointer straight up; until this is called, halfway
+    // between minimum and maximum. Either side of it the dial turns evenly,
+    // so a knob can spend more of its sweep on one side.
+    void SetCentre(double value) { centre_ = value; Refresh(); }
 
     // A push-pull knob: a click that doesn't turn it pushes it in or pops it
     // out, and sends wxEVT_TOGGLEBUTTON (GetInt() 1 for in). Double clicks
@@ -144,6 +148,9 @@ protected:
 
 private:
     void change(double value);
+    // Where value sits along the sweep, 0 to 1, and back.
+    double fractionOf(double value) const;
+    double valueAt(double fraction) const;
     void OnMouseDown(wxMouseEvent& event);
     void OnMouseUp(wxMouseEvent& event);
     void OnMouseMove(wxMouseEvent& event);
@@ -156,6 +163,7 @@ private:
     double step_;
     double value_;
     double defaultValue_;
+    double centre_ = NAN;
     Formatter formatter_;
     double wheelPlain_ = 0.0;
     double wheelShift_ = 0.0;
