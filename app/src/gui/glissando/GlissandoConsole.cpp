@@ -549,6 +549,7 @@ void GlissandoConsole::buildControls()
     buttons->Add(scaleRow, 0);
     modulationRow->Add(buttons, 0, wxALIGN_CENTER_VERTICAL);
     modulationPlate->GetContentSizer()->Add(modulationRow, 0);
+    modulationPlate->CentreTitleOver(buttons);
     bottom->Add(modulationPlate, 1, wxEXPAND | wxRIGHT, 6);
 
     // Command: the master switches beside the radio's dial.

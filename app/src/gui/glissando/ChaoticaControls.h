@@ -32,6 +32,10 @@ public:
 
     wxSizer* GetContentSizer() const { return content_; }
 
+    // Centres the title over part of the contents (a sizer inside this
+    // plate) rather than over the whole plate.
+    void CentreTitleOver(wxSizer* span) { titleSpan_ = span; Refresh(); }
+
 protected:
     // Never narrower than the nameplate, so a narrow window cannot cut the
     // title off.
@@ -42,6 +46,7 @@ private:
 
     wxString title_;
     wxSizer* content_;
+    wxSizer* titleSpan_ = nullptr;
     int titleWidth_;
 };
 

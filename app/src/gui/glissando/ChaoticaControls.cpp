@@ -96,7 +96,9 @@ void Panel::OnPaint(wxPaintEvent&)
         // An engraved nameplate: a darker inset strip, chrome lettering.
         gc->SetFont(font(FontRole::Plate), Colour::Chrome);
         double w = spacedTextWidth(gc.get(), title_, 3.0) + PLATE_NAME_PADDING;
-        double x = (size.x - w) / 2.0;
+        double cx = size.x / 2.0;
+        if (titleSpan_ != nullptr) cx = titleSpan_->GetPosition().x + titleSpan_->GetSize().x / 2.0;
+        double x = cx - w / 2.0;
         gc->SetPen(wxPen(Colour::PlateEdge, 1));
         gc->SetBrush(wxBrush(Colour::PlateShadow));
         gc->DrawRoundedRectangle(x, 7, w, PLATE_TITLE_HEIGHT - 6, 3);
@@ -110,7 +112,7 @@ void Panel::OnPaint(wxPaintEvent&)
             gc->StrokeLine(x + w + 8, y, size.x - 20, y);
         }
 
-        drawSpacedTextCentred(gc.get(), title_, size.x / 2.0, 10, 3.0);
+        drawSpacedTextCentred(gc.get(), title_, cx, 10, 3.0);
     }
 }
 
