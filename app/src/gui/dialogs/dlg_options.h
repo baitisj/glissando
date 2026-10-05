@@ -100,7 +100,6 @@ class OptionsDlg : public wxDialog
         /* SWR meter */
         wxCheckBox    *m_ckboxSwrMeter;
         wxCheckBox    *m_ckboxSwrAutoAbort;
-        wxSpinCtrlDouble *m_spinAlcTarget;
         
         /* test frames, other simulated channel impairments */
 
