@@ -80,7 +80,7 @@ ComPortsDlg::ComPortsDlg(wxWindow* parent, wxWindowID id, const wxString& title,
 
     wxStaticBox* hamlibBox = new wxStaticBox(panel, wxID_ANY, _("Hamlib Settings"));
     wxStaticBoxSizer* staticBoxSizer18 = new wxStaticBoxSizer( hamlibBox, wxHORIZONTAL);
-    wxGridSizer* gridSizerhl = new wxGridSizer(8, 2, 0, 0);
+    wxGridSizer* gridSizerhl = new wxGridSizer(9, 2, 0, 0);
     staticBoxSizer18->Add(gridSizerhl, 1, static_cast<int>(wxEXPAND)|static_cast<int>(wxALIGN_LEFT), 5);
 
     /* Use Hamlib for PTT checkbox. */
@@ -149,6 +149,20 @@ ComPortsDlg::ComPortsDlg(wxWindow* parent, wxWindowID id, const wxString& title,
     m_cbPttMethod->Append(wxT("DTR"));
     m_cbPttMethod->Append(wxT("None"));
     m_cbPttMethod->Append(wxT("CAT via Data port"));
+
+    /* The ALC the console's DRIVE knob holds to when pushed in. */
+
+    gridSizerhl->Add(new wxStaticText(hamlibBox, wxID_ANY, _("ALC Target:"), wxDefaultPosition, wxDefaultSize, 0),
+                      0, static_cast<int>(wxALIGN_CENTER_VERTICAL) |  wxALIGN_RIGHT, 20);
+    m_spinAlcTarget = new wxSpinCtrlDouble(hamlibBox, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(140, -1),
+                                           wxSP_ARROW_KEYS, 0.05, 1.0, 0.5, 0.05);
+    m_spinAlcTarget->SetDigits(2);
+    m_spinAlcTarget->SetToolTip(_("With the console's DRIVE knob pushed in, the transmit level is turned down to hold the "
+                                  "radio's ALC at or under this. The ALC as rigctl reads it (l ALC), 0 to 1; on Icoms 1 is "
+                                  "the top of the meter's ALC zone. Two readings in a row over it turn the level down "
+                                  "0.5 dB, and one over 0.8 turns it down 2 dB. Only radios whose Hamlib backend reports "
+                                  "ALC are asked."));
+    gridSizerhl->Add(m_spinAlcTarget, 0, static_cast<int>(wxALIGN_CENTER_VERTICAL), 0);
 
     /* Force RTS / Force DTR checkboxes on one row */
     wxBoxSizer* forceRtsSizer = new wxBoxSizer(wxHORIZONTAL);
@@ -584,6 +598,7 @@ void ComPortsDlg::ExchangeData(int inout)
         /* Hamlib */
 
         m_ckUseHamlibPTT->SetValue(wxGetApp().appConfiguration.rigControlConfiguration.hamlibUseForPTT);
+        m_spinAlcTarget->SetValue(wxGetApp().appConfiguration.rigControlConfiguration.alcTarget);
         m_cbRigName->SetSelection(wxGetApp().m_intHamlibRig);
         resetIcomCIVStatus();
         m_cbSerialPort->SetValue(wxGetApp().appConfiguration.rigControlConfiguration.hamlibSerialPort);
@@ -644,6 +659,7 @@ void ComPortsDlg::ExchangeData(int inout)
         /* Hamlib settings. */
 
         wxGetApp().appConfiguration.rigControlConfiguration.hamlibUseForPTT = m_ckUseHamlibPTT->GetValue();
+        wxGetApp().appConfiguration.rigControlConfiguration.alcTarget = (float)m_spinAlcTarget->GetValue();
         wxGetApp().m_intHamlibRig = m_cbRigName->GetSelection();
         
         wxGetApp().appConfiguration.rigControlConfiguration.hamlibRigName = (wxGetApp().m_intHamlibRig >= 0) ? HamlibRigController::RigIndexToName(wxGetApp().m_intHamlibRig) : "";

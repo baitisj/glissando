@@ -212,7 +212,7 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     sizerRigControl->Add(sbSizer_ptt,0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
 
     // Read while transmitting, so these can change during a session.
-    wxStaticBox* sb_swr = new wxStaticBox(m_rigControlTab, wxID_ANY, _("SWR and ALC"));
+    wxStaticBox* sb_swr = new wxStaticBox(m_rigControlTab, wxID_ANY, _("SWR"));
     wxStaticBoxSizer* sbSizer_swr = new wxStaticBoxSizer(sb_swr, wxVERTICAL);
 
     m_ckboxSwrMeter = new wxCheckBox(sb_swr, wxID_ANY, _("Show SWR on the console's meter while transmitting"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
@@ -222,19 +222,6 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     m_ckboxSwrAutoAbort = new wxCheckBox(sb_swr, wxID_ANY, _("Abort transmitting when SWR goes over 3:1"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
     m_ckboxSwrAutoAbort->SetToolTip(_("Stops the transmission at the first reading over 3:1, as the console's Abort button would: the message is dropped, not retried."));
     sbSizer_swr->Add(m_ckboxSwrAutoAbort, 0, static_cast<int>(wxALL), 5);
-
-    wxBoxSizer* alcSizer = new wxBoxSizer(wxHORIZONTAL);
-    alcSizer->Add(new wxStaticText(sb_swr, wxID_ANY, _("With the console's DRIVE knob pushed in, hold the ALC at or under")),
-                  0, wxALIGN_CENTER_VERTICAL);
-    m_spinAlcTarget = new wxSpinCtrlDouble(sb_swr, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(90, -1),
-                                           wxSP_ARROW_KEYS, 0.05, 1.0, 0.5, 0.05);
-    m_spinAlcTarget->SetDigits(2);
-    m_spinAlcTarget->SetToolTip(_("The ALC as rigctl reads it (l ALC), 0 to 1; on Icoms 1 is the top of the meter's ALC zone. "
-                                  "While transmitting with DRIVE pushed in, two readings in a row over this turn the level "
-                                  "down 0.5 dB, and one over 0.8 turns it down 2 dB. It is never turned back up on its own. "
-                                  "Only radios whose Hamlib backend reports ALC are asked."));
-    alcSizer->Add(m_spinAlcTarget, 0, static_cast<int>(wxLEFT) | wxALIGN_CENTER_VERTICAL, 5);
-    sbSizer_swr->Add(alcSizer, 0, static_cast<int>(wxALL), 5);
 
     m_ckboxSwrMeter->Connect(wxEVT_CHECKBOX, wxCommandEventHandler(OptionsDlg::OnSwrMeterEnable), NULL, this);
 
@@ -639,7 +626,6 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         m_ckboxSwrMeter->SetValue(wxGetApp().appConfiguration.rigControlConfiguration.swrMeter);
         m_ckboxSwrAutoAbort->SetValue(wxGetApp().appConfiguration.rigControlConfiguration.swrAutoAbort);
         m_ckboxSwrAutoAbort->Enable(wxGetApp().appConfiguration.rigControlConfiguration.swrMeter);
-        m_spinAlcTarget->SetValue(wxGetApp().appConfiguration.rigControlConfiguration.alcTarget);
 
         // A FreeDV-era "frequency and mode changes" setting now means
         // frequency changes: the mode is never touched.
@@ -732,7 +718,6 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
 
         wxGetApp().appConfiguration.rigControlConfiguration.swrMeter = m_ckboxSwrMeter->GetValue();
         wxGetApp().appConfiguration.rigControlConfiguration.swrAutoAbort = m_ckboxSwrAutoAbort->GetValue();
-        wxGetApp().appConfiguration.rigControlConfiguration.alcTarget = (float)m_spinAlcTarget->GetValue();
 
         wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqModeChanges = false;
         wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqChangesOnly = m_rbFrequencyControl->GetValue();
