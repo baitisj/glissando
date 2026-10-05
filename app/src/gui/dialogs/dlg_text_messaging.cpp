@@ -1523,8 +1523,8 @@ void TextMessagingDialog::OnTimer(wxTimerEvent&)
     updateAirTime();
 }
 
-// While the visi-scope smokes (see SmokeGauge), the status line says a word
-// to the wise after Transmitting.
+// Once the visi-scope smokes a fair bit (see SmokeGauge), the status line
+// says a word to the wise after Transmitting.
 wxString TextMessagingDialog::transmittingStatus() const
 {
     return m_smoking ? _("Transmitting. Your rig might be on fire. Please check your finals.")
@@ -1534,7 +1534,9 @@ wxString TextMessagingDialog::transmittingStatus() const
 void TextMessagingDialog::updateSmokeWarning()
 {
     MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
-    bool smoking = frame != nullptr && frame->smokeLevel() > 0.0;
+    // Only once there is a fair bit of it: half as thick as it gets, 20 s
+    // after it starts.
+    bool smoking = frame != nullptr && frame->smokeLevel() >= 0.5;
     if (smoking == m_smoking) return;
     m_smoking = smoking;
     if (m_transmitting && m_statusKind == StatusKind::Activity) setStatus(transmittingStatus(), StatusKind::Activity);
