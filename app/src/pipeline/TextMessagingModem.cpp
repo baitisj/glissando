@@ -211,6 +211,7 @@ bool TextMessagingModem::open()
         std::lock_guard<std::mutex> glissandoLock(glissandoMutex_);
         configureGlissandoReceiverLocked();
         reassembler_.reset();
+        burstHeldUntil_.clear();
     }
     glissandoRx_->start();
 
@@ -583,6 +584,7 @@ void TextMessagingModem::resetReceivers()
     {
         std::lock_guard<std::mutex> lock(glissandoMutex_);
         reassembler_.reset();
+        burstHeldUntil_.clear();
     }
     glissandoRx_->reset();
     {
@@ -642,11 +644,19 @@ TextMessagingModem::Busy TextMessagingModem::busyReason() const
 
         int gear = 0;
         double tailSeconds = 0.0;
+        bool partBurst = false;
         {
             std::lock_guard<std::mutex> lock(glissandoMutex_);
             gear = glissandoStatus_.heardGear != 0 ? glissandoStatus_.heardGear : transmitGearLocked();
             tailSeconds = farEndTailSecondsLocked(gear);
+
+            // A burst part way through, at its own tempo: another station's
+            // burst ending in the middle of it, a whole one at Presto
+            // between two frames of one at Adagio, does not end it.
+            long long now = glissandoRx_->samplesReceived();
+            for (const auto& stream : burstHeldUntil_) partBurst = partBurst || now < stream.second;
         }
+        if (partBurst) return Busy::Melody;
 
         // A burst whose last frame has been heard is over: the far end is
         // waiting for an answer, and holding the channel for another frame
@@ -696,7 +706,11 @@ void TextMessagingModem::setGlissando(const GlissandoConfig& config)
         glissando_ = config;
         glissandoStatus_.transmitGear = transmitGearLocked();
         configureGlissandoReceiverLocked();
-        if (retuned || wasOn != config.enabled) reassembler_.reset();
+        if (retuned || wasOn != config.enabled)
+        {
+            reassembler_.reset();
+            burstHeldUntil_.clear();
+        }
     }
     if (wasOn != config.enabled) glissandoRx_->reset();
     if (tuningChanged || wasOn != config.enabled)
@@ -972,7 +986,16 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
         // and the duet's low voice), or by two overlapping searches.
         long long duplicate = Glissando::gearInfo(decode.gear).samplesPerSymbol();
         GlissandoHeard heard;
-        complete = reassembler_.add(d.payload, d.startSample, duplicate, burst, &heard.segment);
+        const Glissando::GearInfo& info = Glissando::gearInfo(decode.gear);
+        const int stream = info.samplesPerSymbol() * Glissando::SCALE_COUNT + (int)d.scale;
+        complete = reassembler_.add(d.payload, d.startSample, duplicate, burst, &heard.segment, stream);
+
+        // Until its next frame could have decoded: a frame on, and the
+        // receiver's search behind it.
+        if (reassembler_.inProgress(stream))
+            burstHeldUntil_[stream] = d.startSample + (long long)(info.frameSamples() * 2.5);
+        else
+            burstHeldUntil_.erase(stream);
 
         if (!heard.segment.duplicate)
         {

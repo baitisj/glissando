@@ -312,6 +312,9 @@ private:
     GlissandoConfig glissando_;
     GlissandoStatus glissandoStatus_;
     Glissando::Reassembler reassembler_;
+    // Each stream (tempo and scale) with a burst part way through, and the
+    // receiver sample until which its next frame could still decode.
+    std::map<int, long long> burstHeldUntil_;
     std::vector<GlissandoHeard> glissandoHeard_;
     std::vector<double> lastHeardNotesHz_;      // every voice of the last frame heard
     uint64_t lastHeardStartMs_ = 0;

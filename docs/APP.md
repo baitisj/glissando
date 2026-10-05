@@ -197,6 +197,15 @@ freezes the timers until its keying ends; below about −14 dB, where the
 chord goes unheard, the ping may give up first, and the pong still shows
 in the log when it arrives.
 
+The timers also stand still while we are keyed, since the far end hears us
+and holds its answer until we stop: a ping at Adagio waiting on its pong
+used to give up while its station spent two minutes sending an
+acknowledgement owed to a third station. And bursts from different
+stations are put back together apart, by tempo and scale, so a whole
+burst at Presto heard between the two frames of an Adagio pong no longer
+throws the pong's first half away, and the channel stays held until the
+pong's second frame is due.
+
 A pong or acknowledgement with a message of ours riding behind it tells
 every listener that more follows, and a listener that then loses the message
 holds the channel for two text fragments after the reply. Our own traffic
