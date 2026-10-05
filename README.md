@@ -90,4 +90,7 @@ their own key, at no cost in sensitivity or false decodes (DESIGN.md 3.1b). List
 This work represents a long-standing dream of the inventor: to make amateur radio
 bands sound better, and to encourage harmonious interoperability.
 
+## More Information
+[Visit us on Discord: https://discord.gg/za4eYraFdX](https://discord.gg/za4eYraFdX)
+
 ![Spectrogram](docs/spectrogram.png)
