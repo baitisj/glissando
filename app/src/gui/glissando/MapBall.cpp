@@ -53,7 +53,7 @@ constexpr double BORDER_WIDTH = 0.9;
 // Brushed metal, if shown: the marks at their lightest and darkest, and the
 // band where the light catches them at its brightest.
 constexpr double MARK_LIGHT = 30.0;
-constexpr double MARK_DARK = 24.0;
+constexpr double MARK_DARK = 10.0;
 constexpr double SHEEN_BRIGHTEST = 120.0;
 
 // Where the light comes from, over the viewer's left shoulder, as a point
