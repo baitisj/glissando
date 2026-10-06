@@ -2819,6 +2819,53 @@ void testDuetFillerCarriesTheLocator()
     CHECK(portable.transport.fillers.back().empty());
 }
 
+// The console's map follows the last station heard or keyed to whose
+// locator we know, and stays put for one whose locator we do not.
+void testMapFollowsStationsWithKnownLocators()
+{
+    Station station("W1AW");
+    CHECK(station.protocol.mapStation().empty());
+
+    StationLocator known;
+    known.callsign = "VK3ABC";
+    known.gridSquare = "QF22";
+    known.support = LocatorSupport::Yes;
+    station.protocol.restoreStationLocators({known});
+    CHECK(station.protocol.mapStation().empty()); // not heard yet
+
+    auto hear = [&](const std::string& from, FrameType type) {
+        Frame frame;
+        frame.type = type;
+        frame.destinationCrc = FrameCodec::callsignHash("K1ABC");
+        frame.originCallsign = from;
+        frame.airId = 9;
+        frame.senderAutoAck = true;
+        if (type == FrameType::Locator) frame.locator = "JO62";
+        station.protocol.onFrameReceived(frame, 5.0f);
+    };
+
+    hear("VK3ABC", FrameType::Ping);
+    CHECK(station.protocol.mapStation() == "VK3ABC");
+
+    hear("DJ2LS", FrameType::Ping);                 // its locator unknown: stay put
+    CHECK(station.protocol.mapStation() == "VK3ABC");
+
+    hear("DJ2LS", FrameType::Locator);              // now it is known
+    CHECK(station.protocol.mapStation() == "DJ2LS");
+    CHECK(station.protocol.stationLocator(station.protocol.mapStation()) == "JO62");
+
+    // Keying to a station with a known locator turns the map to it.
+    std::string error;
+    CHECK(station.protocol.sendPing("VK3ABC", error));
+    station.completeOneTransmission();
+    CHECK(station.protocol.mapStation() == "VK3ABC");
+
+    // And to one without, leaves it.
+    CHECK(station.protocol.sendPing("G0ABC", error));
+    station.completeOneTransmission();
+    CHECK(station.protocol.mapStation() == "VK3ABC");
+}
+
 int main()
 {
     testAddressedMessageIsAcknowledged();
@@ -2889,6 +2936,7 @@ int main()
     testOlderStationGetsNoLocator();
     testLocatorEndsTheKeying();
     testDuetFillerCarriesTheLocator();
+    testMapFollowsStationsWithKnownLocators();
 
     if (failures > 0)
     {

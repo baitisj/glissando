@@ -258,6 +258,18 @@ std::string TextMessagingProtocol::stationLocator(const std::string& callsign) c
     return found == locatorPeers_.end() ? std::string() : found->second.gridSquare;
 }
 
+std::string TextMessagingProtocol::mapStation() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return mapStation_;
+}
+
+void TextMessagingProtocol::noteMapStationLocked(const std::string& callsign)
+{
+    auto found = locatorPeers_.find(callsign);
+    if (found != locatorPeers_.end() && !found->second.gridSquare.empty()) mapStation_ = callsign;
+}
+
 void TextMessagingProtocol::restoreStationLocators(const std::vector<StationLocator>& stations)
 {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -1028,6 +1040,8 @@ void TextMessagingProtocol::onFrameReceived(const Frame& frame, float snr)
                 handleLocatorLocked(frame, nowMs);
                 break;
         }
+
+        noteMapStationLocked(frame.originCallsign);
     }
 
     deliver(events);
@@ -1690,6 +1704,12 @@ void TextMessagingProtocol::serviceOutboxLocked(uint64_t nowMs, bool frozen,
                 {
                     keyingCarriesLocator_ = !locatorTo.empty();
                     if (keyingCarriesLocator_) locatorPeers_[locatorTo].sent = true;
+                    for (const OutgoingBurst& burst : keying)
+                    {
+                        if (burst.destination.empty()) continue;
+                        noteMapStationLocked(burst.destination);
+                        break;
+                    }
 
                     // A reply with something behind it says more follows, and a
                     // listener that then loses what follows holds the channel
