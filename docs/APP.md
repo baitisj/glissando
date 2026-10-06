@@ -257,6 +257,27 @@ background, so you can see what rides accelerated. The list is
 `HamTextTable.h`. Builds with different phrase lists cannot read each
 other's text.
 
+A station's Maidenhead locator goes on the air as a four character grid
+square (Preferences, Station: `Grid square`, with `Send it with chat`, on by
+default). It is a frame of its own, type 0xE: the header, then the grid
+packed into 15 bits as FT8 packs it, one segment from a standard callsign
+and two otherwise. It rides as the last burst of a directed message, counted
+among the bursts that follow, and goes only to a station that has said it
+reads locators: pings and acknowledgements carry a feature byte in bits 0.5
+leaves zero and never reads (bit 7, "I read locator frames"; bit 6, in an
+acknowledgement only, "I have your locator"). A 0.5 station would hold its
+answer for a whole text fragment after the message, so it never gets one.
+A station that acknowledges gets ours on each message until its
+acknowledgement says it has it; one with Auto acknowledge off gets it once.
+That is once per contact, a contact ending after 30 minutes without a frame
+either way, and again to everybody when the locator changes. A duet keying
+with a voice to spare also sings it in the filler segment, to anybody, for
+free; 0.5 skips a filler unread. Hearing a locator ends that station's
+keying for the listener, so an answer goes out at once rather than after the
+text fragment the message booked. Locators heard, and which stations read
+them, are kept in the chat database (`station_locators`, which older builds
+ignore). The console's map ball, which will show them, comes later.
+
 The COMMS window's send button shows how long the message being typed will be
 on the air at the tempo it would go out at now, in red once that is longer
 than the transmit time-out (Preferences, Rig control; 180 s when the app's

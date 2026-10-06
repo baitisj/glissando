@@ -29,6 +29,7 @@ const char* kindName(FrameType type)
         case FrameType::MessageAck: return "ACK";
         case FrameType::Broadcast: return "BROADCAST";
         case FrameType::MessagePartialAck: return "PARTIAL ACK";
+        case FrameType::Locator: return "LOCATOR";
     }
     return "?";
 }
@@ -147,6 +148,15 @@ std::vector<AnnotationToken> describeSegment(const std::vector<uint8_t>& bytes, 
     {
         if (r.completesHere(bit, 1) && r.value(bit, 1) != 0) add(tokens, Role::Field, "MORE TO COME");
         bit += 1;
+        if (type == FrameType::Locator)
+        {
+            if (r.completesHere(bit, LOCATOR_BITS))
+            {
+                std::string grid = FrameCodec::unpackGridSquare((int)r.value(bit, LOCATOR_BITS));
+                add(tokens, Role::Field, "LOC " + (grid.empty() ? std::string("?") : grid));
+            }
+            return tokens;
+        }
         if (r.completesHere(bit, AIR_ID_BITS)) add(tokens, Role::Field, format("No.%u", (unsigned)r.value(bit, AIR_ID_BITS)));
         bit += AIR_ID_BITS;
 
@@ -155,6 +165,11 @@ std::vector<AnnotationToken> describeSegment(const std::vector<uint8_t>& bytes, 
         if (payloadBits > 0 && r.completesHere(bit, payloadBits))
         {
             add(tokens, Role::Field, format("%02X", (unsigned)r.value(bit, payloadBits)));
+        }
+        else if (FrameCodec::carriesFeatures(type) && r.completesHere(bit, FEATURE_BITS) &&
+                 (r.value(bit, FEATURE_BITS) & FEATURE_HEARD_YOUR_LOCATOR) != 0)
+        {
+            add(tokens, Role::Field, "HAS YOUR LOC");
         }
         return tokens;
     }

@@ -80,6 +80,7 @@ public:
         transmissions.emplace_back();
         modes.emplace_back();
         gears.emplace_back();
+        fillers.push_back(bursts.empty() ? std::vector<uint8_t>() : bursts.back().duetFiller);
         for (const OutgoingBurst& burst : bursts)
         {
             transmissions.back().push_back(burst.frame);
@@ -97,6 +98,7 @@ public:
     std::vector<std::vector<std::vector<uint8_t>>> transmissions; // frames, per keying
     std::vector<std::vector<BurstMode>> modes;                    // and their modes
     std::vector<std::vector<int>> gears;                          // and tempos
+    std::vector<std::vector<uint8_t>> fillers;                    // and duet fillers
     bool transmitting = false;
     bool voiceActive = false;
     bool channelBusy = false;
@@ -2500,6 +2502,323 @@ void testQueuedMessageTakesATempoOfItsOwn()
     CHECK(!receiver.protocol.setMessageTempo(mine, 3));
 }
 
+// What a station's store says about another station's locator.
+StationLocator storedLocator(MessageStore& store, const std::string& callsign)
+{
+    for (const StationLocator& station : store.stationLocators())
+    {
+        if (station.callsign == callsign) return station;
+    }
+    return StationLocator();
+}
+
+// As an earlier session would have left it: the station takes locators.
+void knowsLocators(Station& station, const std::string& callsign)
+{
+    StationLocator known;
+    known.callsign = callsign;
+    known.support = LocatorSupport::Yes;
+    station.protocol.restoreStationLocators({known});
+}
+
+// How long a station with traffic queued holds off after hearing a keying.
+uint64_t keyedAfter(Station& station, uint64_t heardAt, uint64_t limit)
+{
+    for (station.nowMs = heardAt; station.nowMs <= heardAt + limit; station.nowMs += 100)
+    {
+        station.protocol.tick();
+        if (!station.transport.transmissions.empty()) return station.nowMs - heardAt;
+    }
+    return UINT64_MAX;
+}
+
+// Our locator rides only to a station that has said, in an acknowledgement
+// or a ping, that it takes locator frames: Glissando 0.5 would hold its
+// answer for a whole text burst after the message. It rides last, counted
+// among the bursts that follow the message, until the station says it has it.
+void testLocatorRidesToAStationThatTakesIt()
+{
+    Station sender("W1AW");
+    Station receiver("VK3ABC");
+    sender.protocol.setMyLocator(" cn87UX ", true);
+    receiver.protocol.setMyLocator("QF22", true);
+    CHECK(sender.protocol.myLocator() == "CN87ux");
+
+    std::string error;
+    CHECK(sender.protocol.sendMessage("Hello", "VK3ABC", error));
+    sender.completeOneTransmission();
+    CHECK(sender.transport.transmissions[0].size() == 1); // nothing known of it yet
+    receiver.receiveFrom(sender.transport);
+    receiver.completeOneTransmission();
+
+    // Its acknowledgement says it takes locators, and has not had ours.
+    Frame ack = decodeOne(receiver.transport.transmissions[0][0]);
+    CHECK(ack.type == FrameType::MessageAck);
+    CHECK(ack.features == FEATURE_UNDERSTANDS_LOCATOR);
+    sender.receiveFrom(receiver.transport);
+    CHECK(storedLocator(sender.store, "VK3ABC").support == LocatorSupport::Yes);
+
+    CHECK(sender.protocol.sendMessage("Where are you?", "VK3ABC", error));
+    sender.completeOneTransmission();
+    const std::vector<std::vector<uint8_t>>& keying = sender.transport.transmissions[1];
+    CHECK(keying.size() == 2);
+    CHECK(sender.transport.modes[1].size() == 2 && sender.transport.modes[1][1] == BurstMode::Signalling);
+    Frame message = decodeOne(keying[0]);
+    Frame locator = decodeOne(keying[1]);
+    CHECK(message.type == FrameType::Message && message.burstsFollowing == 1);
+    CHECK(locator.type == FrameType::Locator);
+    CHECK(locator.locator == "CN87");
+    CHECK(locator.originCallsign == "W1AW");
+    CHECK(locator.destinationCrc == FrameCodec::callsignHash("VK3ABC"));
+    CHECK(locator.burstsFollowing == 0);
+
+    // The station keeps it, and says so in its acknowledgement.
+    receiver.receiveFrom(sender.transport);
+    CHECK(receiver.protocol.stationLocator("w1aw") == "CN87");
+    StationLocator stored = storedLocator(receiver.store, "W1AW");
+    CHECK(stored.gridSquare == "CN87" && stored.support == LocatorSupport::Yes);
+    receiver.completeOneTransmission();
+    ack = decodeOne(receiver.transport.transmissions[1][0]);
+    CHECK(ack.features == (FEATURE_UNDERSTANDS_LOCATOR | FEATURE_HEARD_YOUR_LOCATOR));
+    sender.receiveFrom(receiver.transport);
+
+    // Which is the end of it for this contact.
+    CHECK(sender.protocol.sendMessage("Nice", "VK3ABC", error));
+    sender.completeOneTransmission();
+    CHECK(sender.transport.transmissions[2].size() == 1);
+}
+
+// A locator that is lost leaves the acknowledgement without the bit, and
+// ours rides again behind the next message.
+void testLocatorRidesUntilTheStationHasIt()
+{
+    Station sender("W1AW");
+    Station receiver("VK3ABC");
+    sender.protocol.setMyLocator("CN87", true);
+    knowsLocators(sender, "VK3ABC");
+
+    std::string error;
+    CHECK(sender.protocol.sendMessage("One", "VK3ABC", error));
+    sender.completeOneTransmission();
+    CHECK(sender.transport.transmissions[0].size() == 2);
+
+    receiver.protocol.onFrameReceived(decodeOne(sender.transport.transmissions[0][0]), 5.0f);
+    receiver.nowMs += TEXT_FRAGMENT_AIR_MILLISECONDS; // it waits out the burst it missed
+    receiver.completeOneTransmission();
+    CHECK(decodeOne(receiver.transport.transmissions[0][0]).features == FEATURE_UNDERSTANDS_LOCATOR);
+    sender.receiveFrom(receiver.transport);
+    CHECK(sender.observer.lastUpdateFor(sender.observer.added[0].id)->status == MessageStatus::Acknowledged);
+
+    CHECK(sender.protocol.sendMessage("Two", "VK3ABC", error));
+    sender.completeOneTransmission();
+    CHECK(sender.transport.transmissions[1].size() == 2);
+    receiver.receiveFrom(sender.transport);
+    receiver.completeOneTransmission();
+    CHECK((decodeOne(receiver.transport.transmissions[1][0]).features & FEATURE_HEARD_YOUR_LOCATOR) != 0);
+    sender.receiveFrom(receiver.transport);
+
+    CHECK(sender.protocol.sendMessage("Three", "VK3ABC", error));
+    sender.completeOneTransmission();
+    CHECK(sender.transport.transmissions[2].size() == 1);
+
+    // A changed locator goes again, behind the last fragment of a longer
+    // message.
+    std::string body(perFragment('A') + 10, 'A'); // two fragments
+    CHECK(sender.protocol.sendMessage(body, "VK3ABC", error));
+    sender.protocol.setMyLocator("CN88", true);
+    sender.completeOneTransmission();
+    CHECK(sender.transport.transmissions[3].size() == 3);
+    CHECK(decodeOne(sender.transport.transmissions[3][0]).burstsFollowing == 2);
+    CHECK(decodeOne(sender.transport.transmissions[3][2]).locator == "CN88");
+}
+
+// A station with Auto acknowledge off never says it has our locator, so it
+// gets it once a contact. A contact ends after a long enough silence, and a
+// changed locator goes again to everybody.
+void testLocatorGoesOnceToAStationWithAutoAckOff()
+{
+    Station sender("W1AW");
+    Station receiver("VK3ABC");
+    sender.protocol.setMyLocator("CN87", true);
+    knowsLocators(sender, "VK3ABC");
+    receiver.protocol.setAutoReplyEnabled(false);
+
+    std::string error;
+    CHECK(receiver.protocol.sendMessage("Listening only", "W1AW", error));
+    receiver.completeOneTransmission();
+    sender.receiveFrom(receiver.transport);
+    CHECK(!sender.protocol.stationAutoAcks("VK3ABC"));
+    sender.completeOneTransmission(); // our acknowledgement of it carries nothing
+    size_t keyings = sender.transport.transmissions.size();
+    CHECK(sender.transport.transmissions.back().size() == 1);
+
+    auto sendAndCount = [&](const std::string& text) -> size_t
+    {
+        CHECK(sender.protocol.sendMessage(text, "VK3ABC", error));
+        sender.completeOneTransmission();
+        return sender.transport.transmissions.back().size();
+    };
+
+    CHECK(sendAndCount("One") == 2);
+    CHECK(sendAndCount("Two") == 1);
+
+    sender.nowMs += LOCATOR_CONTACT_IDLE_MILLISECONDS + 1;
+    CHECK(sendAndCount("Three") == 2);
+    CHECK(sendAndCount("Four") == 1);
+
+    // The same grid square is no news; another one is.
+    sender.protocol.setMyLocator("CN87ab", true);
+    CHECK(sendAndCount("Five") == 1);
+    sender.protocol.setMyLocator("CN88", true);
+    CHECK(sendAndCount("Six") == 2);
+
+    // Turned off, or not a locator, nothing goes.
+    sender.protocol.setMyLocator("CN97", false);
+    CHECK(sendAndCount("Seven") == 1);
+    CHECK(sender.transport.fillers.back().empty());
+    sender.protocol.setMyLocator("ZZ99", true);
+    CHECK(sender.protocol.myLocator().empty());
+    CHECK(sendAndCount("Eight") == 1);
+    CHECK(sender.transport.transmissions.size() == keyings + 8);
+}
+
+// A station that pings or acknowledges without the feature bit is an older
+// build, whatever an earlier session thought of it.
+void testOlderStationGetsNoLocator()
+{
+    Station sender("W1AW");
+    sender.protocol.setMyLocator("CN87", true);
+    knowsLocators(sender, "VK3ABC");
+
+    Frame ping;
+    ping.type = FrameType::Ping;
+    ping.destinationCrc = FrameCodec::callsignHash("W1AW");
+    ping.originCallsign = "VK3ABC";
+    ping.airId = 7;
+    ping.senderAutoAck = true;
+    sender.protocol.onFrameReceived(ping, 5.0f);
+    CHECK(storedLocator(sender.store, "VK3ABC").support == LocatorSupport::No);
+    sender.completeOneTransmission(); // the pong
+
+    std::string error;
+    CHECK(sender.protocol.sendMessage("Hello", "VK3ABC", error));
+    sender.completeOneTransmission();
+    CHECK(sender.transport.transmissions.back().size() == 1);
+
+    // Our own pings say we take locators.
+    CHECK(sender.protocol.sendPing("VK3ABC", error));
+    sender.completeOneTransmission();
+    Frame ours = decodeOne(sender.transport.transmissions.back()[0]);
+    CHECK(ours.type == FrameType::Ping && ours.features == FEATURE_UNDERSTANDS_LOCATOR);
+
+    // What the store kept comes back in the next session.
+    Station later("W1AW");
+    later.protocol.restoreStationLocators(sender.store.stationLocators());
+    StationLocator heard;
+    heard.callsign = "DJ2LS";
+    heard.gridSquare = "JO62";
+    heard.support = LocatorSupport::Yes;
+    later.protocol.restoreStationLocators({heard});
+    CHECK(later.protocol.stationLocator("DJ2LS") == "JO62");
+    CHECK(later.protocol.stationLocator("K1ABC").empty());
+}
+
+// The locator ends the sender's keying. Whoever hears it lets go of the
+// channel then, rather than a whole text burst after the message; whoever
+// misses it waits that out, and so the sender waits that much longer for
+// its acknowledgement.
+void testLocatorEndsTheKeying()
+{
+    Station sender("W1AW");
+    sender.protocol.setMyLocator("CN87", true);
+    knowsLocators(sender, "VK3ABC");
+
+    std::string error;
+    CHECK(sender.protocol.sendMessage("Hello", "VK3ABC", error));
+    int64_t id = sender.observer.added[0].id;
+    sender.completeOneTransmission();
+    const std::vector<std::vector<uint8_t>>& frames = sender.transport.transmissions[0];
+    CHECK(frames.size() == 2);
+
+    Station bystander("DJ2LS");
+    CHECK(bystander.protocol.sendMessage("waiting", "W1AW", error));
+    uint64_t heardAt = bystander.nowMs;
+    bystander.receiveFrom(sender.transport);
+    CHECK(bystander.protocol.stationLocator("W1AW") == "CN87");
+    uint64_t released = keyedAfter(bystander, heardAt, 4 * TEXT_FRAGMENT_AIR_MILLISECONDS);
+
+    Station lossy("DJ2LS");
+    CHECK(lossy.protocol.sendMessage("waiting", "W1AW", error));
+    heardAt = lossy.nowMs;
+    lossy.protocol.onFrameReceived(decodeOne(frames[0]), 5.0f);
+    uint64_t held = keyedAfter(lossy, heardAt, 4 * TEXT_FRAGMENT_AIR_MILLISECONDS);
+    CHECK(held >= (uint64_t)TEXT_FRAGMENT_AIR_MILLISECONDS);
+    CHECK(released < (uint64_t)TEXT_FRAGMENT_AIR_MILLISECONDS);
+
+    // The addressee answers once the keying is over.
+    Station receiver("VK3ABC");
+    heardAt = receiver.nowMs;
+    receiver.receiveFrom(sender.transport);
+    CHECK(keyedAfter(receiver, heardAt, 4 * TEXT_FRAGMENT_AIR_MILLISECONDS) <
+          (uint64_t)TEXT_FRAGMENT_AIR_MILLISECONDS);
+
+    // And one that lost a fragment asks for it then.
+    Station longSender("W1AW");
+    longSender.protocol.setMyLocator("CN87", true);
+    knowsLocators(longSender, "VK3ABC");
+    CHECK(longSender.protocol.sendMessage(std::string(perFragment('A') + 10, 'A'), "VK3ABC", error));
+    longSender.completeOneTransmission();
+    const std::vector<std::vector<uint8_t>>& longFrames = longSender.transport.transmissions[0];
+    CHECK(longFrames.size() == 3);
+    Station gappy("VK3ABC");
+    heardAt = gappy.nowMs;
+    gappy.protocol.onFrameReceived(decodeOne(longFrames[0]), 5.0f);
+    gappy.protocol.onFrameReceived(decodeOne(longFrames[2]), 5.0f);
+    CHECK(keyedAfter(gappy, heardAt, 4 * TEXT_FRAGMENT_AIR_MILLISECONDS) < (uint64_t)TEXT_FRAGMENT_AIR_MILLISECONDS);
+    CHECK(decodeOne(gappy.transport.transmissions[0][0]).type == FrameType::MessagePartialAck);
+
+    sender.nowMs += ACK_TIMEOUT_MILLISECONDS + 1;
+    sender.protocol.tick();
+    CHECK(sender.observer.lastUpdateFor(id)->status == MessageStatus::AwaitingAck);
+    sender.nowMs += TEXT_FRAGMENT_AIR_MILLISECONDS;
+    sender.protocol.tick();
+    CHECK(sender.observer.lastUpdateFor(id)->status == MessageStatus::Retrying);
+}
+
+// A duet keying with a voice to spare sings our locator in it, to anybody,
+// whatever else the keying holds; one segment holds it only from a standard
+// callsign.
+void testDuetFillerCarriesTheLocator()
+{
+    Station sender("W1AW");
+    std::string error;
+    CHECK(sender.protocol.sendMessage("CQ", "", error));
+    sender.completeOneTransmission();
+    CHECK(sender.transport.fillers.back().empty()); // no locator set
+
+    sender.protocol.setMyLocator("CN87", true);
+    CHECK(sender.protocol.sendMessage("CQ again", "", error));
+    sender.completeOneTransmission();
+    CHECK(sender.transport.transmissions.back().size() == 1); // a broadcast carries no rider
+    const std::vector<uint8_t>& filler = sender.transport.fillers.back();
+    Frame frame = decodeOne(filler);
+    CHECK(frame.type == FrameType::Locator && frame.locator == "CN87");
+    CHECK(frame.originCallsign == "W1AW" && frame.destinationCrc == 0);
+    CHECK(std::all_of(filler.begin() + 9, filler.end(), [](uint8_t byte) { return byte == 0; }));
+
+    CHECK(sender.protocol.sendPing("VK3ABC", error));
+    sender.completeOneTransmission();
+    frame = decodeOne(sender.transport.fillers.back());
+    CHECK(frame.type == FrameType::Locator && frame.destinationCrc == FrameCodec::callsignHash("VK3ABC"));
+
+    CHECK(!FrameCodec::isStandardCallsign("TEST1/P"));
+    Station portable("TEST1/P");
+    portable.protocol.setMyLocator("CN87", true);
+    CHECK(portable.protocol.sendMessage("CQ", "", error));
+    portable.completeOneTransmission();
+    CHECK(portable.transport.fillers.back().empty());
+}
+
 int main()
 {
     testAddressedMessageIsAcknowledged();
@@ -2564,6 +2883,12 @@ int main()
     testChannelThatNeverClearsIsEventuallyIgnored();
     testVoiceTransmissionDefersChat();
     testSendRequiresCallsign();
+    testLocatorRidesToAStationThatTakesIt();
+    testLocatorRidesUntilTheStationHasIt();
+    testLocatorGoesOnceToAStationWithAutoAckOff();
+    testOlderStationGetsNoLocator();
+    testLocatorEndsTheKeying();
+    testDuetFillerCarriesTheLocator();
 
     if (failures > 0)
     {

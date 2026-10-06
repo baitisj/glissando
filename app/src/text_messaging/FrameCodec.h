@@ -70,6 +70,13 @@ struct Frame
     // A text frame's characters, or a pong's or partial acknowledgement's
     // one byte. Pings and acknowledgements carry none.
     std::vector<uint8_t> payload;
+
+    // A ping's or acknowledgement's FEATURE_* bits. Zero from Glissando 0.5
+    // and older, which leave the byte empty.
+    uint8_t features = 0;
+
+    // A locator frame's grid square, four characters (FrameCodec::normalizeLocator).
+    std::string locator;
 };
 
 constexpr int MAX_TEXT_BURSTS_FOLLOWING = (1 << BURSTS_FOLLOWING_BITS) - 1;
@@ -93,6 +100,17 @@ public:
     // it) rather than EXTENDED_CALLSIGN_BITS.
     static bool isStandardCallsign(const std::string& callsign);
 
+    // A Maidenhead locator as the operator typed it, tidied: a grid square
+    // ("CN87") or a subsquare ("CN87ux"), the field letters upper case and
+    // the subsquare's lower case. Empty if it is neither.
+    static std::string normalizeLocator(const std::string& locator);
+
+    // The LOCATOR_BITS value of a locator's grid square (its first four
+    // characters), or -1 if it has none; and the grid square a value stands
+    // for, or empty for a value packing never produces.
+    static int packGridSquare(const std::string& locator);
+    static std::string unpackGridSquare(int value);
+
     // Serializes a frame, zero padded out to frameBytes (SIGNALLING_FRAME_BYTES
     // or TEXT_FRAME_BYTES). Returns an empty vector if the frame does not fit,
     // if a field is out of range, if it carries a callsign that cannot be
@@ -112,6 +130,9 @@ public:
     // fragment fields, so they carry a shorter header and are always a single
     // fragment. Message text rides DATAC4 and carries the full header.
     static bool isSignallingFrameType(FrameType type);
+
+    // Whether a frame type ends in a feature byte: pings and acknowledgements.
+    static bool carriesFeatures(FrameType type);
 
     // The frame type a TYPE_BITS type code stands for, and whether it says
     // the sender has Auto acknowledge off. False for a code no frame uses.

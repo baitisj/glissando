@@ -136,6 +136,20 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     m_txt_callsign = new wxTextCtrl(sbStation, wxID_ANY,  wxEmptyString, wxDefaultPosition, wxSize(180,-1), 0, wxTextValidator(wxFILTER_ALPHANUMERIC));
     m_txt_callsign->SetToolTip(_("The callsign text chat sends under."));
     sbSizerCallsign->Add(m_txt_callsign, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
+
+    sbSizerCallsign->AddSpacer(10);
+    wxStaticText* labelGridSquare = new wxStaticText(sbStation, wxID_ANY, _("Grid square:"));
+    sbSizerCallsign->Add(labelGridSquare, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
+    m_txtGridSquare = new wxTextCtrl(sbStation, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(90, -1));
+    m_txtGridSquare->SetToolTip(_("Your Maidenhead locator, such as CN87 or CN87ux. Chat sends the first four "
+                                  "characters, which place you to within about 100 km."));
+    sbSizerCallsign->Add(m_txtGridSquare, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
+    m_ckboxSendGridSquare = new wxCheckBox(sbStation, wxID_ANY, _("Send it with chat"), wxDefaultPosition,
+                                           wxDefaultSize, wxCHK_2STATE);
+    m_ckboxSendGridSquare->SetToolTip(
+        _("Your grid square rides at the end of your first message to each station that can read it, "
+          "until that station says it has it, and fills the spare voice of a duet for free."));
+    sbSizerCallsign->Add(m_ckboxSendGridSquare, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
     sbSizerStationRows->Add(sbSizerCallsign, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
 
     // CSV log file path
@@ -683,6 +697,8 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
 #endif
         
         m_txt_callsign->SetValue(wxGetApp().appConfiguration.reportingConfiguration.reportingCallsign);
+        m_txtGridSquare->SetValue(wxGetApp().appConfiguration.reportingConfiguration.reportingGridSquare);
+        m_ckboxSendGridSquare->SetValue(wxGetApp().appConfiguration.reportingConfiguration.reportingSendGridSquare);
 
         // CSV log file path
         m_txtCtrlCsvLogFilePath->SetValue(wxGetApp().appConfiguration.reportingConfiguration.csvLogFilePath);
@@ -773,6 +789,9 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
 #endif
 
         wxGetApp().appConfiguration.reportingConfiguration.reportingCallsign = m_txt_callsign->GetValue();
+        wxGetApp().appConfiguration.reportingConfiguration.reportingGridSquare =
+            m_txtGridSquare->GetValue().Strip(wxString::both);
+        wxGetApp().appConfiguration.reportingConfiguration.reportingSendGridSquare = m_ckboxSendGridSquare->GetValue();
 
         // CSV log file path
         wxGetApp().appConfiguration.reportingConfiguration.csvLogFilePath = m_txtCtrlCsvLogFilePath->GetValue();

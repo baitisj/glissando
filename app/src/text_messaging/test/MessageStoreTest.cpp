@@ -216,6 +216,48 @@ void testHeardStationPersistence()
     CHECK(stations[0].callsign == "W1AW");
 }
 
+void testStationLocatorPersistence()
+{
+    MessageStore store;
+    CHECK(store.open(":memory:"));
+    CHECK(store.stationLocators().empty());
+
+    StationLocator station;
+    station.callsign = "VK3ABC";
+    station.support = LocatorSupport::Yes;
+    station.updated = NOW;
+    CHECK(store.upsertStationLocator(station));
+
+    // Hearing its locator later fills it in rather than adding a row.
+    station.gridSquare = "QF22";
+    station.updated = NOW + 60;
+    CHECK(store.upsertStationLocator(station));
+
+    StationLocator older;
+    older.callsign = "W1AW";
+    older.support = LocatorSupport::No;
+    older.updated = NOW + 120;
+    CHECK(store.upsertStationLocator(older));
+
+    std::vector<StationLocator> stations = store.stationLocators();
+    CHECK(stations.size() == 2);
+    for (const StationLocator& stored : stations)
+    {
+        if (stored.callsign == "VK3ABC")
+        {
+            CHECK(stored.gridSquare == "QF22");
+            CHECK(stored.support == LocatorSupport::Yes);
+            CHECK(stored.updated == NOW + 60);
+        }
+        else
+        {
+            CHECK(stored.callsign == "W1AW");
+            CHECK(stored.gridSquare.empty());
+            CHECK(stored.support == LocatorSupport::No);
+        }
+    }
+}
+
 void testClosedStoreFails()
 {
     MessageStore store;
@@ -225,6 +267,8 @@ void testClosedStoreFails()
     CHECK(!store.addMessage(message));
     CHECK(!store.lastError().empty());
     CHECK(store.recentMessages(10).empty());
+    CHECK(!store.upsertStationLocator(StationLocator()));
+    CHECK(store.stationLocators().empty());
 }
 
 void testHeardStationList()
@@ -363,6 +407,7 @@ int main()
     testMessageLimitAndPrune();
     testClearMessagesKeepsOutstanding();
     testHeardStationPersistence();
+    testStationLocatorPersistence();
     testClosedStoreFails();
     testHeardStationList();
     testPinnedStations();

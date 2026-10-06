@@ -91,6 +91,7 @@ bool TextMessagingSession::start(const std::string& databasePath,
     // Stations from earlier sessions, so traffic addressed to them is named
     // before they are heard again.
     for (const HeardStation& station : stations_.stations()) snoop_.addKnownCallsign(station.callsign);
+    protocol_.restoreStationLocators(store_.stationLocators());
 
     transport_ = transport;
     protocol_.setTransport(transport);

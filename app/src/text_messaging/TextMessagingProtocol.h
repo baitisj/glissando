@@ -133,6 +133,22 @@ public:
     // acknowledgement that will not come, and so without retries.
     bool stationAutoAcks(const std::string& callsign) const;
 
+    // Our Maidenhead locator, as typed (FrameCodec::normalizeLocator), and
+    // whether its grid square goes on the air. It rides as the last burst of
+    // our directed messages to a station that understands locator frames,
+    // once a contact and on every message to it until it says it has it;
+    // and it fills the spare voice of a duet keying. Changing it sends it
+    // again to everybody. An empty or unusable locator sends nothing.
+    void setMyLocator(const std::string& locator, bool send);
+    std::string myLocator() const;
+
+    // A station's grid square as last heard from it, this session or an
+    // earlier one, or empty.
+    std::string stationLocator(const std::string& callsign) const;
+
+    // What earlier sessions learned of stations' locators, from the store.
+    void restoreStationLocators(const std::vector<StationLocator>& stations);
+
     // Stops every chat transmission, for a station on a frequency where it
     // may not send data. Whatever is waiting to go out is discarded as not
     // sent, including a retry or a reply that becomes due while inhibited,
@@ -278,6 +294,18 @@ private:
         TransmissionState state = TransmissionState::Queued;
     };
 
+    // A station's locator, and where our exchange of locators with it
+    // stands in the current contact; see LOCATOR_CONTACT_IDLE_MILLISECONDS.
+    struct LocatorPeer
+    {
+        std::string gridSquare;
+        LocatorSupport support = LocatorSupport::Unknown;
+        uint64_t lastContactMs = 0;  // last heard from it or sent to it
+        bool acknowledged = false;   // it said it has our locator
+        bool sent = false;           // ours went to it
+        bool heardTheirs = false;    // we heard its locator
+    };
+
     struct Reassembly
     {
         std::vector<std::string> fragments;
@@ -329,7 +357,8 @@ private:
     bool retryOrFailLocked(size_t index, uint64_t nowMs, std::vector<PendingEvent>& events);
     PendingTransmission* riderLocked(size_t replyIndex, uint64_t nowMs);
     std::vector<OutgoingBurst> keyingBurstsLocked(
-        const std::vector<const PendingTransmission*>& entries) const;
+        const std::vector<const PendingTransmission*>& entries, uint64_t nowMs,
+        std::string* locatorToOut);
     void handlePingLocked(const Frame& frame, float snr, std::vector<PendingEvent>& events);
     void handlePongLocked(const Frame& frame, float snr, std::vector<PendingEvent>& events);
     void addSystemMessageLocked(const std::string& text, const std::string& destination,
@@ -359,6 +388,14 @@ private:
                                   std::vector<PendingEvent>& events);
     bool expectsAckFromLocked(const std::string& destination) const;
 
+    LocatorPeer& locatorPeerLocked(const std::string& callsign, uint64_t nowMs);
+    bool locatorRidesToLocked(const std::string& destination, uint64_t nowMs);
+    uint8_t featuresForLocked(const Frame& frame, const std::string& destination) const;
+    Frame locatorFrameLocked(const std::string& destination) const;
+    void noteLocatorFeaturesLocked(const Frame& frame, uint64_t nowMs);
+    void handleLocatorLocked(const Frame& frame, uint64_t nowMs);
+    void saveLocatorPeerLocked(const std::string& callsign, const LocatorPeer& peer);
+
     void deliver(const std::vector<PendingEvent>& events);
 
     mutable std::mutex mutex_;
@@ -371,6 +408,14 @@ private:
     uint32_t myCallsignCrc_;
     bool autoReplyEnabled_;
     std::set<std::string> noAutoAckStations_;  // heard saying Auto acknowledge is off
+    std::string myLocator_;       // normalized; empty for none
+    bool sendLocator_;
+    std::map<std::string, LocatorPeer> locatorPeers_;
+
+    // Whether the keying now on the air ends in our locator. A station that
+    // misses that burst holds its answer for a text burst's time after the
+    // message, so the wait for that answer is that much longer.
+    bool keyingCarriesLocator_;
     std::string inhibitReason_;   // empty unless transmitting is inhibited
     uint16_t nextAirId_;
 
@@ -402,6 +447,7 @@ private:
     bool channelHeld_ = false;        // channelFrozenLocked() at the last tick
     uint64_t channelBusySinceMs_;
     uint64_t channelReservedUntilMs_; // a fragmented message still on the air
+    std::string channelReservedBy_;   // whose, when it was a text frame's count
     uint64_t lastTickMs_;
 
     std::deque<PendingTransmission> outbox_;

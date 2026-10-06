@@ -424,11 +424,12 @@ std::vector<GlissandoScopeFrame> MainFrame::glissandoHeardFrames()
                                                           segment.index + 1);
         frame.title = wxString::Format("%s  %s  %+.0f dB", wxString(gear.tempo).Upper(), part, h.snrDb);
 
-        if (!segment.filler)
+        // A filler is empty, or a frame of its own in one segment: a locator.
+        if (!segment.filler || !segment.bytes.empty())
         {
+            int segmentFrom = segment.filler ? 0 : segment.index * Glissando::SEGMENT_DATA_BYTES;
             for (const TextMessaging::AnnotationToken& token :
-                 TextMessaging::describeSegment(segment.bytes, segment.index * Glissando::SEGMENT_DATA_BYTES,
-                                                segment.knownFrom, segment.text, nameFor))
+                 TextMessaging::describeSegment(segment.bytes, segmentFrom, segment.knownFrom, segment.text, nameFor))
             {
                 frame.tokens.push_back({scopeRole(token.role), fromAir(token.text)});
             }

@@ -47,7 +47,8 @@ std::string describeSnoopFrame(const SnoopEvent& event)
             snprintf(buffer, sizeof(buffer), "PONG, heard at %.1f dB", (double)event.reportedSnr);
             return buffer;
         case FrameType::MessageAck:
-            snprintf(buffer, sizeof(buffer), "ACK #%u", (unsigned)event.airId);
+            snprintf(buffer, sizeof(buffer), "ACK #%u%s", (unsigned)event.airId,
+                     event.heardYourLocator ? ", has your locator" : "");
             return buffer;
         case FrameType::MessagePartialAck:
             // The payload says which fragments arrived, not how many there
@@ -55,6 +56,8 @@ std::string describeSnoopFrame(const SnoopEvent& event)
             snprintf(buffer, sizeof(buffer), "PARTIAL ACK #%u, holds %s", (unsigned)event.airId,
                      heldList(event.fragmentsHeld, 8).c_str());
             return buffer;
+        case FrameType::Locator:
+            return "LOCATOR " + event.locator;
         case FrameType::Message:
         case FrameType::Broadcast:
             snprintf(buffer, sizeof(buffer), "#%u fragment %d/%d%s", (unsigned)event.airId,
@@ -163,6 +166,9 @@ void SnoopFeed::onFrame(const Frame& frame, float snr, SnoopSource source, std::
         {
             event.fragmentsHeld = frame.payload[0];
         }
+        event.locator = frame.locator;
+        event.heardYourLocator = frame.type == FrameType::MessageAck &&
+                                 (frame.features & FEATURE_HEARD_YOUR_LOCATOR) != 0;
 
         if (!text || !wellFormed)
         {

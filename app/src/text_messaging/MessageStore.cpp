@@ -67,7 +67,15 @@ const char* const SCHEMA_SQL =
     "CREATE TABLE IF NOT EXISTS heard_stations ("
     "  callsign TEXT PRIMARY KEY,"
     "  snr REAL NOT NULL,"
-    "  last_heard INTEGER NOT NULL);";
+    "  last_heard INTEGER NOT NULL);"
+    // A table of its own, which an older build simply never reads, so it
+    // needs no new schema version: one would lock that build out of the
+    // chat history.
+    "CREATE TABLE IF NOT EXISTS station_locators ("
+    "  callsign TEXT PRIMARY KEY,"
+    "  grid_square TEXT NOT NULL,"
+    "  support INTEGER NOT NULL,"
+    "  updated INTEGER NOT NULL);";
 
 // Statuses are persisted as integers, so the mapping cannot follow the enum's
 // declaration order; it has to be explicit and stable.
@@ -104,6 +112,28 @@ MessageStatus intToStatus(int value)
         case 8: return MessageStatus::NotSent;
         case 9: return MessageStatus::Aborted;
         default: return MessageStatus::Failed;
+    }
+}
+
+// Persisted as integers, like statuses.
+int supportToInt(LocatorSupport support)
+{
+    switch (support)
+    {
+        case LocatorSupport::Unknown: return 0;
+        case LocatorSupport::No: return 1;
+        case LocatorSupport::Yes: return 2;
+    }
+    return 0;
+}
+
+LocatorSupport intToSupport(int value)
+{
+    switch (value)
+    {
+        case 1: return LocatorSupport::No;
+        case 2: return LocatorSupport::Yes;
+        default: return LocatorSupport::Unknown;
     }
 }
 
@@ -509,6 +539,74 @@ bool MessageStore::pruneHeardStationsOlderThan(std::time_t cutoff)
     sqlite3_finalize(statement);
 
     return ok;
+}
+
+bool MessageStore::upsertStationLocator(const StationLocator& station)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (db_ == nullptr)
+    {
+        lastError_ = "database is not open";
+        return false;
+    }
+
+    const char* sql =
+        "INSERT INTO station_locators (callsign, grid_square, support, updated) VALUES (?, ?, ?, ?)"
+        " ON CONFLICT(callsign) DO UPDATE SET grid_square = excluded.grid_square,"
+        " support = excluded.support, updated = excluded.updated;";
+
+    sqlite3_stmt* statement = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &statement, nullptr) != SQLITE_OK)
+    {
+        setError("preparing station locator upsert");
+        return false;
+    }
+
+    sqlite3_bind_text(statement, 1, station.callsign.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(statement, 2, station.gridSquare.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(statement, 3, supportToInt(station.support));
+    sqlite3_bind_int64(statement, 4, (sqlite3_int64)station.updated);
+
+    bool ok = sqlite3_step(statement) == SQLITE_DONE;
+    if (!ok) setError("upserting station locator");
+    sqlite3_finalize(statement);
+
+    return ok;
+}
+
+std::vector<StationLocator> MessageStore::stationLocators()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::vector<StationLocator> stations;
+    if (db_ == nullptr)
+    {
+        lastError_ = "database is not open";
+        return stations;
+    }
+
+    sqlite3_stmt* statement = nullptr;
+    if (sqlite3_prepare_v2(db_, "SELECT callsign, grid_square, support, updated FROM station_locators;", -1,
+                           &statement, nullptr) != SQLITE_OK)
+    {
+        setError("preparing station locator query");
+        return stations;
+    }
+
+    while (sqlite3_step(statement) == SQLITE_ROW)
+    {
+        StationLocator station;
+        station.callsign = columnText(statement, 0);
+        station.gridSquare = columnText(statement, 1);
+        station.support = intToSupport(sqlite3_column_int(statement, 2));
+        station.updated = (std::time_t)sqlite3_column_int64(statement, 3);
+        stations.push_back(station);
+    }
+
+    sqlite3_finalize(statement);
+
+    return stations;
 }
 
 std::string MessageStore::lastError() const

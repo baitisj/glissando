@@ -116,6 +116,39 @@ void testDuetFiller()
     CHECK(!r.add(payloads.back(), 999999999, DUPLICATE_SAMPLES, burst));
 }
 
+// A filler can carry a frame of one segment, which arrives on its own as a
+// signalling burst and leaves a burst being put together alone; one too long
+// for a segment is not sent, and a keying with no spare voice has no filler.
+void testFillerFrame()
+{
+    Random rng(7);
+    std::vector<uint8_t> locator = makeBurst(false, 9, rng).bytes;
+    locator.resize(SIGNALLING_BYTES, 0);
+    LinkBurst text = makeBurst(true, 20, rng);
+    std::vector<Payload> payloads = segmentBursts({text}, 2, locator);
+    CHECK(payloads.size() == 4);
+
+    Reassembler r(SIGNALLING_BYTES, TEXT_BYTES);
+    LinkBurst burst;
+    SegmentProgress progress;
+    long long start = 0;
+    CHECK(!r.add(payloads[0], start += 100000, DUPLICATE_SAMPLES, burst));
+    CHECK(r.add(payloads[3], start += 100000, DUPLICATE_SAMPLES, burst, &progress));
+    CHECK(progress.filler && progress.completed && progress.bytes.size() == (size_t)SEGMENT_DATA_BYTES);
+    CHECK(burst.filler && !burst.text && burst.bytes == locator);
+    CHECK(!r.add(payloads[1], start += 100000, DUPLICATE_SAMPLES, burst));
+    CHECK(r.add(payloads[2], start += 100000, DUPLICATE_SAMPLES, burst));
+    CHECK(!burst.filler && sameBurst(burst, text));
+
+    std::vector<uint8_t> tooLong = makeBurst(false, 10, rng).bytes;
+    payloads = segmentBursts({text}, 2, tooLong);
+    CHECK(!r.add(payloads[3], start += 100000, DUPLICATE_SAMPLES, burst, &progress));
+    CHECK(progress.filler);
+
+    CHECK(segmentBursts({text}, 1, locator).size() == 3);
+    CHECK(segmentBursts({makeBurst(true, 18, rng)}, 2, locator).size() == 2);
+}
+
 void testOutOfOrder()
 {
     Random rng(4);
@@ -312,6 +345,7 @@ int main()
     testFirstSegmentKnownBits();
     testTrailingZeros();
     testDuetFiller();
+    testFillerFrame();
     testOutOfOrder();
     testDuplicates();
     testInterleavedStations();

@@ -55,6 +55,7 @@ enum class FrameType : uint8_t
     Broadcast = 0x22,  // unaddressed message fragment, no acknowledgement
     MessagePartialAck = 0x23, // which fragments of a message arrived; payload is
                               // a bit per fragment, and the sender resends the rest
+    Locator = 0x30,    // the sender's Maidenhead grid square; see LOCATOR_BITS
 };
 
 // Modem frame payload sizes: what codec2 hands us per modem frame, less the
@@ -74,13 +75,23 @@ constexpr int TEXT_FRAME_BYTES = 54;       // DATAC4: 448 bits - CRC16
 // which covers portable suffixes such as VK3ABC/P). The origin's own hash
 // is not sent: it is the hash of the callsign already in the frame.
 //
-// A signalling frame then has a "more follows" bit, a 10-bit message ID and,
-// for a pong or partial acknowledgement, one payload byte: 72 bits with a
-// standard callsign, one Glissando segment. A text frame has how many bursts
-// follow in this keying (4 bits), the message ID, the fragment's index and
-// the fragment count less one (3 bits each), 73 bits with a standard
-// callsign, and then the text, Huffman coded (HamText) to the end of the
-// frame. Zero padding reads as no text, so no length field is needed.
+// A signalling frame then has a "more follows" bit, a 10-bit message ID and
+// one byte more: a pong's SNR, a partial acknowledgement's fragments, or a
+// ping's or acknowledgement's feature byte (FEATURE_*, bits Glissando 0.5
+// and older leave zero and never read). 72 bits with a standard callsign,
+// one Glissando segment. A text frame has how many bursts follow in this
+// keying (4 bits), the message ID, the fragment's index and the fragment
+// count less one (3 bits each), 73 bits with a standard callsign, and then
+// the text, Huffman coded (HamText) to the end of the frame. Zero padding
+// reads as no text, so no length field is needed.
+//
+// A locator frame carries the sender's grid square where a signalling frame
+// has its message ID: the "more follows" bit, then the square's first four
+// characters in LOCATOR_BITS, packed as FT8 packs them. 69 bits with a
+// standard callsign, one Glissando segment. It rides as the last burst of a
+// directed message to a station that has said it understands it, until that
+// station acknowledges it (FEATURE_HEARD_YOUR_LOCATOR), and fills the empty
+// second voice of a duet keying. Older builds drop it as not one of theirs.
 //
 // A station with Auto acknowledge off says so in the type of its pings,
 // messages and broadcasts, so that others do not retry to it. Pongs and
@@ -97,7 +108,24 @@ constexpr int AIR_ID_BITS = 10;
 constexpr int BURSTS_FOLLOWING_BITS = 4;
 constexpr int FRAGMENT_FIELD_BITS = 3;
 constexpr int SIGNALLING_PAYLOAD_BITS = 8;
+constexpr int FEATURE_BITS = 8;
+constexpr int LOCATOR_BITS = 15;
 constexpr int MAX_AIR_ID = (1 << AIR_ID_BITS) - 1;
+
+// What a ping or an acknowledgement says about its sender, in its feature
+// byte. The other bits are zero, and a receiver ignores them.
+constexpr uint8_t FEATURE_UNDERSTANDS_LOCATOR = 0x80; // it takes in locator frames
+constexpr uint8_t FEATURE_HEARD_YOUR_LOCATOR = 0x40;  // an acknowledgement only: it has
+                                                      // the addressee's locator, this contact
+
+// Grid squares, field letters A to R and square digits 0 to 9: 18 x 18 x 10
+// x 10 values, which fit LOCATOR_BITS.
+constexpr int GRID_SQUARE_VALUES = 18 * 18 * 10 * 10;
+
+// A station's locator goes to each station we message once a contact, and
+// keeps riding our messages to it until it says it has it. A contact ends
+// when we have neither heard from the station nor sent to it for this long.
+constexpr uint64_t LOCATOR_CONTACT_IDLE_MILLISECONDS = 30 * 60 * 1000;
 
 // A message is sent as one keying of the transmitter, so its length is bounded
 // by how long we are willing to hold the channel.
@@ -389,6 +417,31 @@ struct OutgoingBurst
     std::vector<uint8_t> frame;
     int gear = 0; // the Glissando tempo the operator chose for it; 0 for the one set now
     std::string destination; // the station it is addressed to; empty for a broadcast
+
+    // A frame a Glissando duet keying may send in its spare second voice,
+    // which otherwise carries a filler segment: our locator, when it fits one
+    // segment. Not a burst: nothing counts it, and every other transport and
+    // mode ignores it. Set on the last burst of a keying.
+    std::vector<uint8_t> duetFiller;
+};
+
+// Whether a station's build takes in locator frames, as far as we know: its
+// pings and acknowledgements say so in their feature byte.
+enum class LocatorSupport
+{
+    Unknown,
+    No,
+    Yes,
+};
+
+// What we know of a station's locator, kept across sessions so a station
+// heard last week is placed as soon as it is heard again.
+struct StationLocator
+{
+    std::string callsign;
+    std::string gridSquare;  // four characters, or empty if never heard
+    LocatorSupport support = LocatorSupport::Unknown;
+    std::time_t updated = 0;
 };
 
 // A station we have decoded something from, shown in the heard stations list.

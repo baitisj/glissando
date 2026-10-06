@@ -211,7 +211,7 @@ void testRoundTrip()
 void testSizes()
 {
     const FrameType signalling[] = {FrameType::Ping, FrameType::PingAck, FrameType::MessageAck,
-                                    FrameType::MessagePartialAck};
+                                    FrameType::MessagePartialAck, FrameType::Locator};
     for (FrameType type : signalling)
     {
         for (const char* call : {"W1AW", "VK3ABC/P"})
@@ -222,6 +222,8 @@ void testSizes()
             frame.airId = MAX_AIR_ID;
             frame.burstsFollowing = 1;
             if (FrameCodec::signallingPayloadBits(type) > 0) frame.payload.assign(1, 0xFF);
+            frame.features = 0xFF;
+            frame.locator = "RR99";
             frame.destinationCrc = (1u << DESTINATION_HASH_BITS) - 1;
             std::vector<uint8_t> encoded = FrameCodec::encode(frame, SIGNALLING_FRAME_BYTES);
             CHECK(!encoded.empty());
@@ -232,6 +234,7 @@ void testSizes()
     CHECK(FrameCodec::headerBits(FrameType::Message, true) == 73);
     CHECK(FrameCodec::headerBits(FrameType::Message, false) == 93);
     CHECK(FrameCodec::headerBits(FrameType::Ping, true) == 64);
+    CHECK(FrameCodec::headerBits(FrameType::Locator, true) == 54);
 
     // The protocol cuts text where a frame fills; what it says fits, fits.
     std::string body;
@@ -532,7 +535,7 @@ void testDecodeRejections()
     CHECK(!FrameCodec::decode(nullptr, TEXT_FRAME_BYTES, decoded));
     CHECK(!FrameCodec::decode(encoded.data(), 9, decoded)); // shorter than the header
 
-    for (uint8_t code : {0x0, 0x1, 0x2, 0x9, 0xA, 0xE, 0xF})
+    for (uint8_t code : {0x0, 0x1, 0x2, 0x9, 0xA, 0xF})
     {
         std::vector<uint8_t> corrupted = encoded;
         corrupted[0] = (uint8_t)((code << 4) | (corrupted[0] & 0x0F));
@@ -554,6 +557,7 @@ void testDecodeRejections()
     // A ping truncated by a byte is short of its header.
     std::vector<uint8_t> ping = FrameCodec::encode(makePingFrame(), SIGNALLING_FRAME_BYTES);
     CHECK(FrameCodec::decode(ping.data(), 8, decoded));
+    CHECK(decoded.features == 0);
     CHECK(!FrameCodec::decode(ping.data(), 7, decoded));
 }
 
@@ -621,6 +625,121 @@ void testExpectedFrameStart()
     }
 }
 
+// Grid squares pack as FT8 packs them, and only what an operator could
+// mean by one is taken.
+void testGridSquares()
+{
+    CHECK(FrameCodec::normalizeLocator("cn87") == "CN87");
+    CHECK(FrameCodec::normalizeLocator(" CN87UX ") == "CN87ux");
+    CHECK(FrameCodec::normalizeLocator("RR99xx") == "RR99xx");
+    CHECK(FrameCodec::normalizeLocator("").empty());
+    CHECK(FrameCodec::normalizeLocator("CN8").empty());
+    CHECK(FrameCodec::normalizeLocator("CN87u").empty());
+    CHECK(FrameCodec::normalizeLocator("SN87").empty());
+    CHECK(FrameCodec::normalizeLocator("C887").empty());
+    CHECK(FrameCodec::normalizeLocator("CN8A").empty());
+    CHECK(FrameCodec::normalizeLocator("CN87uy").empty());
+    CHECK(FrameCodec::normalizeLocator("CN87ux12").empty());
+
+    CHECK(FrameCodec::packGridSquare("AA00") == 0);
+    CHECK(FrameCodec::packGridSquare("RR99") == GRID_SQUARE_VALUES - 1);
+    CHECK(FrameCodec::packGridSquare("CN87ux") == FrameCodec::packGridSquare("CN87"));
+    CHECK(FrameCodec::packGridSquare("nowhere") == -1);
+    CHECK(GRID_SQUARE_VALUES <= (1 << LOCATOR_BITS));
+
+    bool roundTrips = true;
+    for (int value = 0; value < GRID_SQUARE_VALUES; value++)
+    {
+        std::string grid = FrameCodec::unpackGridSquare(value);
+        if (grid.size() != 4 || FrameCodec::packGridSquare(grid) != value) roundTrips = false;
+    }
+    CHECK(roundTrips);
+    CHECK(FrameCodec::unpackGridSquare(GRID_SQUARE_VALUES).empty());
+    CHECK(FrameCodec::unpackGridSquare(-1).empty());
+}
+
+// A locator frame is one segment from a standard callsign, carries the
+// square and not the subsquare, and a value past the last square is
+// corruption.
+void testLocatorFrame()
+{
+    Frame frame;
+    frame.type = FrameType::Locator;
+    frame.destinationCrc = FrameCodec::callsignHash("VK3ABC");
+    frame.originCallsign = "W1AW";
+    frame.locator = "fn31pr";
+    std::vector<uint8_t> encoded = FrameCodec::encode(frame, SIGNALLING_FRAME_BYTES);
+    CHECK(!encoded.empty());
+    CHECK(sentBytes(encoded) <= 9);
+
+    Frame decoded;
+    CHECK(FrameCodec::decode(encoded.data(), (int)encoded.size(), decoded));
+    CHECK(decoded.type == FrameType::Locator);
+    CHECK(decoded.locator == "FN31");
+    CHECK(decoded.originCallsign == "W1AW");
+    CHECK(decoded.destinationCrc == FrameCodec::callsignHash("VK3ABC"));
+    CHECK(decoded.burstsFollowing == 0);
+    CHECK(decoded.airId == 0);
+
+    frame.burstsFollowing = 1;
+    encoded = FrameCodec::encode(frame, SIGNALLING_FRAME_BYTES);
+    CHECK(FrameCodec::decode(encoded.data(), (int)encoded.size(), decoded));
+    CHECK(decoded.burstsFollowing == 1);
+
+    // The square sits right after "more follows".
+    int at = FrameCodec::headerBits(FrameType::Locator, true);
+    CHECK(getBits(encoded.data(), at, LOCATOR_BITS) == (uint64_t)FrameCodec::packGridSquare("FN31"));
+    putBits(encoded.data(), at, (1u << LOCATOR_BITS) - 1, LOCATOR_BITS);
+    CHECK(!FrameCodec::decode(encoded.data(), (int)encoded.size(), decoded));
+
+    Frame nowhere = frame;
+    nowhere.locator = "";
+    CHECK(FrameCodec::encode(nowhere, SIGNALLING_FRAME_BYTES).empty());
+
+    // From a callsign that is not standard it is two segments.
+    frame.originCallsign = "VK3ABC/P";
+    encoded = FrameCodec::encode(frame, SIGNALLING_FRAME_BYTES);
+    CHECK(FrameCodec::decode(encoded.data(), (int)encoded.size(), decoded));
+    CHECK(decoded.locator == "FN31" && decoded.originCallsign == "VK3ABC/P");
+    CHECK(sentBytes(encoded) > 9 && sentBytes(encoded) <= 12);
+}
+
+// Pings and acknowledgements end in the feature byte, in the ninth byte
+// that Glissando 0.5 sent as zero and never read; pongs and partial
+// acknowledgements have their own byte there and carry none.
+void testFeatureByte()
+{
+    for (FrameType type : {FrameType::Ping, FrameType::MessageAck})
+    {
+        Frame frame = makePingFrame();
+        frame.type = type;
+        frame.features = FEATURE_UNDERSTANDS_LOCATOR | FEATURE_HEARD_YOUR_LOCATOR;
+        std::vector<uint8_t> encoded = FrameCodec::encode(frame, SIGNALLING_FRAME_BYTES);
+        CHECK(!encoded.empty());
+        CHECK(encoded[8] == frame.features);
+        CHECK(sentBytes(encoded) == 9);
+
+        Frame decoded;
+        CHECK(FrameCodec::decode(encoded.data(), (int)encoded.size(), decoded));
+        CHECK(decoded.features == frame.features);
+
+        // What 0.5 sends: the byte left zero.
+        encoded[8] = 0;
+        CHECK(FrameCodec::decode(encoded.data(), (int)encoded.size(), decoded));
+        CHECK(decoded.features == 0);
+    }
+
+    Frame pong = makePingFrame();
+    pong.type = FrameType::PingAck;
+    pong.payload.assign(1, 0x2A);
+    pong.features = 0xFF;
+    std::vector<uint8_t> encoded = FrameCodec::encode(pong, SIGNALLING_FRAME_BYTES);
+    Frame decoded;
+    CHECK(FrameCodec::decode(encoded.data(), (int)encoded.size(), decoded));
+    CHECK(decoded.features == 0);
+    CHECK(decoded.payload.size() == 1 && decoded.payload[0] == 0x2A);
+}
+
 } // namespace
 
 int main()
@@ -638,6 +757,9 @@ int main()
     testPartialAcknowledgement();
     testEncodeRejections();
     testDecodeRejections();
+    testGridSquares();
+    testLocatorFrame();
+    testFeatureByte();
 
     if (failures > 0)
     {
