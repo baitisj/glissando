@@ -105,6 +105,8 @@ public:
     ConfigurationDataElement<bool> glissandoSnoopOpen;      // and the snooping window
     ConfigurationDataElement<bool> glissandoSmoke;          // the scope smokes on a long keying at high power
     ConfigurationDataElement<int> glissandoSmokeSeconds;    // keyed this long, it starts
+    ConfigurationDataElement<bool> glissandoMapBorders;     // the map ball draws the borders between countries
+    ConfigurationDataElement<bool> glissandoMapBrushedMetal; // and its land as brushed metal
     ConfigurationDataElement<long> glissandoWindowLeft;
     ConfigurationDataElement<long> glissandoWindowTop;
     ConfigurationDataElement<long> glissandoWindowWidth;

@@ -79,6 +79,8 @@ struct GlissandoTelemetry
     std::string homeLocator;        // our Maidenhead locator, empty if none is set
     std::string stationLocator;     // the last station heard or sent to whose locator is known
     bool stationLocatorCurrent = false; // that locator came from it this contact
+    bool mapBorders = true;         // the map ball draws the borders between countries
+    bool mapBrushedMetal = true;    // and its land as brushed metal
 };
 
 // The setup dialogs the console's Preferences button leads to.

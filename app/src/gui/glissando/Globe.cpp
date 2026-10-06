@@ -8,8 +8,10 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 
+#include "BorderLines.h"
 #include "LandOutlines.h"
 
 namespace Globe
@@ -66,6 +68,23 @@ constexpr double NORTH_UP_SHARE = 0.75;
 // Steps along a line of the grid, and round the rim where land goes behind.
 constexpr double GRID_STEP_DEGREES = 2.0;
 constexpr double RIM_STEP_RADIANS = 3.0 / DEGREES;
+
+// Brushed metal. The marks come in octaves of latitude, the coarsest a
+// degree apart and each next one half as far, and those that come out about
+// MARK_PIXELS apart at the size shown count most, falling away over
+// MARK_SPREAD octaves either side. They are read every MARK_SAMPLE_PIXELS
+// across the window. Where the circles' centre is more than STRAIGHT_BEYOND
+// window widths off, they are drawn straight. The band of light is
+// SHEEN_OFFSET of the window's breadth across north from its middle, and
+// SHEEN_HALF_WIDTH of it wide either side.
+constexpr double COARSEST_MARK_DEGREES = 1.0;
+constexpr int MARK_OCTAVES = 8;
+constexpr double MARK_PIXELS = 1.6;
+constexpr double MARK_SPREAD = 0.6;
+constexpr double MARK_SAMPLE_PIXELS = 0.5;
+constexpr double STRAIGHT_BEYOND = 20.0;
+constexpr double SHEEN_OFFSET = 0.04;
+constexpr double SHEEN_HALF_WIDTH = 0.25;
 
 double dot(const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 
@@ -140,6 +159,74 @@ const std::vector<Ring>& rings()
         return unpacked;
     }();
     return all;
+}
+
+// The borders, unpacked once in the same way.
+struct Line
+{
+    std::vector<Vec3> points;
+    Vec3 centre;
+    double reach = 0.0;
+};
+
+const std::vector<Line>& borders()
+{
+    static const std::vector<Line> all = []() {
+        std::vector<Line> unpacked;
+        for (int l = 0; l < BorderLines::LINE_COUNT; l++)
+        {
+            Line line;
+            Vec3 sum;
+            for (uint32_t i = BorderLines::LINE_START[l]; i < BorderLines::LINE_START[l + 1]; i++)
+            {
+                double lon = BorderLines::POINTS[2 * i] / BorderLines::UNITS_PER_DEGREE;
+                double lat = BorderLines::POINTS[2 * i + 1] / BorderLines::UNITS_PER_DEGREE;
+                line.points.push_back(toVector(LatLon{lat, lon}));
+                sum = plus(sum, line.points.back());
+            }
+            line.centre = length(sum) > 1e-9 ? normalized(sum) : line.points.front();
+            for (const Vec3& p : line.points) line.reach = std::max(line.reach, angleOf(line.centre, p));
+            unpacked.push_back(std::move(line));
+        }
+        return unpacked;
+    }();
+    return all;
+}
+
+// A well stirred 32 bits.
+uint32_t mixed(uint32_t x)
+{
+    x ^= x >> 16;
+    x *= 0x7feb352dU;
+    x ^= x >> 15;
+    x *= 0x846ca68bU;
+    x ^= x >> 16;
+    return x;
+}
+
+// The brush marks at a latitude, at a radius: -1 to 1. Each octave is a
+// light or dark mark at every step of latitude, blended smoothly between.
+double grain(double latDegrees, double radius)
+{
+    double sum = 0.0;
+    double weights = 0.0;
+    double step = COARSEST_MARK_DEGREES;
+    for (int octave = 0; octave < MARK_OCTAVES; octave++, step /= 2.0)
+    {
+        double off = std::log2(step / DEGREES * radius / MARK_PIXELS) / MARK_SPREAD;
+        double weight = std::exp(-0.5 * off * off);
+        if (weight < 1e-3) continue;
+        auto mark = [octave](uint32_t k) {
+            return mixed(k * 0x9e3779b9U + (uint32_t)octave * 0x85ebca6bU) / 2147483647.5 - 1.0;
+        };
+        double x = (std::clamp(latDegrees, -90.0, 90.0) + 90.0) / step;
+        uint32_t k = (uint32_t)x;
+        double f = x - k;
+        f = f * f * (3.0 - 2.0 * f);
+        sum += weight * (mark(k) + (mark(k + 1) - mark(k)) * f);
+        weights += weight * weight;
+    }
+    return weights > 0.0 ? std::clamp(sum / std::sqrt(weights), -1.0, 1.0) : 0.0;
 }
 
 // How far from the middle of the view, in radians over the ball, the window
@@ -871,6 +958,98 @@ std::vector<Outline> fieldLines(const View& view, const Window& window)
         addNearRuns(lines, points, view, window);
     }
     return lines;
+}
+
+std::vector<Outline> borderLines(const View& view, const Window& window)
+{
+    std::vector<Outline> lines;
+    const double reach = visibleReach(view, window);
+    for (const Line& line : borders())
+    {
+        if (angleOf(line.centre, view.attitude.out) - line.reach > reach) continue;
+        addNearRuns(lines, line.points, view, window);
+    }
+    return lines;
+}
+
+Brushing brushing(const View& view, const Window& window, const Point& towardsLight)
+{
+    Brushing brushing;
+    const Point middle{window.width / 2.0, window.height / 2.0};
+    const double radius = view.radius;
+
+    // North at the window's middle; looking straight down on a pole, any
+    // way will do.
+    Vec3 pole = toView(view.attitude, NORTH);
+    double northX = pole.x;
+    double northY = -pole.y;
+    double northLength = std::hypot(northX, northY);
+    if (northLength < 1e-9)
+    {
+        northX = 0.0;
+        northY = -1.0;
+    }
+    else
+    {
+        northX /= northLength;
+        northY /= northLength;
+    }
+    brushing.north = Point{northX, northY};
+
+    // At latitude phi the circle of latitude through the window's middle
+    // bends round a point R cos(phi) / sin(phi) north of it, or south of it
+    // south of the equator. The circles either side bend round almost the
+    // same point.
+    double sinPhi = std::clamp(view.attitude.out.z, -1.0, 1.0);
+    double phi = std::asin(sinPhi) * DEGREES;
+    double towards = std::fabs(sinPhi) > 1e-12 ? radius * std::sqrt(1.0 - sinPhi * sinPhi) / sinPhi : 1e12;
+    brushing.straight = std::fabs(towards) > STRAIGHT_BEYOND * window.width;
+
+    // The latitude t pixels north of the middle, along north.
+    auto latitudeAt = [&](double t) { return phi + std::asin(std::clamp(t / radius, -1.0, 1.0)) * DEGREES; };
+
+    double from;
+    double to;
+    if (brushing.straight)
+    {
+        brushing.centre = middle;
+        double half = (std::fabs(northX) * window.width + std::fabs(northY) * window.height) / 2.0;
+        from = -half;
+        to = half;
+    }
+    else
+    {
+        brushing.centre = Point{middle.x + northX * towards, middle.y + northY * towards};
+        double nearestX = std::clamp(brushing.centre.x, 0.0, window.width) - brushing.centre.x;
+        double nearestY = std::clamp(brushing.centre.y, 0.0, window.height) - brushing.centre.y;
+        from = std::hypot(nearestX, nearestY);
+        to = 0.0;
+        for (double x : {0.0, window.width})
+        {
+            for (double y : {0.0, window.height})
+            {
+                to = std::max(to, std::hypot(x - brushing.centre.x, y - brushing.centre.y));
+            }
+        }
+    }
+    int samples = std::max(2, (int)std::ceil((to - from) / MARK_SAMPLE_PIXELS) + 1);
+    for (int i = 0; i < samples; i++)
+    {
+        double at = from + (to - from) * i / (samples - 1);
+        // Out from the centre is south of it, when the centre is north.
+        double t = brushing.straight ? at : towards > 0.0 ? towards - at : towards + at;
+        brushing.marks.emplace_back(at, grain(latitudeAt(t), radius));
+    }
+
+    // The marks run east and west, so they catch the light where they are
+    // square to it: along a meridian, a band along north.
+    Point across{-northY, northX};
+    if (across.x * towardsLight.x + across.y * towardsLight.y < 0.0) across = Point{northY, -northX};
+    double breadth = std::fabs(across.x) * window.width + std::fabs(across.y) * window.height;
+    brushing.across = across;
+    brushing.sheenMiddle = Point{middle.x + across.x * SHEEN_OFFSET * breadth, middle.y + across.y * SHEEN_OFFSET * breadth};
+    brushing.sheenHalfWidth = SHEEN_HALF_WIDTH * breadth;
+    return brushing;
 }
 
 bool isLand(const LatLon& position)

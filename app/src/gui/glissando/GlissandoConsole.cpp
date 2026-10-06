@@ -863,6 +863,7 @@ void GlissandoConsole::refreshTelemetry()
     scope_->setSmoke(t.smoke);
     scope_->setCarrierSense(t.channelHeld, t.carrierHz);
     mapBall_->setLocators(t.homeLocator, t.stationLocator, t.stationLocatorCurrent);
+    mapBall_->setLook(t.mapBorders, t.mapBrushedMetal);
     for (const GlissandoScopeFrame& frame : host_->glissandoHeardFrames()) scope_->addHeard(frame);
     for (const GlissandoScopeSent& frame : host_->glissandoSentFrames()) scope_->addSent(frame);
 

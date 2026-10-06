@@ -3,8 +3,8 @@
 // Purpose:         The sums behind the console's map ball: where a
 //                  Maidenhead locator is, how far and which way, which way
 //                  up and how close the ball shows a path best, how it rolls
-//                  there, and the outlines of its land and grid as the
-//                  window shows them.
+//                  there, and the outlines of its land, borders and grid,
+//                  and its brushed metal, as the window shows them.
 //
 // Nothing here depends on wxWidgets: MapBall draws what this works out.
 //
@@ -18,6 +18,7 @@
 #define GUI_GLISSANDO__GLOBE_H
 
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Globe
@@ -239,6 +240,41 @@ std::vector<Outline> landOutlines(const View& view, const Window& window);
 // The lines of the Maidenhead fields, 20 degrees of longitude by 10 of
 // latitude, on the near side of the ball, as lines to stroke.
 std::vector<Outline> fieldLines(const View& view, const Window& window);
+
+// The borders between countries on the near side of the ball, smoothed, as
+// lines to stroke.
+std::vector<Outline> borderLines(const View& view, const Window& window);
+
+// The land as metal brushed along the lines of latitude, the way a lathe
+// brushes a ball. The brush marks go round the pole: in the window they are,
+// near enough, circles about one centre, or near the equator, where that
+// centre is far off, straight lines square to north. They are fixed to the
+// earth, so they roll with the land, and finer marks come in as the ball
+// comes nearer. The light catches the marks in a band running north and
+// south a little to the light's side of the window's middle. The band stays
+// where it is as the ball spins about its poles, and the land slides through
+// it.
+struct Brushing
+{
+    bool straight = false;
+    Point centre;               // of the circles; straight, the window's middle
+    Point north;                // a unit step north in the window, at its middle
+
+    // How light (up to 1) or dark (down to -1) the metal is at distances
+    // out from the centre or, straight, north of it, in pixels: in order,
+    // close enough together to show every mark, across the whole window.
+    std::vector<std::pair<double, double>> marks;
+
+    // The band of light: along north through sheenMiddle, sheenHalfWidth
+    // pixels either side; across is a unit step square to north, towards
+    // the light.
+    Point sheenMiddle;
+    Point across;
+    double sheenHalfWidth = 0.0;
+};
+
+// towardsLight is a direction in the window, x right and y down.
+Brushing brushing(const View& view, const Window& window, const Point& towardsLight);
 
 // Whether the outlines have land at a position.
 bool isLand(const LatLon& position);

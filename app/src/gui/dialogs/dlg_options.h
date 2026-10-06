@@ -79,6 +79,7 @@ class OptionsDlg : public wxDialog
         wxNotebookPage *m_reportingTab; // Station: callsign, stations heard log
         wxNotebookPage *m_rigControlTab; // Rig Control
         wxNotebookPage *m_modemTab; // 700/OFDM/duplex
+        wxNotebookPage *m_uiTab; // how the console looks
         wxNotebookPage *m_debugTab; // Debug
         
         /* Hamlib options */
@@ -137,6 +138,8 @@ class OptionsDlg : public wxDialog
         wxCheckBox*  m_ckboxGlissandoShowMarquee;
         wxCheckBox*  m_ckboxGlissandoSmoke;
         wxTextCtrl*  m_txtGlissandoSmokeSeconds;
+        wxCheckBox*  m_ckboxGlissandoMapBorders;
+        wxCheckBox*  m_ckboxGlissandoMapBrushedMetal;
         wxCheckBox*  m_ckboxData2G;
         wxTextCtrl*  m_txtData2GHost;
         wxTextCtrl*  m_txtData2GKissPort;

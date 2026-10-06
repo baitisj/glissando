@@ -309,6 +309,23 @@ are public domain, and `prototype/globe/gen_land_outlines.py` remakes them from
 that shapefile. They are coarse closer in than about a degree to 20 pixels,
 so the zoom stops there. The sums are in `app/src/gui/glissando/Globe.cpp`.
 
+Preferences, UI Options, has two looks for the ball, both on to begin with.
+Country borders draws faint lines between countries (`BorderLines.h`, from
+the same shapefile by `prototype/globe/gen_border_lines.py`): each border is
+an edge two countries' outlines share, smoothed to about 25 km so it reads as
+a few clean strokes. Smoothing a border could cut across another, or a
+stretch of coast, and fence off a country that isn't there, so the script
+puts points back wherever a smoothed border would meet another line anywhere
+but at a shared end, or run over the sea, until none does; the globe test
+checks the result. Brushed metal makes the land look like metal brushed along
+the lines of latitude on a lathe: fine light and dark marks, fixed to the
+earth so they roll with the land and finer ones come in as it zooms, and a
+band of light along north just left of the middle that the land slides
+through as the ball spins. Both are gradients over the land the ball already
+fills; with both on, drawing the ball takes about 3.3 ms instead of 1.8 ms
+on one core of a cloud machine, while it moves. The same tab has the switch
+for the GLISSANDO title over the visi-scope.
+
 The COMMS window's send button shows how long the message being typed will be
 on the air at the tempo it would go out at now, in red once that is longer
 than the transmit time-out (Preferences, Rig control; 180 s when the app's
