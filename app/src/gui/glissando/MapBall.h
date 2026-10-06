@@ -11,7 +11,8 @@
 // the bearing under the window. A station whose square is not known leaves
 // the ball where it is. The mouse wheel over it zooms in and out; a double
 // click fits the path again. It is all drawn as outlines, so it is sharp at
-// any size. The sums are in Globe.h.
+// any size; the borders between countries, and the land as brushed metal,
+// can each be turned off in Preferences. The sums are in Globe.h.
 //
 // The ball is heavy and the fluid thick. Dragged, it spins, and with only
 // our own square to show it coasts on until the fluid stops it. Held, it
@@ -26,6 +27,7 @@
 
 #include <string>
 
+#include <wx/graphics.h>
 #include <wx/timer.h>
 
 #include "ChaoticaControls.h"
@@ -42,6 +44,10 @@ public:
     // shows the North Atlantic, and asks for our square. A station's square
     // kept from an earlier contact is shown dim and marked as such.
     void setLocators(const std::string& home, const std::string& station, bool stationCurrent = true);
+
+    // Whether the land shows the borders between countries, and whether it
+    // looks like brushed metal. Both cost a little more to draw.
+    void setLook(bool borders, bool brushedMetal);
 
 protected:
     virtual void paint(wxGraphicsContext* gc, const wxSize& size) override;
@@ -68,6 +74,8 @@ private:
     void pointer(const wxMouseEvent& event, double& x, double& y) const;
 
     void drawBall(wxGraphicsContext* gc, const Globe::View& view, double left, double top);
+    void drawBrushing(wxGraphicsContext* gc, const Globe::View& view, const wxGraphicsPath& land, double left,
+                      double top);
     void drawPath(wxGraphicsContext* gc, const Globe::View& view, double left, double top);
 
     Globe::Window window_;
@@ -80,6 +88,8 @@ private:
     bool haveHome_;
     bool haveStation_;
     bool stationCurrent_;
+    bool borders_;
+    bool brushedMetal_;
     Globe::LatLon homeAt_;
     Globe::LatLon stationAt_;
     double pathDrawn_;              // how much of the path is drawn so far, 0 to 1

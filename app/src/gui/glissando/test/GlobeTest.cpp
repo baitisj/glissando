@@ -5,10 +5,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "../BorderLines.h"
 #include "../Globe.h"
 
 using namespace Globe;
@@ -538,6 +542,220 @@ void testSpinning()
     CHECK(slowest < 6.0);
 }
 
+const double HALF_TURN = std::acos(-1.0);
+
+// Whether segments pq and rs, in whole hundredths of a degree, meet
+// anywhere but at an end they share.
+using Corner = std::pair<long long, long long>;
+
+int orientation(const Corner& a, const Corner& b, const Corner& c)
+{
+    long long v = (b.first - a.first) * (c.second - a.second) - (b.second - a.second) * (c.first - a.first);
+    return (v > 0) - (v < 0);
+}
+
+bool within(const Corner& a, const Corner& b, const Corner& p)
+{
+    return std::min(a.first, b.first) <= p.first && p.first <= std::max(a.first, b.first) &&
+           std::min(a.second, b.second) <= p.second && p.second <= std::max(a.second, b.second);
+}
+
+bool meet(const Corner& p, const Corner& q, const Corner& r, const Corner& s)
+{
+    int sharedEnds = (p == r) + (p == s) + (q == r) + (q == s);
+    if (sharedEnds >= 2) return true;
+    if (sharedEnds == 1)
+    {
+        const Corner& x = (p == r || p == s) ? p : q;
+        const Corner& a = x == p ? q : p;
+        const Corner& b = x == r ? s : r;
+        return orientation(x, a, b) == 0 &&
+               (a.first - x.first) * (b.first - x.first) + (a.second - x.second) * (b.second - x.second) > 0;
+    }
+    int o1 = orientation(p, q, r), o2 = orientation(p, q, s), o3 = orientation(r, s, p), o4 = orientation(r, s, q);
+    if (o1 != o2 && o3 != o4) return true;
+    return (o1 == 0 && within(p, q, r)) || (o2 == 0 && within(p, q, s)) || (o3 == 0 && within(r, s, p)) ||
+           (o4 == 0 && within(r, s, q));
+}
+
+void testBorders()
+{
+    struct Segment
+    {
+        Corner p, q;
+    };
+    std::vector<Segment> segments;
+    for (int l = 0; l < BorderLines::LINE_COUNT; l++)
+    {
+        for (uint32_t i = BorderLines::LINE_START[l]; i + 1 < BorderLines::LINE_START[l + 1]; i++)
+        {
+            segments.push_back(Segment{Corner{BorderLines::POINTS[2 * i], BorderLines::POINTS[2 * i + 1]},
+                                       Corner{BorderLines::POINTS[2 * i + 2], BorderLines::POINTS[2 * i + 3]}});
+        }
+    }
+    CHECK(segments.size() > 1000);
+
+    // Smoothed, no border crosses another or itself, so they make no
+    // countries that aren't there. The one crossing is Natural Earth's own,
+    // where Sudan, South Sudan and the Central African Republic meet; it is
+    // a few kilometres across.
+    auto nearSudanCorner = [](const Segment& a) {
+        return std::abs(a.p.first - 2420) < 60 && std::abs(a.p.second - 860) < 60;
+    };
+    int crossings = 0;
+    for (size_t a = 0; a < segments.size(); a++)
+    {
+        for (size_t b = a + 1; b < segments.size(); b++)
+        {
+            if (!meet(segments[a].p, segments[a].q, segments[b].p, segments[b].q)) continue;
+            if (nearSudanCorner(segments[a]) && nearSudanCorner(segments[b])) continue;
+            crossings++;
+            fprintf(stderr, "borders meet: (%lld, %lld)-(%lld, %lld) and (%lld, %lld)-(%lld, %lld)\n",
+                    segments[a].p.first, segments[a].p.second, segments[a].q.first, segments[a].q.second,
+                    segments[b].p.first, segments[b].p.second, segments[b].q.first, segments[b].q.second);
+        }
+    }
+    CHECK(crossings == 0);
+
+    // And they run over land, not across bays: every stretch is on land, or
+    // right beside it where it follows the edge of the map's data.
+    int overSea = 0;
+    for (const Segment& segment : segments)
+    {
+        double dx = (double)(segment.q.first - segment.p.first);
+        double dy = (double)(segment.q.second - segment.p.second);
+        double length = std::hypot(dx, dy);
+        if (length == 0.0) continue;
+        for (double t : {0.25, 0.5, 0.75})
+        {
+            double lon = (segment.p.first + dx * t) / 100.0;
+            double lat = (segment.p.second + dy * t) / 100.0;
+            double sideLon = -dy / length * 0.01;
+            double sideLat = dx / length * 0.01;
+            if (!isLand(LatLon{lat, lon}) && !isLand(LatLon{lat + sideLat, lon + sideLon}) &&
+                !isLand(LatLon{lat - sideLat, lon - sideLon}))
+            {
+                overSea++;
+            }
+        }
+    }
+    CHECK(overSea == 0);
+
+    // Over Europe there are plenty, all on the near side; over the open
+    // Pacific, none.
+    Window window{416.0, 104.0};
+    View europe{lookingAt(toVector(LatLon{50.0, 10.0})), 600.0};
+    std::vector<Outline> lines = borderLines(europe, window);
+    CHECK(lines.size() > 20);
+    for (const Outline& line : lines)
+    {
+        for (const Point& p : line) CHECK(std::hypot(p.x - 208.0, p.y - 52.0) <= 600.0 + 1e-6);
+    }
+    View pacific{lookingAt(toVector(LatLon{-20.0, -150.0})), 500.0};
+    CHECK(borderLines(pacific, window).empty());
+}
+
+void testBrushing()
+{
+    Window window{416.0, 104.0};
+    const Point light{-0.35, -0.5};
+    auto covers = [&](const Brushing& b) {
+        if (b.marks.size() < 2) return false;
+        for (size_t i = 1; i < b.marks.size(); i++)
+        {
+            if (!(b.marks[i].first > b.marks[i - 1].first)) return false;
+            if (b.marks[i].first - b.marks[i - 1].first > 1.0) return false;
+        }
+        for (const auto& mark : b.marks)
+        {
+            if (mark.second < -1.0 || mark.second > 1.0) return false;
+        }
+        return true;
+    };
+
+    // North up at 30 N, the marks bend round a point R cot 30 above the
+    // window's middle, reaching every corner; the light catches them left
+    // of the middle, in a band along north.
+    View north{lookingAt(toVector(LatLon{30.0, -40.0})), 245.0};
+    Brushing b = brushing(north, window, light);
+    CHECK(!b.straight);
+    CHECK(near(b.north.x, 0.0, 1e-9) && near(b.north.y, -1.0, 1e-9));
+    CHECK(near(b.centre.x, 208.0, 1e-6));
+    CHECK(near(b.centre.y, 52.0 - 245.0 * std::sqrt(3.0), 1e-6));
+    CHECK(covers(b));
+    CHECK(b.marks.front().first <= 245.0 * std::sqrt(3.0) - 52.0 + 1e-6);
+    CHECK(b.marks.back().first >= std::hypot(208.0, 52.0 + 245.0 * std::sqrt(3.0)) - 1e-6);
+    CHECK(near(b.across.x, -1.0, 1e-9) && near(b.across.y, 0.0, 1e-9));
+    CHECK(b.sheenMiddle.x < 208.0 && near(b.sheenMiddle.y, 52.0, 1e-9));
+    CHECK(b.sheenHalfWidth > 50.0);
+    int lighter = 0, darker = 0;
+    for (const auto& mark : b.marks)
+    {
+        if (mark.second > 0.1) lighter++;
+        if (mark.second < -0.1) darker++;
+    }
+    CHECK(lighter > 20 && darker > 20);
+
+    // South of the equator they bend the other way; on the equator they are
+    // straight across; looking down on a pole, round it.
+    Brushing south = brushing(View{lookingAt(toVector(LatLon{-30.0, 20.0})), 245.0}, window, light);
+    CHECK(!south.straight && south.centre.y > 52.0 + 400.0);
+    CHECK(covers(south));
+    Brushing equator = brushing(View{lookingAt(toVector(LatLon{0.0, 20.0})), 245.0}, window, light);
+    CHECK(equator.straight && covers(equator));
+    CHECK(equator.marks.front().first <= -52.0 && equator.marks.back().first >= 52.0);
+    Brushing pole = brushing(View{lookingAt(toVector(LatLon{90.0, 0.0})), 245.0}, window, light);
+    CHECK(!pole.straight && covers(pole));
+    CHECK(std::hypot(pole.centre.x - 208.0, pole.centre.y - 52.0) < 1.0);
+    CHECK(pole.marks.front().first < 1e-6);
+
+    // Turned on its side, the band turns with north.
+    Brushing turned = brushing(View{lookingAt(toVector(LatLon{30.0, -40.0}), HALF_TURN / 2.0), 245.0}, window, light);
+    CHECK(near(std::fabs(turned.north.x), 1.0, 1e-9));
+    CHECK(near(turned.across.x, 0.0, 1e-9) && turned.across.y < 0.0);
+
+    // The marks are fixed to the earth: spun about its poles the ball shows
+    // the same marks, and rolled north they move with the land.
+    Brushing spun = brushing(View{lookingAt(toVector(LatLon{30.0, 75.0})), 245.0}, window, light);
+    CHECK(spun.marks.size() == b.marks.size());
+    double spunApart = 0.0;
+    for (size_t i = 0; i < std::min(spun.marks.size(), b.marks.size()); i++)
+    {
+        spunApart = std::max(spunApart, std::fabs(spun.marks[i].second - b.marks[i].second));
+    }
+    CHECK(spunApart < 1e-9);
+
+    const double radius = 245.0;
+    Brushing here = brushing(View{lookingAt(toVector(LatLon{0.0, 0.0})), radius}, window, light);
+    Brushing rolled = brushing(View{lookingAt(toVector(LatLon{1.0, 0.0})), radius}, window, light);
+    CHECK(here.straight && rolled.straight);
+    auto valueAt = [](const Brushing& brushed, double t) {
+        for (size_t i = 1; i < brushed.marks.size(); i++)
+        {
+            if (brushed.marks[i].first >= t)
+            {
+                const auto& a = brushed.marks[i - 1];
+                const auto& c = brushed.marks[i];
+                return a.second + (c.second - a.second) * (t - a.first) / (c.first - a.first);
+            }
+        }
+        return brushed.marks.back().second;
+    };
+    double apart = 0.0;
+    int compared = 0;
+    for (const auto& mark : here.marks)
+    {
+        // The same latitude, in the rolled view.
+        double lat = std::asin(std::clamp(mark.first / radius, -1.0, 1.0));
+        double t = radius * std::sin(lat - HALF_TURN / 180.0);
+        if (t < rolled.marks.front().first || t > rolled.marks.back().first) continue;
+        apart += std::fabs(valueAt(rolled, t) - mark.second);
+        compared++;
+    }
+    CHECK(compared > 50);
+    CHECK(compared > 0 && apart / compared < 0.05);
+}
+
 } // namespace
 
 int main()
@@ -552,6 +770,8 @@ int main()
     testRolling();
     testSpinning();
     testOutlines();
+    testBorders();
+    testBrushing();
 
     if (failures > 0)
     {

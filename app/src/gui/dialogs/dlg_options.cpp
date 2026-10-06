@@ -114,11 +114,13 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     m_reportingTab = new wxPanel(m_notebook, wxID_ANY);
     m_rigControlTab = new wxPanel(m_notebook, wxID_ANY);
     m_modemTab = new wxPanel(m_notebook, wxID_ANY);
+    m_uiTab = new wxPanel(m_notebook, wxID_ANY);
     m_debugTab = new wxPanel(m_notebook, wxID_ANY);
     
     m_notebook->AddPage(m_reportingTab, _("Station"));
     m_notebook->AddPage(m_rigControlTab, _("Rig Control"));
     m_notebook->AddPage(m_modemTab, _("Modem"));
+    m_notebook->AddPage(m_uiTab, _("UI Options"));
     m_notebook->AddPage(m_debugTab, _("Debugging"));
     
     bSizer30->Add(m_notebook, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 3);
@@ -398,13 +400,6 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
           "rockets for the pentatonic scale, invaders for the tritone scales."));
     sbSizer_textChat->Add(m_ckboxGlissandoTransmitShips, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
 
-    m_ckboxGlissandoShowMarquee = new wxCheckBox(
-        sb_textChat, wxID_ANY, _("Show the GLISSANDO title above the visi-scope"),
-        wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    m_ckboxGlissandoShowMarquee->SetToolTip(
-        _("Turn off on a small screen: the console gets shorter by the title's height."));
-    sbSizer_textChat->Add(m_ckboxGlissandoShowMarquee, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
-
     // No tooltips, on purpose: it's an easter egg.
     wxBoxSizer* smokeSizer = new wxBoxSizer(wxHORIZONTAL);
     m_ckboxGlissandoSmoke = new wxCheckBox(
@@ -458,6 +453,38 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     sizerModem->Add(sbSizer_textChat, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
     
     m_modemTab->SetSizer(sizerModem);
+
+    // UI Options tab: how the console looks.
+    wxBoxSizer* sizerUi = new wxBoxSizer(wxVERTICAL);
+    wxStaticBox* sb_uiConsole = new wxStaticBox(m_uiTab, wxID_ANY, _("Console"));
+    wxStaticBoxSizer* sbSizer_uiConsole = new wxStaticBoxSizer(sb_uiConsole, wxVERTICAL);
+
+    m_ckboxGlissandoShowMarquee = new wxCheckBox(
+        sb_uiConsole, wxID_ANY, _("Show the GLISSANDO title above the visi-scope"),
+        wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
+    m_ckboxGlissandoShowMarquee->SetToolTip(
+        _("Turn off on a small screen: the console gets shorter by the title's height."));
+    sbSizer_uiConsole->Add(m_ckboxGlissandoShowMarquee, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
+    sizerUi->Add(sbSizer_uiConsole, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
+
+    wxStaticBox* sb_mapBall = new wxStaticBox(m_uiTab, wxID_ANY, _("Map Ball"));
+    wxStaticBoxSizer* sbSizer_mapBall = new wxStaticBoxSizer(sb_mapBall, wxVERTICAL);
+
+    m_ckboxGlissandoMapBorders = new wxCheckBox(
+        sb_mapBall, wxID_ANY, _("Country borders"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
+    m_ckboxGlissandoMapBorders->SetToolTip(
+        _("Faint lines between countries on the map ball, smoothed to a few clean strokes."));
+    sbSizer_mapBall->Add(m_ckboxGlissandoMapBorders, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
+
+    m_ckboxGlissandoMapBrushedMetal = new wxCheckBox(
+        sb_mapBall, wxID_ANY, _("Brushed metal"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
+    m_ckboxGlissandoMapBrushedMetal->SetToolTip(
+        _("The land on the map ball as metal brushed along the lines of latitude, catching the light "
+          "as it turns. Turn off on a slow computer: it takes the most drawing."));
+    sbSizer_mapBall->Add(m_ckboxGlissandoMapBrushedMetal, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
+
+    sizerUi->Add(sbSizer_mapBall, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
+    m_uiTab->SetSizer(sizerUi);
     
     // Debug tab
     wxBoxSizer* sizerDebug = new wxBoxSizer(wxVERTICAL);
@@ -673,6 +700,8 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         m_ckboxGlissandoTransmitShips->SetValue(wxGetApp().appConfiguration.glissandoTransmitShips);
         m_ckboxGlissandoShowMarquee->SetValue(wxGetApp().appConfiguration.glissandoShowMarquee);
         m_ckboxGlissandoSmoke->SetValue(wxGetApp().appConfiguration.glissandoSmoke);
+        m_ckboxGlissandoMapBorders->SetValue(wxGetApp().appConfiguration.glissandoMapBorders);
+        m_ckboxGlissandoMapBrushedMetal->SetValue(wxGetApp().appConfiguration.glissandoMapBrushedMetal);
         m_txtGlissandoSmokeSeconds->SetValue(
             wxString::Format("%d", wxGetApp().appConfiguration.glissandoSmokeSeconds.get()));
         m_ckboxData2G->SetValue(wxGetApp().appConfiguration.data2gEnabled);
@@ -763,6 +792,8 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         wxGetApp().appConfiguration.glissandoTransmitShips = m_ckboxGlissandoTransmitShips->GetValue();
         wxGetApp().appConfiguration.glissandoShowMarquee = m_ckboxGlissandoShowMarquee->GetValue();
         wxGetApp().appConfiguration.glissandoSmoke = m_ckboxGlissandoSmoke->GetValue();
+        wxGetApp().appConfiguration.glissandoMapBorders = m_ckboxGlissandoMapBorders->GetValue();
+        wxGetApp().appConfiguration.glissandoMapBrushedMetal = m_ckboxGlissandoMapBrushedMetal->GetValue();
         long smokeSeconds = 0;
         if (m_txtGlissandoSmokeSeconds->GetValue().ToLong(&smokeSeconds))
             wxGetApp().appConfiguration.glissandoSmokeSeconds = (int)std::min(smokeSeconds, 100000L);

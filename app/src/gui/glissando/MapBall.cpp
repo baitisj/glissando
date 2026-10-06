@@ -46,6 +46,16 @@ const wxColour LAND(186, 181, 168);
 const wxColour RULING(232, 236, 230, 44);
 const wxColour PATH_CASING(0, 0, 0, 150);
 
+// Borders between countries, if shown: faint dark lines on the land.
+const wxColour BORDER(64, 60, 54, 120);
+constexpr double BORDER_WIDTH = 0.9;
+
+// Brushed metal, if shown: the marks at their lightest and darkest, and the
+// band where the light catches them at its brightest.
+constexpr double MARK_LIGHT = 30.0;
+constexpr double MARK_DARK = 24.0;
+constexpr double SHEEN_BRIGHTEST = 120.0;
+
 // Where the light comes from, over the viewer's left shoulder, as a point
 // on the ball's face: the highlight sits there and the ball darkens away
 // from it.
@@ -73,6 +83,8 @@ MapBall::MapBall(wxWindow* parent)
     , haveHome_(false)
     , haveStation_(false)
     , stationCurrent_(true)
+    , borders_(true)
+    , brushedMetal_(true)
     , pathDrawn_(1.0)
     , timer_(this)
     , lastTickMs_(0)
@@ -166,6 +178,14 @@ void MapBall::setLocators(const std::string& home, const std::string& station, b
     Refresh();
 }
 
+void MapBall::setLook(bool borders, bool brushedMetal)
+{
+    if (borders == borders_ && brushedMetal == brushedMetal_) return;
+    borders_ = borders;
+    brushedMetal_ = brushedMetal;
+    Refresh();
+}
+
 void MapBall::OnTimer(wxTimerEvent&)
 {
     long long now = wxGetLocalTimeMillis().GetValue();
@@ -247,6 +267,19 @@ void MapBall::drawBall(wxGraphicsContext* gc, const Globe::View& view, double le
     }
     gc->SetBrush(wxBrush(LAND));
     gc->FillPath(land, wxWINDING_RULE);
+    if (brushedMetal_) drawBrushing(gc, view, land, left, top);
+
+    if (borders_)
+    {
+        wxGraphicsPath lines = gc->CreatePath();
+        for (const Globe::Outline& line : Globe::borderLines(view, window_))
+        {
+            lines.MoveToPoint(at(line.front(), left, top));
+            for (size_t i = 1; i < line.size(); i++) lines.AddLineToPoint(at(line[i], left, top));
+        }
+        gc->SetPen(gc->CreatePen(wxGraphicsPenInfo(BORDER, BORDER_WIDTH).Join(wxJOIN_ROUND)));
+        gc->StrokePath(lines);
+    }
 
     wxGraphicsPath fields = gc->CreatePath();
     for (const Globe::Outline& line : Globe::fieldLines(view, window_))
@@ -272,6 +305,60 @@ void MapBall::drawBall(wxGraphicsContext* gc, const Globe::View& view, double le
     double gy = cy - LIGHT_Y * radius;
     gc->SetBrush(gc->CreateRadialGradientBrush(gx, gy, gx, gy, glow, shine));
     gc->DrawEllipse(gx - glow, gy - glow, 2.0 * glow, 2.0 * glow);
+}
+
+void MapBall::drawBrushing(wxGraphicsContext* gc, const Globe::View& view, const wxGraphicsPath& land, double left,
+                           double top)
+{
+    Globe::Brushing brushing = Globe::brushing(view, window_, Globe::Point{LIGHT_X, -LIGHT_Y});
+    gc->SetPen(*wxTRANSPARENT_PEN);
+
+    // The band of light, laid over the land: a bright streak down its
+    // middle in a softer glow, fading out to either side.
+    auto light = [](double share) { return wxColour(255, 255, 250, (unsigned char)std::lround(SHEEN_BRIGHTEST * share)); };
+    wxGraphicsGradientStops sheen(light(0.0), light(0.0));
+    sheen.Add(light(0.15), 0.3f);
+    sheen.Add(light(0.45), 0.42f);
+    sheen.Add(light(1.0), 0.5f);
+    sheen.Add(light(0.45), 0.58f);
+    sheen.Add(light(0.15), 0.7f);
+    const Globe::Point& middle = brushing.sheenMiddle;
+    const Globe::Point& across = brushing.across;
+    const double half = brushing.sheenHalfWidth;
+    gc->SetBrush(gc->CreateLinearGradientBrush(left + middle.x - across.x * half, top + middle.y - across.y * half,
+                                               left + middle.x + across.x * half, top + middle.y + across.y * half,
+                                               sheen));
+    gc->FillPath(land, wxWINDING_RULE);
+
+    // The marks: a gradient with a stop for every few pixels, round the
+    // centre or straight across north.
+    if (brushing.marks.size() < 2) return;
+    auto shade = [](double value) {
+        return value >= 0.0 ? wxColour(255, 255, 250, (unsigned char)std::lround(MARK_LIGHT * value))
+                            : wxColour(0, 0, 0, (unsigned char)std::lround(-MARK_DARK * value));
+    };
+    const double from = brushing.marks.front().first;
+    const double to = brushing.marks.back().first;
+    wxGraphicsGradientStops marks(shade(brushing.marks.front().second), shade(brushing.marks.back().second));
+    for (const auto& mark : brushing.marks)
+    {
+        double position = brushing.straight ? (mark.first - from) / (to - from) : mark.first / to;
+        marks.Add(shade(mark.second), (float)position);
+    }
+    const Globe::Point& centre = brushing.centre;
+    if (brushing.straight)
+    {
+        const Globe::Point& north = brushing.north;
+        gc->SetBrush(gc->CreateLinearGradientBrush(left + centre.x + north.x * from, top + centre.y + north.y * from,
+                                                   left + centre.x + north.x * to, top + centre.y + north.y * to,
+                                                   marks));
+    }
+    else
+    {
+        gc->SetBrush(gc->CreateRadialGradientBrush(left + centre.x, top + centre.y, left + centre.x, top + centre.y,
+                                                   to, marks));
+    }
+    gc->FillPath(land, wxWINDING_RULE);
 }
 
 void MapBall::drawPath(wxGraphicsContext* gc, const Globe::View& view, double left, double top)

@@ -269,6 +269,8 @@ GlissandoTelemetry MainFrame::glissandoTelemetry()
     std::string mapStation = protocol.mapStation();
     telemetry.stationLocator = protocol.stationLocator(mapStation);
     telemetry.stationLocatorCurrent = protocol.stationLocatorIsCurrent(mapStation);
+    telemetry.mapBorders = wxGetApp().appConfiguration.glissandoMapBorders;
+    telemetry.mapBrushedMetal = wxGetApp().appConfiguration.glissandoMapBrushedMetal;
 
     int64_t frequency = wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency;
     telemetry.rigFrequencyKnown = frequency > 0;

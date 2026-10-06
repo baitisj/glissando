@@ -30,32 +30,38 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "..", "..", "app", "src", "gui", "glissando", "LandOutlines.h")
 
 
-def read_rings(path):
-    """Every polygon's rings, as lists of (lon, lat), the closing point dropped."""
+def read_shapes(path):
+    """Each record's rings, as lists of (lon, lat), the closing point dropped."""
     with open(path, "rb") as f:
         data = f.read()
-    rings = []
+    shapes = []
     pos = 100
     while pos < len(data):
         _, length = struct.unpack(">ii", data[pos:pos + 8])
         content = data[pos + 8:pos + 8 + 2 * length]
         pos += 8 + 2 * length
         shape_type = struct.unpack("<i", content[:4])[0]
-        if shape_type not in (5, 15, 25):
-            continue
-        num_parts, num_points = struct.unpack("<ii", content[36:44])
-        parts = list(struct.unpack("<%di" % num_parts, content[44:44 + 4 * num_parts]))
-        offset = 44 + 4 * num_parts
-        points = [struct.unpack("<dd", content[offset + 16 * i:offset + 16 * i + 16])
-                  for i in range(num_points)]
-        parts.append(num_points)
-        for i in range(num_parts):
-            ring = points[parts[i]:parts[i + 1]]
-            if len(ring) > 1 and ring[0] == ring[-1]:
-                ring = ring[:-1]
-            if len(ring) >= 3:
-                rings.append(ring)
-    return rings
+        rings = []
+        if shape_type in (5, 15, 25):
+            num_parts, num_points = struct.unpack("<ii", content[36:44])
+            parts = list(struct.unpack("<%di" % num_parts, content[44:44 + 4 * num_parts]))
+            offset = 44 + 4 * num_parts
+            points = [struct.unpack("<dd", content[offset + 16 * i:offset + 16 * i + 16])
+                      for i in range(num_points)]
+            parts.append(num_points)
+            for i in range(num_parts):
+                ring = points[parts[i]:parts[i + 1]]
+                if len(ring) > 1 and ring[0] == ring[-1]:
+                    ring = ring[:-1]
+                if len(ring) >= 3:
+                    rings.append(ring)
+        shapes.append(rings)
+    return shapes
+
+
+def read_rings(path):
+    """Every polygon's rings, as lists of (lon, lat), the closing point dropped."""
+    return [ring for rings in read_shapes(path) for ring in rings]
 
 
 def densified(ring):
