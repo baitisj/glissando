@@ -185,6 +185,17 @@ bool everUpdatedTo(const RecordingObserver& observer, int64_t id, MessageStatus 
     return false;
 }
 
+// Whether the log has a line of the protocol's own saying this.
+bool hasSystemLine(const RecordingObserver& observer, const std::string& text)
+{
+    for (const TextMessage& message : observer.added)
+    {
+        if (message.kind == MessageKind::System && message.text.find(text) != std::string::npos)
+            return true;
+    }
+    return false;
+}
+
 void testAddressedMessageIsAcknowledged()
 {
     Station sender("W1AW");
@@ -512,6 +523,52 @@ void testPingWaitsForAnAnswerAtASlowerTempo()
     CHECK(sender.observer.added.back().text.find("VK3ABC >> W1AW : PONG!") == 0);
 }
 
+// The far end cannot answer while we are keyed: it hears us and waits. A
+// ping waiting for its pong while we send an acknowledgement owed to a
+// third station must not spend its wait on that keying; at Adagio the
+// acknowledgement alone took two minutes and the ping always gave up.
+void testOwnKeyingHoldsTheWaitForAnAnswer()
+{
+    Station sender("W1AW");
+    Station third("K6ABC");
+
+    std::string error;
+    CHECK(sender.protocol.sendPing("VK3ABC", error));
+    sender.completeOneTransmission();
+
+    CHECK(third.protocol.sendMessage("Hello W1AW", "W1AW", error));
+    third.completeOneTransmission();
+    sender.receiveFrom(third.transport);
+
+    // The acknowledgement keys as soon as the turnaround allows.
+    uint64_t pingEnded = sender.nowMs;
+    while (sender.transport.transmissions.size() < 2 && sender.nowMs - pingEnded < PING_TIMEOUT_MILLISECONDS)
+    {
+        sender.nowMs += 250;
+        sender.protocol.tick();
+    }
+    CHECK(sender.transport.transmissions.size() == 2);
+    uint64_t waited = sender.nowMs - pingEnded;
+
+    // A long keying, many times the ping's timeout.
+    for (int i = 0; i < 40; i++)
+    {
+        sender.nowMs += PING_TIMEOUT_MILLISECONDS / 4;
+        sender.protocol.tick();
+    }
+    CHECK(!hasSystemLine(sender.observer, "no response to PING"));
+
+    // Once we stop, the rest of the wait runs, and then it gives up.
+    sender.transport.transmitting = false;
+    sender.protocol.tick();
+    sender.nowMs += PING_TIMEOUT_MILLISECONDS - waited - 1000;
+    sender.protocol.tick();
+    CHECK(!hasSystemLine(sender.observer, "no response to PING"));
+    sender.nowMs += 2000;
+    sender.protocol.tick();
+    CHECK(hasSystemLine(sender.observer, "no response to PING"));
+}
+
 void testPingTimesOut()
 {
     Station sender("W1AW");
@@ -557,16 +614,6 @@ void testAutoReplyCanBeDisabled()
 // message to it goes once: no acknowledgement is coming, so it ends as sent
 // rather than retrying and failing. Hearing it say otherwise turns retries
 // back on.
-bool hasSystemLine(const RecordingObserver& observer, const std::string& text)
-{
-    for (const TextMessage& message : observer.added)
-    {
-        if (message.kind == MessageKind::System && message.text.find(text) != std::string::npos)
-            return true;
-    }
-    return false;
-}
-
 void testStationWithAutoAckOffIsNotRetried()
 {
     Station sender("W1AW");
@@ -2474,6 +2521,7 @@ int main()
     testDeliveryChip();
     testPingAndPong();
     testPingTimesOut();
+    testOwnKeyingHoldsTheWaitForAnAnswer();
     testAirTimingWaitsForTheSlowestAnswer();
     testAirTimingCountsTheChords();
     testReplyWindowEndsAtTheAnswersChord();

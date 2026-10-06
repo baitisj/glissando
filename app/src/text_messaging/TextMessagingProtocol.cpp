@@ -1408,10 +1408,15 @@ void TextMessagingProtocol::tick()
 
         // While the channel is busy everything waits, timers included: the far
         // end cannot answer us through somebody else's burst, and it may be the
-        // answer itself that is coming in.
+        // answer itself that is coming in. Nor through one of ours: it hears
+        // us keyed and holds its answer until we stop. At Adagio an
+        // acknowledgement we owed a third station keyed for two minutes
+        // while a ping waited for its pong, and the ping gave up before the
+        // far end could have answered it.
         bool frozen = channelFrozenLocked(nowMs);
         channelHeld_ = frozen;
-        if (frozen && lastTickMs_ != 0 && nowMs > lastTickMs_) holdTimersLocked(nowMs - lastTickMs_);
+        bool keyed = transport_ != nullptr && transport_->isTransmitting();
+        if ((frozen || keyed) && lastTickMs_ != 0 && nowMs > lastTickMs_) holdTimersLocked(nowMs - lastTickMs_);
         lastTickMs_ = nowMs;
 
         if (transport_ != nullptr && !outbox_.empty()) serviceOutboxLocked(nowMs, frozen, events);
@@ -1534,8 +1539,9 @@ void TextMessagingProtocol::serviceOutboxLocked(uint64_t nowMs, bool frozen,
         }
     }
 
-    // Expired acknowledgement timers, checked even while keying so that a
-    // message gets no extra grace just because something else is on the air.
+    // Expired acknowledgement timers. They stand still while anybody, us
+    // included, has the channel (see tick()), so one runs out only after
+    // time the far end could have answered in.
     for (size_t i = 0; i < outbox_.size();)
     {
         PendingTransmission& waiting = outbox_[i];

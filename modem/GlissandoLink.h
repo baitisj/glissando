@@ -24,7 +24,9 @@
 #ifndef GLISSANDO__GLISSANDO_LINK_H
 #define GLISSANDO__GLISSANDO_LINK_H
 
+#include <array>
 #include <cstdint>
+#include <map>
 #include <vector>
 
 #include "GlissandoModem.h"
@@ -81,6 +83,13 @@ struct SegmentProgress
 // segment that does not follow on from the one before it in the same mode
 // abandons the partial burst: the chat protocol retries whole bursts, so
 // there is nothing to gain from holding on to half of one.
+//
+// Bursts from different stations can be heard interleaved: a station at
+// Presto sends a whole burst between two frames of one at Adagio. Each is
+// kept apart by its stream, which the caller gives as anything that tells
+// the senders apart; the modem uses the tempo's symbol length and the scale.
+// Without that, the faster burst abandoned the slower one half way, and an
+// Adagio pong was never heard.
 class Reassembler
 {
 public:
@@ -94,7 +103,10 @@ public:
     // (by a second gear that shares its waveform, or by an overlapping
     // search) is ignored.
     bool add(const Payload& payload, long long startSample, long long duplicateSamples,
-             LinkBurst& burstOut, SegmentProgress* progressOut = nullptr);
+             LinkBurst& burstOut, SegmentProgress* progressOut = nullptr, int stream = 0);
+
+    // Whether a burst in this stream has begun and not yet completed.
+    bool inProgress(int stream) const;
 
     void reset();
 
@@ -108,7 +120,7 @@ private:
 
     int signallingBytes_;
     int textBytes_;
-    Partial partial_[2];            // [0] signalling, [1] text
+    std::map<int, std::array<Partial, 2>> partials_;  // per stream: [0] signalling, [1] text
 
     bool haveLast_;
     Payload lastPayload_;

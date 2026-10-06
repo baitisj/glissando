@@ -130,13 +130,18 @@ Reassembler::Reassembler(int signallingBytes, int textBytes)
 
 void Reassembler::reset()
 {
-    partial_[0] = Partial();
-    partial_[1] = Partial();
+    partials_.clear();
     haveLast_ = false;
 }
 
+bool Reassembler::inProgress(int stream) const
+{
+    auto it = partials_.find(stream);
+    return it != partials_.end() && (it->second[0].active || it->second[1].active);
+}
+
 bool Reassembler::add(const Payload& payload, long long startSample, long long duplicateSamples,
-                      LinkBurst& burstOut, SegmentProgress* progressOut)
+                      LinkBurst& burstOut, SegmentProgress* progressOut, int stream)
 {
     SegmentProgress progress;
     SegmentProgress& p = progressOut != nullptr ? *progressOut : progress;
@@ -168,7 +173,7 @@ bool Reassembler::add(const Payload& payload, long long startSample, long long d
     uint8_t data[SEGMENT_DATA_BYTES];
     for (int i = 0; i < SEGMENT_DATA_BYTES; i++) data[i] = (uint8_t)getBits(payload, position, 8);
 
-    Partial& partial = partial_[text ? 1 : 0];
+    Partial& partial = partials_[stream][text ? 1 : 0];
     if (index == 0)
     {
         partial = Partial();

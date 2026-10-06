@@ -172,6 +172,38 @@ void testDuplicates()
     CHECK(!r.add(p[1], 700000, DUPLICATE_SAMPLES, burst));
 }
 
+// A whole burst from a faster station heard between two frames of a slower
+// one: each completes when kept in its own stream, and the slower one is
+// lost when they share a stream, as they all did before streams.
+void testInterleavedStations()
+{
+    Random rng(8);
+    LinkBurst slow = makeBurst(false, SIGNALLING_BYTES, rng);
+    LinkBurst fast = makeBurst(false, SIGNALLING_BYTES, rng);
+    std::vector<Payload> s = segmentBursts({slow}, 1);
+    std::vector<Payload> f = segmentBursts({fast}, 1);
+    CHECK(s.size() == 2 && f.size() == 2);
+    const int ADAGIO = 1, PRESTO = 2;
+
+    Reassembler r(SIGNALLING_BYTES, TEXT_BYTES);
+    LinkBurst burst;
+    CHECK(!r.add(s[0], 0, DUPLICATE_SAMPLES, burst, nullptr, ADAGIO));
+    CHECK(r.inProgress(ADAGIO));
+    CHECK(!r.inProgress(PRESTO));
+    CHECK(!r.add(f[0], 100000, DUPLICATE_SAMPLES, burst, nullptr, PRESTO));
+    CHECK(r.add(f[1], 160000, DUPLICATE_SAMPLES, burst, nullptr, PRESTO));
+    CHECK(sameBurst(burst, fast));
+    CHECK(!r.inProgress(PRESTO));
+    CHECK(r.inProgress(ADAGIO));
+    CHECK(r.add(s[1], 440000, DUPLICATE_SAMPLES, burst, nullptr, ADAGIO));
+    CHECK(sameBurst(burst, slow));
+    CHECK(!r.inProgress(ADAGIO));
+
+    // In one stream the second burst's first segment abandons the first.
+    std::vector<LinkBurst> out = reassemble(r, {s[0], f[0], f[1], s[1]});
+    CHECK(out.size() == 1 && sameBurst(out[0], fast));
+}
+
 // A full text burst over the air in the duet: three G5 frames, decoded and
 // reassembled in voice order.
 void testOverTheModem()
@@ -282,6 +314,7 @@ int main()
     testDuetFiller();
     testOutOfOrder();
     testDuplicates();
+    testInterleavedStations();
     testOverTheModem();
     testProgress();
     if (failures == 0) printf("glissando link tests passed\n");
