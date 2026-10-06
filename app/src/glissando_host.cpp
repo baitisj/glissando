@@ -263,6 +263,11 @@ GlissandoTelemetry MainFrame::glissandoTelemetry()
     telemetry.engageToSend =
         chatWaitsForEngage() && TextMessaging::TextMessagingSession::instance().protocol().hasQueuedTransmissions();
 
+    // The map ball: where we are, and where the station it shows is.
+    auto& protocol = TextMessaging::TextMessagingSession::instance().protocol();
+    telemetry.homeLocator = protocol.myLocator();
+    telemetry.stationLocator = protocol.stationLocator(protocol.mapStation());
+
     int64_t frequency = wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency;
     telemetry.rigFrequencyKnown = frequency > 0;
     telemetry.rigFrequencyHz = (double)frequency;

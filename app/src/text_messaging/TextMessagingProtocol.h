@@ -149,6 +149,11 @@ public:
     // What earlier sessions learned of stations' locators, from the store.
     void restoreStationLocators(const std::vector<StationLocator>& stations);
 
+    // The station the console's map shows: the last one we heard or keyed
+    // to whose locator we know. A station whose locator we do not know
+    // leaves it as it was. Empty until there is one.
+    std::string mapStation() const;
+
     // Stops every chat transmission, for a station on a frequency where it
     // may not send data. Whatever is waiting to go out is discarded as not
     // sent, including a retry or a reply that becomes due while inhibited,
@@ -395,6 +400,7 @@ private:
     void noteLocatorFeaturesLocked(const Frame& frame, uint64_t nowMs);
     void handleLocatorLocked(const Frame& frame, uint64_t nowMs);
     void saveLocatorPeerLocked(const std::string& callsign, const LocatorPeer& peer);
+    void noteMapStationLocked(const std::string& callsign);
 
     void deliver(const std::vector<PendingEvent>& events);
 
@@ -411,6 +417,7 @@ private:
     std::string myLocator_;       // normalized; empty for none
     bool sendLocator_;
     std::map<std::string, LocatorPeer> locatorPeers_;
+    std::string mapStation_;      // see mapStation()
 
     // Whether the keying now on the air ends in our locator. A station that
     // misses that burst holds its answer for a text burst's time after the

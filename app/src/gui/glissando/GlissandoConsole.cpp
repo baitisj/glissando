@@ -19,6 +19,7 @@
 #include "ChaoticaTheme.h"
 #include "ChaoticaTheme.h"
 #include "GlissandoScope.h"
+#include "MapBall.h"
 
 using namespace Chaotica;
 
@@ -439,6 +440,8 @@ void GlissandoConsole::buildControls()
     lamps->Add(receivingLamp_, 0, wxBOTTOM, 4);
     lamps->Add(transmittingLamp_, 0);
     scopeControls->Add(lamps, 0, wxALIGN_CENTER_VERTICAL);
+    mapBall_ = new MapBall(scopePlate);
+    scopeControls->Add(mapBall_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 12);
     scopeControls->AddStretchSpacer();
 
     scopePlate->GetContentSizer()->Add(scopeControls, 0, wxEXPAND | wxTOP, 8);
@@ -859,6 +862,7 @@ void GlissandoConsole::refreshTelemetry()
     scope_->setActivity(t.receiving, t.transmitting);
     scope_->setSmoke(t.smoke);
     scope_->setCarrierSense(t.channelHeld, t.carrierHz);
+    mapBall_->setLocators(t.homeLocator, t.stationLocator);
     for (const GlissandoScopeFrame& frame : host_->glissandoHeardFrames()) scope_->addHeard(frame);
     for (const GlissandoScopeSent& frame : host_->glissandoSentFrames()) scope_->addSent(frame);
 

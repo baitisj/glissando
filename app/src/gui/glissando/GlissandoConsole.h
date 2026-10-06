@@ -14,6 +14,7 @@
 #ifndef GUI_GLISSANDO__GLISSANDO_CONSOLE_H
 #define GUI_GLISSANDO__GLISSANDO_CONSOLE_H
 
+#include <string>
 #include <vector>
 
 #include <wx/frame.h>
@@ -22,6 +23,8 @@
 
 #include "GlissandoModem.h"
 #include "GlissandoScope.h"
+
+class MapBall;
 
 namespace Chaotica
 {
@@ -73,6 +76,8 @@ struct GlissandoTelemetry
     bool chatUnread = false;        // a message has come in since the COMMS window was last open
     bool channelHeld = false;       // somebody else has the channel: our transmit queue waits
     std::vector<double> carrierHz;  // the notes carrier sense hears holding it, if it hears any
+    std::string homeLocator;        // our Maidenhead locator, empty if none is set
+    std::string stationLocator;     // the last station heard or sent to whose locator is known
 };
 
 // The setup dialogs the console's Preferences button leads to.
@@ -210,6 +215,7 @@ private:
     Chaotica::Lamp* engagedLamp_;
     Chaotica::Lamp* receivingLamp_;
     Chaotica::Lamp* transmittingLamp_;
+    MapBall* mapBall_;
 };
 
 #endif // GUI_GLISSANDO__GLISSANDO_CONSOLE_H
