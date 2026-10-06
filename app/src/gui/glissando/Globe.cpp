@@ -10,7 +10,7 @@
 #include <cmath>
 #include <cstdio>
 
-#include "LandMask.h"
+#include "LandOutlines.h"
 
 namespace Globe
 {
@@ -38,14 +38,14 @@ constexpr double FRAMING_MARGIN = 12.0;
 // The most the middle of the path is lifted towards the pole, as a share of
 // the window's half height, so the bow stays in a short window.
 constexpr double CURL_SHARE = 0.5;
+// Looking for how close to come, from nearest out, a step at a time; and
+// how much closer a turned picture has to be to win over north up.
+constexpr double ZOOM_STEP = 0.93;
+constexpr double NORTH_UP_SHARE = 0.75;
 
-// The ball's colours: silver land on a dark sea in darker fluid, as the
-// rest of the console is silver on black.
-constexpr double SEA[3] = {50, 52, 56};
-constexpr double LAND[3] = {186, 181, 168};
-constexpr double FLUID[3] = {14, 13, 12};
-constexpr double RULING[3] = {232, 236, 230};
-constexpr double RULING_STRENGTH = 0.16;
+// Steps along a line of the grid, and round the rim where land goes behind.
+constexpr double GRID_STEP_DEGREES = 2.0;
+constexpr double RIM_STEP_RADIANS = 3.0 / DEGREES;
 
 double dot(const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 
@@ -79,65 +79,109 @@ Vec3 perpendicular(const Vec3& a)
     return normalized(p);
 }
 
-// The land mask, unpacked once: one byte a cell, 1 for land.
-const std::vector<uint8_t>& landCells()
+// The outlines, unpacked once as unit vectors, each with the cap that holds
+// it, so outlines nowhere near the window can be passed over, and which way
+// round it goes.
+struct Ring
 {
-    static const std::vector<uint8_t> cells = []() {
-        std::vector<uint8_t> unpacked((size_t)LandMask::WIDTH * LandMask::HEIGHT, 0);
-        for (int row = 0; row < LandMask::HEIGHT; row++)
+    std::vector<Vec3> points;
+    Vec3 centre;
+    double reach = 0.0;     // radians from centre to the farthest point
+    bool clockwise = true;  // land; a hole goes anticlockwise
+};
+
+const std::vector<Ring>& rings()
+{
+    static const std::vector<Ring> all = []() {
+        std::vector<Ring> unpacked;
+        for (int r = 0; r < LandOutlines::RING_COUNT; r++)
         {
-            uint8_t value = 0;
-            size_t column = 0;
-            for (uint32_t i = LandMask::LAND_ROW_START[row]; i < LandMask::LAND_ROW_START[row + 1]; i++)
+            Ring ring;
+            double area = 0.0;
+            uint32_t first = LandOutlines::RING_START[r];
+            uint32_t last = LandOutlines::RING_START[r + 1];
+            Vec3 sum;
+            for (uint32_t i = first; i < last; i++)
             {
-                size_t run = LandMask::LAND_RUNS[i];
-                if (value != 0)
-                {
-                    std::fill_n(unpacked.begin() + (size_t)row * LandMask::WIDTH + column, run, (uint8_t)1);
-                }
-                column += run;
-                value ^= 1;
+                double lon = LandOutlines::POINTS[2 * i] / LandOutlines::UNITS_PER_DEGREE;
+                double lat = LandOutlines::POINTS[2 * i + 1] / LandOutlines::UNITS_PER_DEGREE;
+                uint32_t j = i + 1 < last ? i + 1 : first;
+                double lon2 = LandOutlines::POINTS[2 * j] / LandOutlines::UNITS_PER_DEGREE;
+                double lat2 = LandOutlines::POINTS[2 * j + 1] / LandOutlines::UNITS_PER_DEGREE;
+                area += lon * lat2 - lon2 * lat;
+                ring.points.push_back(toVector(LatLon{lat, lon}));
+                sum = plus(sum, ring.points.back());
             }
+            ring.clockwise = area < 0.0;
+            ring.centre = length(sum) > 1e-9 ? normalized(sum) : ring.points.front();
+            for (const Vec3& p : ring.points) ring.reach = std::max(ring.reach, angleOf(ring.centre, p));
+            unpacked.push_back(std::move(ring));
         }
         return unpacked;
     }();
-    return cells;
+    return all;
 }
 
-// How much of a position is land, 0 to 1, blending the four cells around
-// it so coasts come out smooth.
-double landAt(const std::vector<uint8_t>& cells, double lat, double lon)
+// How far from the middle of the view, in radians over the ball, the window
+// can show anything.
+double visibleReach(const View& view, const Window& window)
 {
-    double u = (lon + 180.0) * LandMask::CELLS_PER_DEGREE - 0.5;
-    double v = (90.0 - lat) * LandMask::CELLS_PER_DEGREE - 0.5;
-    double u0 = std::floor(u);
-    double v0 = std::floor(v);
-    double fu = u - u0;
-    double fv = v - v0;
-
-    // Round the date line without dividing: this is done a lot.
-    int left = (int)u0;
-    while (left < 0) left += LandMask::WIDTH;
-    while (left >= LandMask::WIDTH) left -= LandMask::WIDTH;
-    int right = left + 1 == LandMask::WIDTH ? 0 : left + 1;
-    const uint8_t* above = &cells[(size_t)std::clamp((int)v0, 0, LandMask::HEIGHT - 1) * LandMask::WIDTH];
-    const uint8_t* below = &cells[(size_t)std::clamp((int)v0 + 1, 0, LandMask::HEIGHT - 1) * LandMask::WIDTH];
-    double top = above[left] * (1.0 - fu) + above[right] * fu;
-    double bottom = below[left] * (1.0 - fu) + below[right] * fu;
-    return top * (1.0 - fv) + bottom * fv;
+    double corner = std::hypot(window.width / 2.0, window.height / 2.0) / view.radius;
+    return corner >= 1.0 ? PI / 2.0 : std::asin(corner);
 }
 
-// How much of a pixel is land, the pixel being about the given number of
-// degrees across. Where the pixel is wider than a cell or so, one look
-// makes the coasts ragged, so it takes four spread over the pixel.
-double landOver(const std::vector<uint8_t>& cells, double lat, double lon, double cosLat, double pixelDegrees)
+// Where the line from a (near side) to b (far side) goes over the rim: the
+// angle round the rim, anticlockwise from the right, in the view.
+double rimAngle(const Vec3& a, const Vec3& b)
 {
-    if (pixelDegrees * LandMask::CELLS_PER_DEGREE < 1.5) return landAt(cells, lat, lon);
+    double t = a.z / (a.z - b.z);
+    return std::atan2(a.y + (b.y - a.y) * t, a.x + (b.x - a.x) * t);
+}
 
-    double dLat = 0.25 * pixelDegrees;
-    double dLon = dLat / std::max(cosLat, 0.2);
-    return 0.25 * (landAt(cells, lat - dLat, lon - dLon) + landAt(cells, lat - dLat, lon + dLon) +
-                   landAt(cells, lat + dLat, lon - dLon) + landAt(cells, lat + dLat, lon + dLon));
+Point screenPoint(const View& view, const Window& window, double x, double y)
+{
+    return Point{window.width / 2.0 + x * view.radius, window.height / 2.0 - y * view.radius};
+}
+
+// Round the rim from an angle by sweep radians, anticlockwise if positive,
+// leaving out the first point and putting in the last.
+void followRim(Outline& outline, const View& view, const Window& window, double from, double sweep)
+{
+    if (std::fabs(sweep) < 1e-9) return;
+    int steps = std::max(1, (int)std::ceil(std::fabs(sweep) / RIM_STEP_RADIANS));
+    for (int k = 1; k <= steps; k++)
+    {
+        double angle = from + sweep * k / steps;
+        outline.push_back(screenPoint(view, window, std::cos(angle), std::sin(angle)));
+    }
+}
+
+// Splits a line of points into the runs on the near side, ending each run
+// on the rim where it goes behind.
+void addNearRuns(std::vector<Outline>& lines, const std::vector<Vec3>& points, const View& view, const Window& window)
+{
+    Outline run;
+    Vec3 previous;
+    bool previousNear = false;
+    for (size_t i = 0; i < points.size(); i++)
+    {
+        Vec3 v = toView(view.attitude, points[i]);
+        bool near = v.z > 0.0;
+        if (i > 0 && near != previousNear)
+        {
+            double angle = near ? rimAngle(v, previous) : rimAngle(previous, v);
+            run.push_back(screenPoint(view, window, std::cos(angle), std::sin(angle)));
+            if (!near)
+            {
+                if (run.size() >= 2) lines.push_back(run);
+                run.clear();
+            }
+        }
+        if (near) run.push_back(screenPoint(view, window, v.x, v.y));
+        previous = v;
+        previousNear = near;
+    }
+    if (run.size() >= 2) lines.push_back(run);
 }
 
 std::string withThousands(long value)
@@ -310,29 +354,35 @@ std::vector<Vec3> greatCircle(const Vec3& a, const Vec3& b, int segments)
     return points;
 }
 
-int pointsInView(const Attitude& attitude, const std::vector<Vec3>& path, const Window& window)
+Point onScreen(const View& view, const Window& window, const Vec3& earth)
+{
+    Vec3 v = toView(view.attitude, earth);
+    return screenPoint(view, window, v.x, v.y);
+}
+
+int pointsInView(const View& view, const std::vector<Vec3>& path, const Window& window)
 {
     double halfWidth = window.width / 2.0 - FRAMING_MARGIN;
     double halfHeight = window.height / 2.0 - FRAMING_MARGIN;
     int count = 0;
     for (const Vec3& point : path)
     {
-        Vec3 v = toView(attitude, point);
+        Vec3 v = toView(view.attitude, point);
         if (v.z <= 0.0) continue;
-        if (std::fabs(v.x * window.radius) <= halfWidth && std::fabs(v.y * window.radius) <= halfHeight) count++;
+        if (std::fabs(v.x * view.radius) <= halfWidth && std::fabs(v.y * view.radius) <= halfHeight) count++;
     }
     return count;
 }
 
-Attitude framePath(const LatLon& home, const LatLon& station, const Window& window)
+namespace
 {
-    Vec3 h = toVector(home);
-    Vec3 s = toVector(station);
-    double span = angleOf(h, s);
-    if (span < 1e-6) return lookingAt(s);
 
-    std::vector<Vec3> path = greatCircle(h, s, FRAMING_SEGMENTS);
-    Vec3 middle = path[(size_t)FRAMING_SEGMENTS / 2];
+// The ball's middle for showing a path at a radius: the path's midpoint,
+// moved towards the equator.
+Vec3 pathCentre(const Vec3& h, const Vec3& s, const std::vector<Vec3>& path, const Window& window, double radius)
+{
+    double span = angleOf(h, s);
+    Vec3 middle = path[path.size() / 2];
 
     // The side of the path away from the nearer pole. Looking from there,
     // the path bows towards the pole the way a great circle route does on
@@ -341,21 +391,31 @@ Attitude framePath(const LatLon& home, const LatLon& station, const Window& wind
     if (length(normal) < 1e-9) normal = cross(h, middle);
     normal = normalized(normal);
     if (dot(normal, NORTH) < 0.0) normal = scaled(normal, -1.0);
-    double lift = std::min(1.0, CURL_SHARE * (window.height / 2.0 - FRAMING_MARGIN) / window.radius);
+    double lift = std::min(1.0, CURL_SHARE * (window.height / 2.0 - FRAMING_MARGIN) / radius);
     double curl = std::min({0.25 * span, 15.0 / DEGREES, std::asin(lift)});
 
-    Vec3 centre = normalized(plus(scaled(middle, std::cos(curl)), scaled(normal, -std::sin(curl))));
+    return normalized(plus(scaled(middle, std::cos(curl)), scaled(normal, -std::sin(curl))));
+}
 
-    // North up if that shows the whole path, or as much of it as any turn
-    // does; otherwise the smallest turn, either way, that shows the most.
+} // namespace
+
+Attitude framePathAt(const LatLon& home, const LatLon& station, const Window& window, double radius)
+{
+    Vec3 h = toVector(home);
+    Vec3 s = toVector(station);
+    if (angleOf(h, s) < 1e-6) return lookingAt(s);
+
+    std::vector<Vec3> path = greatCircle(h, s, FRAMING_SEGMENTS);
+    Vec3 centre = pathCentre(h, s, path, window, radius);
+
     std::vector<std::pair<Attitude, int>> candidates;
     for (int step = 0; step <= 90; step++)
     {
         for (int sign : {1, -1})
         {
             if ((step == 0 || step == 90) && sign < 0) continue;
-            Attitude attitude = lookingAt(centre, sign * step * 2.0 / DEGREES);
-            candidates.push_back({attitude, pointsInView(attitude, path, window)});
+            View view{lookingAt(centre, sign * step * 2.0 / DEGREES), radius};
+            candidates.push_back({view.attitude, pointsInView(view, path, window)});
         }
     }
 
@@ -369,8 +429,43 @@ Attitude framePath(const LatLon& home, const LatLon& station, const Window& wind
     return candidates.front().first;
 }
 
+View framePath(const LatLon& home, const LatLon& station, const Window& window, const Zoom& zoom)
+{
+    Vec3 h = toVector(home);
+    Vec3 s = toVector(station);
+    if (angleOf(h, s) < 1e-6) return View{lookingAt(s), zoom.standard};
+
+    // From closest out: the first radius any turn shows the whole path at,
+    // and the first north up does.
+    std::vector<Vec3> path = greatCircle(h, s, FRAMING_SEGMENTS);
+    const int all = (int)path.size();
+    View turned;
+    bool haveTurned = false;
+    for (double radius = zoom.nearest; radius >= zoom.farthest; radius *= ZOOM_STEP)
+    {
+        View view{framePathAt(home, station, window, radius), radius};
+        if (pointsInView(view, path, window) < all) continue;
+        if (!haveTurned)
+        {
+            turned = view;
+            haveTurned = true;
+        }
+        View upright{lookingAt(pathCentre(h, s, path, window, radius)), radius};
+        if (pointsInView(upright, path, window) == all) return upright;
+        if (radius < NORTH_UP_SHARE * turned.radius) return turned;
+    }
+    if (haveTurned) return turned;
+
+    // Nothing shows it all: as much as can be shown, from as far as allowed.
+    return View{framePathAt(home, station, window, zoom.farthest), zoom.farthest};
+}
+
 Roller::Roller()
-    : moving_(false)
+    : logRadius_(std::log(View().radius))
+    , targetLogRadius_(logRadius_)
+    , zoomSpeed_(0.0)
+    , backOff_(0.0)
+    , moving_(false)
 {
     // empty
 }
@@ -428,17 +523,21 @@ Attitude Roller::toAttitude(const Quaternion& q)
     return a;
 }
 
-void Roller::jump(const Attitude& attitude)
+void Roller::jump(const View& view)
 {
-    current_ = fromAttitude(attitude);
+    current_ = fromAttitude(view.attitude);
     target_ = current_;
     spin_ = Vec3{};
+    logRadius_ = std::log(view.radius);
+    targetLogRadius_ = logRadius_;
+    zoomSpeed_ = 0.0;
     moving_ = false;
 }
 
-void Roller::rollTo(const Attitude& attitude)
+void Roller::rollTo(const View& view)
 {
-    target_ = fromAttitude(attitude);
+    target_ = fromAttitude(view.attitude);
+    targetLogRadius_ = std::log(view.radius);
     moving_ = true;
 }
 
@@ -486,89 +585,181 @@ bool Roller::step(double seconds)
                                     current_.y * current_.y + current_.z * current_.z);
             current_ = Quaternion{current_.w / norm, current_.x / norm, current_.y / norm, current_.z / norm};
         }
+
+        // The zoom goes by the same spring, held back while there is far to
+        // roll: no closer than shows the rest of the roll across backOff_.
+        double goal = targetLogRadius_;
+        double left = std::min(length(error), PI / 2.0);
+        if (backOff_ > 0.0 && left > 1e-6) goal = std::min(goal, std::log(backOff_ / std::sin(left)));
+        zoomSpeed_ += (stiffness * (goal - logRadius_) - damping * zoomSpeed_) * dt;
+        logRadius_ += zoomSpeed_ * dt;
     }
 
-    if (length(error) < SETTLED_RADIANS && length(spin_) < SETTLED_SPIN)
+    if (length(error) < SETTLED_RADIANS && length(spin_) < SETTLED_SPIN &&
+        std::fabs(targetLogRadius_ - logRadius_) < SETTLED_RADIANS && std::fabs(zoomSpeed_) < SETTLED_SPIN)
     {
         current_ = target_;
         spin_ = Vec3{};
+        logRadius_ = targetLogRadius_;
+        zoomSpeed_ = 0.0;
         moving_ = false;
     }
     return moving_;
 }
 
-Attitude Roller::attitude() const
+View Roller::view() const
 {
-    return toAttitude(current_);
+    return View{toAttitude(current_), std::exp(logRadius_)};
 }
 
-void paintBall(const Attitude& attitude, const Window& window, int width, int height, std::vector<uint8_t>& rgb)
+View Roller::target() const
 {
-    rgb.assign((size_t)width * height * 3, 0);
-    const std::vector<uint8_t>& cells = landCells();
+    return View{toAttitude(target_), std::exp(targetLogRadius_)};
+}
 
-    const double radius = window.radius;
-    const Vec3 light = normalized(Vec3{-0.35, 0.5, 0.79});
-    const Vec3 halfway = normalized(plus(light, Vec3{0.0, 0.0, 1.0}));
-    const double degreesPerPixel = DEGREES / radius;
-
-    for (int py = 0; py < height; py++)
+std::vector<Outline> landOutlines(const View& view, const Window& window)
+{
+    std::vector<Outline> outlines;
+    const double reach = visibleReach(view, window);
+    std::vector<Vec3> projected;
+    for (const Ring& ring : rings())
     {
-        for (int px = 0; px < width; px++)
+        // Wholly behind, or nowhere near the window: nothing to draw.
+        if (angleOf(ring.centre, view.attitude.out) - ring.reach > reach) continue;
+
+        projected.clear();
+        bool anyNear = false;
+        bool allNear = true;
+        for (const Vec3& p : ring.points)
         {
-            double sx = (px + 0.5 - width / 2.0) / radius;
-            double sy = (height / 2.0 - (py + 0.5)) / radius;
-            double r = std::sqrt(sx * sx + sy * sy);
+            projected.push_back(toView(view.attitude, p));
+            anyNear = anyNear || projected.back().z > 0.0;
+            allNear = allNear && projected.back().z > 0.0;
+        }
+        if (!anyNear) continue;
+        if (allNear)
+        {
+            Outline outline;
+            for (const Vec3& v : projected) outline.push_back(screenPoint(view, window, v.x, v.y));
+            outlines.push_back(std::move(outline));
+            continue;
+        }
 
-            double colour[3] = {FLUID[0], FLUID[1], FLUID[2]};
-
-            double coverage = std::clamp((1.0 - r) * radius + 0.5, 0.0, 1.0);
-            if (coverage > 0.0)
+        // The runs on the near side, each from where the outline comes over
+        // the rim to where it goes behind again, starting from a point
+        // behind so no run is cut in two.
+        struct Run
+        {
+            Outline points;
+            double inAt = 0.0;      // angles round the rim
+            double outAt = 0.0;
+            bool used = false;
+        };
+        std::vector<Run> runs;
+        const size_t n = projected.size();
+        size_t behind = 0;
+        while (projected[behind].z > 0.0) behind++;
+        for (size_t k = 1; k <= n; k++)
+        {
+            const Vec3& previous = projected[(behind + k - 1) % n];
+            const Vec3& v = projected[(behind + k) % n];
+            bool wasNear = previous.z > 0.0;
+            bool near = v.z > 0.0;
+            if (!wasNear && near)
             {
-                double sz = std::sqrt(std::max(0.0, 1.0 - std::min(r, 1.0) * std::min(r, 1.0)));
-                Vec3 normal{sx, sy, sz};
-                if (r > 1.0) normal = normalized(normal);
-                LatLon position = toLatLon(toEarth(attitude, normal));
-
-                // About how many degrees the pixel covers, foreshortened.
-                double pixel = degreesPerPixel / std::max(sz, 0.15);
-
-                double cosLat = std::cos(position.lat / DEGREES);
-                double land = landOver(cells, position.lat, position.lon, cosLat, pixel);
-                double surface[3];
-                for (int k = 0; k < 3; k++) surface[k] = SEA[k] + (LAND[k] - SEA[k]) * land;
-
-                // The Maidenhead fields, 20 degrees of longitude by 10 of
-                // latitude, ruled about a pixel wide however foreshortened.
-                double offLat = std::fabs(position.lat - 10.0 * std::round(position.lat / 10.0));
-                double offLon = std::fabs(position.lon - 20.0 * std::round(position.lon / 20.0)) * cosLat;
-                double ruling = std::clamp(1.0 - std::min(offLat, offLon) / (0.7 * pixel), 0.0, 1.0);
-                for (int k = 0; k < 3; k++) surface[k] += (RULING[k] - surface[k]) * ruling * RULING_STRENGTH;
-
-                double lambert = std::max(0.0, dot(normal, light));
-                double shade = 0.28 + 0.82 * lambert;
-                double glint = std::max(0.0, dot(normal, halfway));
-                double glint8 = glint * glint * glint * glint;
-                glint8 *= glint8;
-                double glint32 = glint8 * glint8;
-                glint32 *= glint32;
-                double shine = glint32 * glint8 * 50.0;     // to the 40th
-                for (int k = 0; k < 3; k++)
-                {
-                    double lit = surface[k] * shade + shine;
-                    colour[k] += (lit - colour[k]) * coverage;
-                }
+                runs.emplace_back();
+                runs.back().inAt = rimAngle(v, previous);
+                runs.back().points.push_back(
+                    screenPoint(view, window, std::cos(runs.back().inAt), std::sin(runs.back().inAt)));
             }
+            if (near) runs.back().points.push_back(screenPoint(view, window, v.x, v.y));
+            if (wasNear && !near)
+            {
+                runs.back().outAt = rimAngle(previous, v);
+                runs.back().points.push_back(
+                    screenPoint(view, window, std::cos(runs.back().outAt), std::sin(runs.back().outAt)));
+            }
+        }
 
-            uint8_t* out = &rgb[((size_t)py * width + px) * 3];
-            for (int k = 0; k < 3; k++) out[k] = (uint8_t)std::clamp(colour[k] + 0.5, 0.0, 255.0);
+        // Joined up round the rim: from where a run goes behind, the way
+        // the outline goes round, to the first place any run comes back.
+        // Land is on the right of a clockwise outline, so following the
+        // rim clockwise keeps the land on the right too.
+        auto aroundRim = [&](double from, double to) {
+            double sweep = ring.clockwise ? from - to : to - from;
+            sweep = std::fmod(sweep, 2.0 * PI);
+            return sweep < 0.0 ? sweep + 2.0 * PI : sweep;
+        };
+        for (size_t first = 0; first < runs.size(); first++)
+        {
+            if (runs[first].used) continue;
+            Outline outline;
+            size_t at = first;
+            while (!runs[at].used)
+            {
+                runs[at].used = true;
+                outline.insert(outline.end(), runs[at].points.begin(), runs[at].points.end());
+                size_t next = at;
+                double nearest = 4.0 * PI;
+                for (size_t r = 0; r < runs.size(); r++)
+                {
+                    double sweep = aroundRim(runs[at].outAt, runs[r].inAt);
+                    if (sweep < nearest && (r == first || !runs[r].used))
+                    {
+                        nearest = sweep;
+                        next = r;
+                    }
+                }
+                followRim(outline, view, window, runs[at].outAt, ring.clockwise ? -nearest : nearest);
+                at = next;
+            }
+            if (outline.size() >= 3) outlines.push_back(std::move(outline));
         }
     }
+    return outlines;
+}
+
+std::vector<Outline> fieldLines(const View& view, const Window& window)
+{
+    std::vector<Outline> lines;
+    std::vector<Vec3> points;
+    for (int lat = -80; lat <= 80; lat += 10)
+    {
+        points.clear();
+        for (double lon = -180.0; lon <= 180.0 + 1e-9; lon += GRID_STEP_DEGREES) points.push_back(toVector(LatLon{(double)lat, lon}));
+        addNearRuns(lines, points, view, window);
+    }
+    for (int lon = -180; lon < 180; lon += 20)
+    {
+        points.clear();
+        for (double lat = -90.0; lat <= 90.0 + 1e-9; lat += GRID_STEP_DEGREES) points.push_back(toVector(LatLon{lat, (double)lon}));
+        addNearRuns(lines, points, view, window);
+    }
+    return lines;
 }
 
 bool isLand(const LatLon& position)
 {
-    return landAt(landCells(), position.lat, position.lon) >= 0.5;
+    // Winding round the point in longitude and latitude, as the outlines
+    // were drawn on the map they come from.
+    int winding = 0;
+    for (int r = 0; r < LandOutlines::RING_COUNT; r++)
+    {
+        uint32_t first = LandOutlines::RING_START[r];
+        uint32_t last = LandOutlines::RING_START[r + 1];
+        for (uint32_t i = first; i < last; i++)
+        {
+            uint32_t j = i + 1 < last ? i + 1 : first;
+            double x0 = LandOutlines::POINTS[2 * i] / LandOutlines::UNITS_PER_DEGREE;
+            double y0 = LandOutlines::POINTS[2 * i + 1] / LandOutlines::UNITS_PER_DEGREE;
+            double x1 = LandOutlines::POINTS[2 * j] / LandOutlines::UNITS_PER_DEGREE;
+            double y1 = LandOutlines::POINTS[2 * j + 1] / LandOutlines::UNITS_PER_DEGREE;
+            double side = (x1 - x0) * (position.lat - y0) - (position.lon - x0) * (y1 - y0);
+            if (y0 <= position.lat && y1 > position.lat && side > 0.0) winding++;
+            else if (y0 > position.lat && y1 <= position.lat && side < 0.0) winding--;
+        }
+    }
+    return winding != 0;
 }
 
 } // namespace Globe
