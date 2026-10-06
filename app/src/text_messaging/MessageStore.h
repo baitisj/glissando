@@ -87,6 +87,9 @@ public:
     std::vector<HeardStation> heardStations();
     bool pruneHeardStationsOlderThan(std::time_t cutoff);
 
+    bool upsertStationLocator(const StationLocator& station);
+    std::vector<StationLocator> stationLocators();
+
     std::string lastError() const;
 
 private:

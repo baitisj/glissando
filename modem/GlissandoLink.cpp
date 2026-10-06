@@ -62,7 +62,8 @@ int segmentsFor(const LinkBurst& burst)
 
 } // namespace
 
-std::vector<Payload> segmentBursts(const std::vector<LinkBurst>& bursts, int voices)
+std::vector<Payload> segmentBursts(const std::vector<LinkBurst>& bursts, int voices,
+                                   const std::vector<uint8_t>& fillerFrame)
 {
     std::vector<Payload> payloads;
     for (const LinkBurst& burst : bursts)
@@ -83,9 +84,13 @@ std::vector<Payload> segmentBursts(const std::vector<LinkBurst>& bursts, int voi
 
     if (voices > 1)
     {
+        LinkBurst filler{false, fillerFrame};
+        bool fits = !fillerFrame.empty() && sentLength(filler) <= SEGMENT_DATA_BYTES;
         while (payloads.size() % (size_t)voices != 0)
         {
-            payloads.push_back(makeSegment(false, FILLER_SEGMENT_INDEX, false, nullptr, 0));
+            payloads.push_back(makeSegment(false, FILLER_SEGMENT_INDEX, false,
+                                           fits ? fillerFrame.data() : nullptr,
+                                           fits ? sentLength(filler) : 0));
         }
     }
     return payloads;
@@ -164,14 +169,24 @@ bool Reassembler::add(const Payload& payload, long long startSample, long long d
     p.text = text;
     p.index = index;
     p.last = last;
+    uint8_t data[SEGMENT_DATA_BYTES];
+    for (int i = 0; i < SEGMENT_DATA_BYTES; i++) data[i] = (uint8_t)getBits(payload, position, 8);
+
     if (index == FILLER_SEGMENT_INDEX)
     {
         p.filler = true;
-        return false;
-    }
+        bool carries = false;
+        for (uint8_t byte : data) carries = carries || byte != 0;
+        if (!carries) return false;
 
-    uint8_t data[SEGMENT_DATA_BYTES];
-    for (int i = 0; i < SEGMENT_DATA_BYTES; i++) data[i] = (uint8_t)getBits(payload, position, 8);
+        p.bytes.assign(data, data + SEGMENT_DATA_BYTES);
+        p.completed = true;
+        burstOut.text = false;
+        burstOut.filler = true;
+        burstOut.bytes.assign(data, data + SEGMENT_DATA_BYTES);
+        burstOut.bytes.resize((size_t)std::max(signallingBytes_, SEGMENT_DATA_BYTES), 0);
+        return true;
+    }
 
     Partial& partial = partials_[stream][text ? 1 : 0];
     if (index == 0)
@@ -201,6 +216,7 @@ bool Reassembler::add(const Payload& payload, long long startSample, long long d
     int size = text ? textBytes_ : signallingBytes_;
     partial.bytes.resize((size_t)size, 0);
     burstOut.text = text;
+    burstOut.filler = false;
     burstOut.bytes = std::move(partial.bytes);
     partial = Partial();
     return true;

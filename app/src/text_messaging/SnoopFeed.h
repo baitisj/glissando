@@ -80,6 +80,11 @@ struct SnoopEvent
     // PingAck: the SNR the pinged station heard the ping at.
     bool hasReportedSnr = false;
     float reportedSnr = 0.0f;
+
+    // Locator: the sender's grid square. MessageAck: whether it says it has
+    // the addressee's locator.
+    std::string locator;
+    bool heardYourLocator = false;
 };
 
 // One line summary of a signalling frame or a fragment, e.g. "ACK #1234" or

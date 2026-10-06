@@ -1055,6 +1055,9 @@ void MainFrame::applyChatModem_()
     auto& config = wxGetApp().appConfiguration;
     auto& protocol = TextMessaging::TextMessagingSession::instance().protocol();
 
+    protocol.setMyLocator(config.reportingConfiguration.reportingGridSquare->ToStdString(),
+                          config.reportingConfiguration.reportingSendGridSquare);
+
     if (config.data2gEnabled)
     {
         TextMessaging::Data2GTransport::Settings settings;

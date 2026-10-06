@@ -88,6 +88,7 @@ constexpr uint8_t CODE_MESSAGE = 0x8;
 constexpr uint8_t CODE_MESSAGE_NO_AUTO_ACK = 0xB;
 constexpr uint8_t CODE_BROADCAST = 0xC;
 constexpr uint8_t CODE_BROADCAST_NO_AUTO_ACK = 0xD;
+constexpr uint8_t CODE_LOCATOR = 0xE;
 
 uint8_t typeCode(FrameType type, bool autoAck)
 {
@@ -99,6 +100,7 @@ uint8_t typeCode(FrameType type, bool autoAck)
         case FrameType::MessagePartialAck: return CODE_PARTIAL_ACK;
         case FrameType::Message: return autoAck ? CODE_MESSAGE : CODE_MESSAGE_NO_AUTO_ACK;
         case FrameType::Broadcast: return autoAck ? CODE_BROADCAST : CODE_BROADCAST_NO_AUTO_ACK;
+        case FrameType::Locator: return CODE_LOCATOR;
     }
     return 0;
 }
@@ -256,6 +258,7 @@ bool FrameCodec::typeFromCode(uint8_t code, FrameType& typeOut, bool& noAutoAckO
         case CODE_MESSAGE: typeOut = FrameType::Message; return true;
         case CODE_BROADCAST_NO_AUTO_ACK: noAutoAckOut = true; [[fallthrough]];
         case CODE_BROADCAST: typeOut = FrameType::Broadcast; return true;
+        case CODE_LOCATOR: typeOut = FrameType::Locator; return true;
         default: return false;
     }
 }
@@ -268,6 +271,7 @@ bool FrameCodec::isSignallingFrameType(FrameType type)
         case FrameType::PingAck:
         case FrameType::MessageAck:
         case FrameType::MessagePartialAck:
+        case FrameType::Locator:
             return true;
         case FrameType::Message:
         case FrameType::Broadcast:
@@ -277,6 +281,11 @@ bool FrameCodec::isSignallingFrameType(FrameType type)
     return false;
 }
 
+bool FrameCodec::carriesFeatures(FrameType type)
+{
+    return type == FrameType::Ping || type == FrameType::MessageAck;
+}
+
 int FrameCodec::signallingPayloadBits(FrameType type)
 {
     return type == FrameType::PingAck || type == FrameType::MessagePartialAck ? SIGNALLING_PAYLOAD_BITS : 0;
@@ -284,9 +293,74 @@ int FrameCodec::signallingPayloadBits(FrameType type)
 
 int FrameCodec::headerBits(FrameType type, bool standardOrigin)
 {
+    // A locator frame has no message ID: nothing answers it by number.
+    if (type == FrameType::Locator) return ORIGIN_BIT + originBits(standardOrigin) + 1;
+
     int bits = ORIGIN_BIT + originBits(standardOrigin) + AIR_ID_BITS;
     if (isSignallingFrameType(type)) return bits + 1;
     return bits + BURSTS_FOLLOWING_BITS + 2 * FRAGMENT_FIELD_BITS;
+}
+
+// What follows a signalling frame's header: its payload byte, its feature
+// byte or its grid square.
+static int signallingTailBits(FrameType type)
+{
+    if (type == FrameType::Locator) return LOCATOR_BITS;
+    if (FrameCodec::carriesFeatures(type)) return FEATURE_BITS;
+    return FrameCodec::signallingPayloadBits(type);
+}
+
+std::string FrameCodec::normalizeLocator(const std::string& locator)
+{
+    std::string text;
+    for (char c : locator)
+    {
+        if (!std::isspace((unsigned char)c)) text += c;
+    }
+    if (text.size() != 4 && text.size() != 6) return "";
+
+    std::string result;
+    for (size_t i = 0; i < text.size(); i++)
+    {
+        char c = text[i];
+        if (i < 2)
+        {
+            c = (char)std::toupper((unsigned char)c);
+            if (c < 'A' || c > 'R') return "";
+        }
+        else if (i < 4)
+        {
+            if (!std::isdigit((unsigned char)c)) return "";
+        }
+        else
+        {
+            c = (char)std::tolower((unsigned char)c);
+            if (c < 'a' || c > 'x') return "";
+        }
+        result += c;
+    }
+    return result;
+}
+
+int FrameCodec::packGridSquare(const std::string& locator)
+{
+    std::string grid = normalizeLocator(locator);
+    if (grid.empty()) return -1;
+    return (((grid[0] - 'A') * 18 + (grid[1] - 'A')) * 10 + (grid[2] - '0')) * 10 + (grid[3] - '0');
+}
+
+std::string FrameCodec::unpackGridSquare(int value)
+{
+    if (value < 0 || value >= GRID_SQUARE_VALUES) return "";
+    char grid[5];
+    grid[3] = (char)('0' + value % 10);
+    value /= 10;
+    grid[2] = (char)('0' + value % 10);
+    value /= 10;
+    grid[1] = (char)('A' + value % 18);
+    grid[0] = (char)('A' + value / 18);
+    grid[4] = '\0';
+    return grid;
 }
 
 size_t FrameCodec::textThatFits(const std::string& originCallsign, const std::string& text, size_t from)
@@ -303,9 +377,12 @@ std::vector<uint8_t> FrameCodec::encode(const Frame& frame, int frameBytes)
     const bool standard = !positions.empty();
     const int header = headerBits(frame.type, standard);
     const int payloadBits = signalling ? signallingPayloadBits(frame.type) : 0;
+    const int tailBits = signalling ? signallingTailBits(frame.type) : 0;
+    const int gridSquare = frame.type == FrameType::Locator ? packGridSquare(frame.locator) : 0;
 
     if (origin.empty()) return {};
-    if (frameBytes <= 0 || 8 * frameBytes < header + payloadBits) return {};
+    if (frameBytes <= 0 || 8 * frameBytes < header + tailBits) return {};
+    if (gridSquare < 0) return {};
     if (frame.destinationCrc >> DESTINATION_HASH_BITS) return {};
     if (frame.airId > MAX_AIR_ID) return {};
 
@@ -343,8 +420,14 @@ std::vector<uint8_t> FrameCodec::encode(const Frame& frame, int frameBytes)
     if (signalling)
     {
         put(frame.burstsFollowing > 0 ? 1 : 0, 1);
+        if (frame.type == FrameType::Locator)
+        {
+            put((uint64_t)gridSquare, LOCATOR_BITS);
+            return out;
+        }
         put(frame.airId, AIR_ID_BITS);
         if (payloadBits > 0) put(frame.payload.empty() ? 0 : frame.payload[0], payloadBits);
+        else if (carriesFeatures(frame.type)) put(frame.features, FEATURE_BITS);
         return out;
     }
 
@@ -372,7 +455,10 @@ bool FrameCodec::decode(const uint8_t* data, int length, Frame& frameOut)
     const bool standard = getBits(data, ORIGIN_BIT, 1) == 0;
     const int header = headerBits(type, standard);
     const int payloadBits = signalling ? signallingPayloadBits(type) : 0;
-    if (available < header + payloadBits) return false;
+    // The feature byte is read when it is there: a frame cut short of it
+    // reads as one from a build that left it zero.
+    const int requiredTail = signalling && !carriesFeatures(type) ? signallingTailBits(type) : 0;
+    if (available < header + requiredTail) return false;
 
     std::string originCallsign = unpackCallsign(data, ORIGIN_BIT + 1, standard);
     if (originCallsign.empty()) return false;
@@ -393,8 +479,22 @@ bool FrameCodec::decode(const uint8_t* data, int length, Frame& frameOut)
     if (signalling)
     {
         frame.burstsFollowing = (uint8_t)get(1);
-        frame.airId = (uint16_t)get(AIR_ID_BITS);
-        if (payloadBits > 0) frame.payload.push_back((uint8_t)get(payloadBits));
+        if (type == FrameType::Locator)
+        {
+            // Values past the last grid square are corruption that slipped
+            // past the modem CRC.
+            frame.locator = unpackGridSquare((int)get(LOCATOR_BITS));
+            if (frame.locator.empty()) return false;
+        }
+        else
+        {
+            frame.airId = (uint16_t)get(AIR_ID_BITS);
+            if (payloadBits > 0) frame.payload.push_back((uint8_t)get(payloadBits));
+            else if (carriesFeatures(type) && available >= bit + FEATURE_BITS)
+            {
+                frame.features = (uint8_t)get(FEATURE_BITS);
+            }
+        }
     }
     else
     {

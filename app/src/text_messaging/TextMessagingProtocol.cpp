@@ -103,6 +103,8 @@ TextMessagingProtocol::TextMessagingProtocol(MessageStore& store, HeardStationLi
     , observer_(nullptr)
     , myCallsignCrc_(0)
     , autoReplyEnabled_(true)
+    , sendLocator_(false)
+    , keyingCarriesLocator_(false)
     , nextAirId_(randomAirId())
     , quietUntilMs_(0)
     , ownTrafficQuietUntilMs_(0)
@@ -222,6 +224,163 @@ void TextMessagingProtocol::noteStationAutoAckLocked(const std::string& station,
         if (pending.destination != callsign || pending.state != TransmissionState::Queued) continue;
         pending.expectsAck = autoAck;
     }
+}
+
+void TextMessagingProtocol::setMyLocator(const std::string& locator, bool send)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::string normalized = FrameCodec::normalizeLocator(locator);
+
+    // Everybody who has the old square has the wrong one.
+    if (FrameCodec::packGridSquare(normalized) != FrameCodec::packGridSquare(myLocator_))
+    {
+        for (auto& entry : locatorPeers_)
+        {
+            entry.second.acknowledged = false;
+            entry.second.sent = false;
+        }
+    }
+
+    myLocator_ = normalized;
+    sendLocator_ = send;
+}
+
+std::string TextMessagingProtocol::myLocator() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return myLocator_;
+}
+
+std::string TextMessagingProtocol::stationLocator(const std::string& callsign) const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto found = locatorPeers_.find(FrameCodec::normalizeCallsign(callsign));
+    return found == locatorPeers_.end() ? std::string() : found->second.gridSquare;
+}
+
+void TextMessagingProtocol::restoreStationLocators(const std::vector<StationLocator>& stations)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const StationLocator& station : stations)
+    {
+        std::string callsign = FrameCodec::normalizeCallsign(station.callsign);
+        if (callsign.empty()) continue;
+
+        // Only what lasts: a contact is over by the time the program starts.
+        LocatorPeer& peer = locatorPeers_[callsign];
+        peer.gridSquare = FrameCodec::unpackGridSquare(FrameCodec::packGridSquare(station.gridSquare));
+        peer.support = station.support;
+    }
+}
+
+// The station's entry, its contact started over if it has been quiet too
+// long, and marked as in contact now.
+TextMessagingProtocol::LocatorPeer& TextMessagingProtocol::locatorPeerLocked(const std::string& callsign,
+                                                                              uint64_t nowMs)
+{
+    LocatorPeer& peer = locatorPeers_[callsign];
+    if (peer.lastContactMs != 0 && nowMs - peer.lastContactMs > LOCATOR_CONTACT_IDLE_MILLISECONDS)
+    {
+        peer.acknowledged = false;
+        peer.sent = false;
+        peer.heardTheirs = false;
+    }
+    peer.lastContactMs = nowMs;
+    return peer;
+}
+
+// Whether our locator rides behind a message to this station. Only to one
+// that has said it understands it: Glissando 0.5 books the burst after the
+// last text frame as a whole text burst, six segments, and would answer
+// that much late. A station that acknowledges gets it until it says it has
+// it; one with Auto acknowledge off, once a contact.
+bool TextMessagingProtocol::locatorRidesToLocked(const std::string& destination, uint64_t nowMs)
+{
+    if (myLocator_.empty() || !sendLocator_ || destination.empty()) return false;
+
+    LocatorPeer& peer = locatorPeerLocked(destination, nowMs);
+    if (peer.support != LocatorSupport::Yes) return false;
+    return expectsAckFromLocked(destination) ? !peer.acknowledged : !peer.sent;
+}
+
+// A ping or an acknowledgement says we take in locator frames, and an
+// acknowledgement whether we have its addressee's, this contact.
+uint8_t TextMessagingProtocol::featuresForLocked(const Frame& frame, const std::string& destination) const
+{
+    uint8_t features = FEATURE_UNDERSTANDS_LOCATOR;
+    if (frame.type != FrameType::MessageAck) return features;
+
+    auto found = locatorPeers_.find(destination);
+    if (found != locatorPeers_.end() && found->second.heardTheirs) features |= FEATURE_HEARD_YOUR_LOCATOR;
+    return features;
+}
+
+Frame TextMessagingProtocol::locatorFrameLocked(const std::string& destination) const
+{
+    Frame frame = makeFrameLocked(FrameType::Locator, destination, 0, 0, 1, {});
+    frame.locator = myLocator_;
+    return frame;
+}
+
+// What a ping's or acknowledgement's feature byte says about its sender,
+// whoever it was for; and an acknowledgement to us, whether it has our
+// locator.
+void TextMessagingProtocol::noteLocatorFeaturesLocked(const Frame& frame, uint64_t nowMs)
+{
+    if (!FrameCodec::carriesFeatures(frame.type)) return;
+
+    LocatorPeer& peer = locatorPeerLocked(frame.originCallsign, nowMs);
+    LocatorSupport support =
+        (frame.features & FEATURE_UNDERSTANDS_LOCATOR) != 0 ? LocatorSupport::Yes : LocatorSupport::No;
+    if (support != peer.support)
+    {
+        peer.support = support;
+        saveLocatorPeerLocked(frame.originCallsign, peer);
+    }
+
+    if (frame.type == FrameType::MessageAck && isAddressedToMeLocked(frame) &&
+        (frame.features & FEATURE_HEARD_YOUR_LOCATOR) != 0)
+    {
+        peer.acknowledged = true;
+    }
+}
+
+// A station's locator, whoever it rode behind a message to. It is the last
+// burst of the sender's keying, which a text frame said was still to come
+// and booked as a whole text burst: hearing it ends the keying, and frees the
+// channel and any request for missing fragments that was waiting it out.
+void TextMessagingProtocol::handleLocatorLocked(const Frame& frame, uint64_t nowMs)
+{
+    LocatorPeer& peer = locatorPeerLocked(frame.originCallsign, nowMs);
+    peer.heardTheirs = true;
+    if (peer.gridSquare != frame.locator || peer.support != LocatorSupport::Yes)
+    {
+        peer.gridSquare = frame.locator;
+        peer.support = LocatorSupport::Yes;
+        saveLocatorPeerLocked(frame.originCallsign, peer);
+    }
+
+    if (frame.burstsFollowing != 0) return;
+    if (channelReservedBy_ == frame.originCallsign)
+    {
+        channelReservedUntilMs_ = 0;
+        channelReservedBy_.clear();
+    }
+    for (auto& entry : inbox_)
+    {
+        if (entry.first.first != frame.originCallsign) continue;
+        if (entry.second.keyingEndsMs > nowMs) entry.second.keyingEndsMs = nowMs;
+    }
+}
+
+void TextMessagingProtocol::saveLocatorPeerLocked(const std::string& callsign, const LocatorPeer& peer)
+{
+    StationLocator station;
+    station.callsign = callsign;
+    station.gridSquare = peer.gridSquare;
+    station.support = peer.support;
+    station.updated = wallClock_();
+    store_.upsertStationLocator(station);
 }
 
 void TextMessagingProtocol::setTransmitInhibited(const std::string& reason)
@@ -816,7 +975,13 @@ void TextMessagingProtocol::onFrameReceived(const Frame& frame, float snr)
 
         // Whoever the frame is for, its sender holds the channel for the rest
         // of its keying.
-        reserveChannelForKeyingLocked(frame, monotonicMs_());
+        uint64_t nowMs = monotonicMs_();
+        reserveChannelForKeyingLocked(frame, nowMs);
+
+        // Whoever it is for, a frame keeps its sender's contact going, and a
+        // ping or acknowledgement says whether it takes in locators.
+        locatorPeerLocked(frame.originCallsign, nowMs);
+        noteLocatorFeaturesLocked(frame, nowMs);
 
         // Messages, broadcasts and pings say whether their sender acknowledges
         // by itself. An acknowledgement or a pong to us is that station doing so.
@@ -834,6 +999,8 @@ void TextMessagingProtocol::onFrameReceived(const Frame& frame, float snr)
                 {
                     noteStationAutoAckLocked(frame.originCallsign, true, events);
                 }
+                break;
+            case FrameType::Locator:
                 break;
         }
 
@@ -856,6 +1023,9 @@ void TextMessagingProtocol::onFrameReceived(const Frame& frame, float snr)
                 break;
             case FrameType::PingAck:
                 if (isAddressedToMeLocked(frame)) handlePongLocked(frame, snr, events);
+                break;
+            case FrameType::Locator:
+                handleLocatorLocked(frame, nowMs);
                 break;
         }
     }
@@ -884,6 +1054,7 @@ void TextMessagingProtocol::reserveChannelForKeyingLocked(const Frame& frame, ui
         frame.burstsFollowing == 0
             ? 0
             : nowMs + (uint64_t)frame.burstsFollowing * (uint64_t)timing_.textFragmentAirMs;
+    channelReservedBy_ = frame.burstsFollowing == 0 ? std::string() : frame.originCallsign;
 }
 
 void TextMessagingProtocol::handleIncomingFragmentLocked(const Frame& frame, float snr,
@@ -1480,6 +1651,7 @@ void TextMessagingProtocol::serviceOutboxLocked(uint64_t nowMs, bool frozen,
                 sent.state = TransmissionState::AwaitingAck;
                 sent.deadlineMs = nowMs + (uint64_t)(sent.isPing ? timing_.pingTimeoutMs
                                                                  : timing_.ackTimeoutMs);
+                if (keyingCarriesLocator_) sent.deadlineMs += (uint64_t)timing_.textFragmentAirMs;
                 updateStatusLocked(sent, MessageStatus::AwaitingAck, events);
                 i++;
             }
@@ -1510,10 +1682,15 @@ void TextMessagingProtocol::serviceOutboxLocked(uint64_t nowMs, bool frozen,
                     if (rider != nullptr) entries.push_back(rider);
                 }
 
+                std::string locatorTo;
                 std::vector<OutgoingBurst> keying = keyingBurstsLocked(
-                    std::vector<const PendingTransmission*>(entries.begin(), entries.end()));
+                    std::vector<const PendingTransmission*>(entries.begin(), entries.end()), nowMs,
+                    &locatorTo);
                 if (!keying.empty() && transport_->transmit(keying))
                 {
+                    keyingCarriesLocator_ = !locatorTo.empty();
+                    if (keyingCarriesLocator_) locatorPeers_[locatorTo].sent = true;
+
                     // A reply with something behind it says more follows, and a
                     // listener that then loses what follows holds the channel
                     // for two fragments after the reply, however short the
@@ -1527,6 +1704,7 @@ void TextMessagingProtocol::serviceOutboxLocked(uint64_t nowMs, bool frozen,
 
                     keyingEndsMs_ = nowMs;
                     for (PendingTransmission* entry : entries) keyingEndsMs_ += airTimeLocked(*entry);
+                    if (keyingCarriesLocator_) keyingEndsMs_ += (uint64_t)timing_.textFragmentAirMs;
 
                     for (PendingTransmission* entry : entries)
                     {
@@ -1628,12 +1806,15 @@ TextMessagingProtocol::PendingTransmission* TextMessagingProtocol::riderLocked(s
 
 // The bursts for one keying: every frame each entry still has to send, in
 // order, each saying how many bursts follow it in the keying as a whole. A
-// message leaves out the fragments the far end has confirmed.
+// message leaves out the fragments the far end has confirmed. Our locator
+// rides last behind a message to a station that is due it, and that
+// station's callsign goes in locatorToOut; see locatorRidesToLocked().
 std::vector<OutgoingBurst> TextMessagingProtocol::keyingBurstsLocked(
-    const std::vector<const PendingTransmission*>& entries) const
+    const std::vector<const PendingTransmission*>& entries, uint64_t nowMs, std::string* locatorToOut)
 {
     std::vector<std::pair<const PendingTransmission*, const Frame*>> order;
     int gear = 0;
+    std::string locatorTo;
     for (const PendingTransmission* entry : entries)
     {
         if (gear == 0) gear = entry->gear;
@@ -1642,24 +1823,49 @@ std::vector<OutgoingBurst> TextMessagingProtocol::keyingBurstsLocked(
             if ((entry->confirmed & (1u << index)) != 0) continue;
             order.push_back({entry, &entry->frames[index]});
         }
-    }
 
+        bool directedMessage = !entry->reply && !entry->isPing && entry->mode == BurstMode::Text;
+        if (directedMessage && locatorTo.empty() && locatorRidesToLocked(entry->destination, nowMs))
+        {
+            locatorTo = entry->destination;
+        }
+    }
+    if (locatorToOut != nullptr) *locatorToOut = locatorTo;
+
+    size_t bursts = order.size() + (locatorTo.empty() ? 0 : 1);
     std::vector<OutgoingBurst> keying;
     for (size_t position = 0; position < order.size(); position++)
     {
-        BurstMode mode = order[position].first->mode;
+        const PendingTransmission* entry = order[position].first;
+        BurstMode mode = entry->mode;
         Frame frame = *order[position].second;
-        frame.burstsFollowing = (uint8_t)(order.size() - 1 - position);
+        frame.burstsFollowing = (uint8_t)(bursts - 1 - position);
         frame.senderAutoAck = autoReplyEnabled_;
+        if (FrameCodec::carriesFeatures(frame.type)) frame.features = featuresForLocked(frame, entry->destination);
 
         // Every frame encoded when it was queued, and a keying holds at most a
-        // reply and one message, so the count after any fragment still fits:
-        // this does not fail.
+        // reply, one message and a locator, so the count after any fragment
+        // still fits: this does not fail.
         std::vector<uint8_t> encoded = FrameCodec::encode(
             frame, mode == BurstMode::Signalling ? SIGNALLING_FRAME_BYTES : TEXT_FRAME_BYTES);
         if (encoded.empty()) return {};
 
-        keying.push_back({mode, encoded, gear, order[position].first->destination});
+        keying.push_back({mode, encoded, gear, entry->destination, {}});
+    }
+
+    if (!locatorTo.empty())
+    {
+        std::vector<uint8_t> encoded = FrameCodec::encode(locatorFrameLocked(locatorTo), SIGNALLING_FRAME_BYTES);
+        if (!encoded.empty()) keying.push_back({BurstMode::Signalling, encoded, gear, locatorTo, {}});
+    }
+
+    // Whatever the keying, a duet with a voice to spare sings our locator in
+    // it: it costs no air time, and builds that do not know it skip a filler
+    // unread. One segment holds it only from a standard callsign.
+    if (!keying.empty() && !myLocator_.empty() && sendLocator_ && FrameCodec::isStandardCallsign(myCallsign_))
+    {
+        keying.back().duetFiller = FrameCodec::encode(locatorFrameLocked(entries.front()->destination),
+                                                      SIGNALLING_FRAME_BYTES);
     }
 
     return keying;

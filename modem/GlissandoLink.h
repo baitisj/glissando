@@ -16,7 +16,10 @@
 // arrival, so a short message costs fewer (slow) frames. Index 7 never
 // occurs in real traffic (a text frame needs at most six segments) and marks
 // a filler segment, which pads the second voice of a duet frame when a
-// keying has an odd number of segments.
+// keying has an odd number of segments. Its nine bytes are zero, or a whole
+// chat frame short enough for one segment, which the chat layer uses to send
+// the station's locator for free; builds that predate that skip a filler
+// unread.
 //
 // Nothing here depends on wxWidgets or codec2.
 //=========================================================================
@@ -42,12 +45,15 @@ struct LinkBurst
 {
     bool text = true;               // false: a signalling burst
     std::vector<uint8_t> bytes;     // the whole chat frame, padding included
+    bool filler = false;            // received: it came in a filler segment
 };
 
 // Cuts a keying's bursts into payloads, in the order they go on the air. For
 // a duet (voices == 2) the list is padded to an even length with a filler, and
-// payloads 2k and 2k+1 share frame k.
-std::vector<Payload> segmentBursts(const std::vector<LinkBurst>& bursts, int voices);
+// payloads 2k and 2k+1 share frame k. A filler carries fillerFrame when it
+// fits one segment, and zeros otherwise.
+std::vector<Payload> segmentBursts(const std::vector<LinkBurst>& bursts, int voices,
+                                   const std::vector<uint8_t>& fillerFrame = {});
 
 // Number of Glissando frames segmentBursts() would produce.
 int framesForBursts(const std::vector<LinkBurst>& bursts, int voices);
@@ -97,7 +103,9 @@ public:
     // is restored to.
     Reassembler(int signallingBytes, int textBytes);
 
-    // Returns true and fills burstOut when this payload completes a burst.
+    // Returns true and fills burstOut when this payload completes a burst,
+    // or is a filler that carries a frame (burstOut.filler), which leaves
+    // any burst being put together alone.
     // startSample is where the frame began in the receiver's sample count;
     // the same payload decoded again within duplicateSamples of the last one
     // (by a second gear that shares its waveform, or by an overlapping

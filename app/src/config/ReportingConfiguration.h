@@ -32,6 +32,10 @@ public:
     virtual ~ReportingConfiguration() = default;
 
     ConfigurationDataElement<wxString> reportingCallsign;
+
+    // The station's Maidenhead locator, and whether chat sends its grid square.
+    ConfigurationDataElement<wxString> reportingGridSquare;
+    ConfigurationDataElement<bool> reportingSendGridSquare;
     
     // NOTE: this needs special handling for load/save as it's a string on disk but
     // uint64_t inside the FreeDV application.

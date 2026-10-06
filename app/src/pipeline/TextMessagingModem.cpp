@@ -103,6 +103,7 @@ const char* frameTypeName(FrameType type)
         case FrameType::MessageAck: return "ack";
         case FrameType::Broadcast: return "broadcast";
         case FrameType::MessagePartialAck: return "partial ack";
+        case FrameType::Locator: return "locator";
     }
     return "unknown";
 }
@@ -340,15 +341,17 @@ bool TextMessagingModem::modulate(const std::vector<OutgoingBurst>& bursts,
         const Glissando::GearInfo& gear = Glissando::gearInfo(settings.gear);
 
         std::vector<Glissando::LinkBurst> linkBursts;
+        std::vector<uint8_t> duetFiller;
         for (const OutgoingBurst& burst : bursts)
         {
             linkBursts.push_back({burst.mode == BurstMode::Text, burst.frame});
+            if (!burst.duetFiller.empty()) duetFiller = burst.duetFiller;
         }
         {
             std::lock_guard<std::mutex> lock(glissandoMutex_);
             noteKeyingLocked(bursts, steadyMs());
         }
-        std::vector<Glissando::Payload> payloads = Glissando::segmentBursts(linkBursts, gear.voices);
+        std::vector<Glissando::Payload> payloads = Glissando::segmentBursts(linkBursts, gear.voices, duetFiller);
 
         // The keying opens with E4 and D5 for 0.6 s at every tempo and in
         // every scale, which listeners hear as the channel being taken (see
@@ -1043,6 +1046,19 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
     {
         if (rxLogEnabled()) log_info("RX: Glissando burst is not a chat frame");
         return;
+    }
+
+    // Only a locator rides in a duet's spare voice: nothing else there is
+    // part of the conversation.
+    if (burst.filler && frame.type != FrameType::Locator)
+    {
+        if (rxLogEnabled()) log_info("RX: Glissando filler carries a %s, ignored", frameTypeName(frame.type));
+        return;
+    }
+    if (rxLogEnabled() && frame.type == FrameType::Locator)
+    {
+        log_info("RX: Glissando locator %s from %s%s", frame.locator.c_str(), frame.originCallsign.c_str(),
+                 burst.filler ? " in a duet filler" : "");
     }
 
     {

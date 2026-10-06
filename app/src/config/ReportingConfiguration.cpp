@@ -66,6 +66,8 @@ uint64_t storedFrequencyHz(wxString const& val)
 
 ReportingConfiguration::ReportingConfiguration()
     : reportingCallsign("/Reporting/Callsign", _(""))
+    , reportingGridSquare("/Reporting/GridSquare", _(""))
+    , reportingSendGridSquare("/Reporting/SendGridSquare", true)
     , reportingFrequency("/Reporting/Frequency", 0)
     , reportingFrequencyList("/Reporting/FrequencyList", {
         // Where Glissando calls: inside the data segments (US 47 CFR 97.305
@@ -142,6 +144,8 @@ ReportingConfiguration::ReportingConfiguration()
 void ReportingConfiguration::load(wxConfigBase* config)
 {
     load_(config, reportingCallsign);
+    load_(config, reportingGridSquare);
+    load_(config, reportingSendGridSquare);
 
     // Note: this needs to be loaded before the frequency list so that
     // we get the values formatted as kHz (if so configured).
@@ -203,6 +207,8 @@ void ReportingConfiguration::save(wxConfigBase* config)
 {
  
     save_(config, reportingCallsign);
+    save_(config, reportingGridSquare);
+    save_(config, reportingSendGridSquare);
 
     save_(config, reportingFrequencyAsKhz);
     save_(config, reportingFrequencyList);
