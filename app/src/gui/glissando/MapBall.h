@@ -1,9 +1,9 @@
 //=========================================================================
 // Name:            MapBall.h
-// Purpose:         The console's map ball: a map of the world on a ball
-//                  floating in something thick, under a window twice as wide
-//                  as it is tall, beside the Engaged, Receiving and
-//                  Transmitting lamps.
+// Purpose:         The console's map ball: a map of the world on a big ball
+//                  floating in something thick, seen through a window four
+//                  times as wide as it is tall, beside the Engaged, Receiving
+//                  and Transmitting lamps.
 //
 // Given our grid square and a station's, it rolls to show the path between
 // them and eases to a stop, the path curling out from our dot to the

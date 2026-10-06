@@ -81,9 +81,9 @@ std::vector<Vec3> greatCircle(const Vec3& a, const Vec3& b, int segments);
 // ball is centred in the window.
 struct Window
 {
-    double width = 208.0;
+    double width = 416.0;
     double height = 104.0;
-    double radius = 98.0;
+    double radius = 245.0;
 };
 
 // The attitude that best shows the path from home to a station. The ball

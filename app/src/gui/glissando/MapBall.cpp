@@ -19,9 +19,9 @@ using namespace Chaotica;
 namespace
 {
 
-constexpr int WINDOW_WIDTH = 208;
+constexpr int WINDOW_WIDTH = 416;
 constexpr int WINDOW_HEIGHT = 104;
-constexpr double BALL_RADIUS = 98.0;
+constexpr double BALL_RADIUS = 245.0;
 constexpr int BEZEL = 2;
 constexpr int CAPTION_GAP = 4;
 constexpr int CAPTION_HEIGHT = 14;

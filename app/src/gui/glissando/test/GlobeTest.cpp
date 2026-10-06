@@ -184,8 +184,8 @@ void testFraming()
     Vec3 middle = toView(a, path[32]);
     CHECK(middle.y * window.radius > 4.0);  // above the centre, towards the pole
 
-    // North to south, 8,600 km, does not fit a window twice as wide as it
-    // is tall north up: the ball turns, and shows more of it.
+    // North to south, 8,600 km, does not fit the wide window north up: the
+    // ball turns, and shows more of it.
     LatLon connecticut = centreOf("FN31");
     LatLon uruguay = centreOf("GF15");
     path = greatCircle(toVector(connecticut), toVector(uruguay), 64);
@@ -253,8 +253,8 @@ void testRolling()
 void testPainting()
 {
     Window window;
-    const int width = 208;
-    const int height = 104;
+    const int width = (int)window.width;
+    const int height = (int)window.height;
     std::vector<uint8_t> rgb;
 
     auto brightness = [&](int x, int y) {
@@ -265,10 +265,15 @@ void testPainting()
     paintBall(lookingAt(toVector(LatLon{39.0, -98.0})), window, width, height, rgb);
     CHECK(rgb.size() == (size_t)width * height * 3);
     int land = brightness(width / 2, height / 2);
-    int fluid = brightness(0, height / 2);              // outside the ball
 
     paintBall(lookingAt(toVector(LatLon{0.0, -150.0})), window, width, height, rgb);
     int sea = brightness(width / 2, height / 2);
+
+    // The ball fills the window; a smaller one floats with the fluid round it.
+    Window small = window;
+    small.radius = 40.0;
+    paintBall(lookingAt(toVector(LatLon{0.0, -150.0})), small, width, height, rgb);
+    int fluid = brightness(0, height / 2);
 
     CHECK(land > sea + 150);
     CHECK(sea > fluid);

@@ -34,7 +34,10 @@ constexpr double SETTLED_SPIN = 0.005;
 // Points along a path when framing it, and how far inside the window's
 // edge they have to be to count as shown.
 constexpr int FRAMING_SEGMENTS = 64;
-constexpr double FRAMING_MARGIN = 6.0;
+constexpr double FRAMING_MARGIN = 12.0;
+// The most the middle of the path is lifted towards the pole, as a share of
+// the window's half height, so the bow stays in a short window.
+constexpr double CURL_SHARE = 0.5;
 
 // The ball's colours: silver land on a dark sea in darker fluid, as the
 // rest of the console is silver on black.
@@ -112,7 +115,10 @@ double landAt(const std::vector<uint8_t>& cells, double lat, double lon)
     double fu = u - u0;
     double fv = v - v0;
 
-    int left = ((int)u0 % LandMask::WIDTH + LandMask::WIDTH) % LandMask::WIDTH;
+    // Round the date line without dividing: this is done a lot.
+    int left = (int)u0;
+    while (left < 0) left += LandMask::WIDTH;
+    while (left >= LandMask::WIDTH) left -= LandMask::WIDTH;
     int right = left + 1 == LandMask::WIDTH ? 0 : left + 1;
     const uint8_t* above = &cells[(size_t)std::clamp((int)v0, 0, LandMask::HEIGHT - 1) * LandMask::WIDTH];
     const uint8_t* below = &cells[(size_t)std::clamp((int)v0 + 1, 0, LandMask::HEIGHT - 1) * LandMask::WIDTH];
@@ -122,10 +128,12 @@ double landAt(const std::vector<uint8_t>& cells, double lat, double lon)
 }
 
 // How much of a pixel is land, the pixel being about the given number of
-// degrees across: four looks spread over it, as the cells are smaller than
-// a pixel and one look makes the coasts ragged.
+// degrees across. Where the pixel is wider than a cell or so, one look
+// makes the coasts ragged, so it takes four spread over the pixel.
 double landOver(const std::vector<uint8_t>& cells, double lat, double lon, double cosLat, double pixelDegrees)
 {
+    if (pixelDegrees * LandMask::CELLS_PER_DEGREE < 1.5) return landAt(cells, lat, lon);
+
     double dLat = 0.25 * pixelDegrees;
     double dLon = dLat / std::max(cosLat, 0.2);
     return 0.25 * (landAt(cells, lat - dLat, lon - dLon) + landAt(cells, lat - dLat, lon + dLon) +
@@ -333,7 +341,8 @@ Attitude framePath(const LatLon& home, const LatLon& station, const Window& wind
     if (length(normal) < 1e-9) normal = cross(h, middle);
     normal = normalized(normal);
     if (dot(normal, NORTH) < 0.0) normal = scaled(normal, -1.0);
-    double curl = std::min(0.25 * span, 15.0 / DEGREES);
+    double lift = std::min(1.0, CURL_SHARE * (window.height / 2.0 - FRAMING_MARGIN) / window.radius);
+    double curl = std::min({0.25 * span, 15.0 / DEGREES, std::asin(lift)});
 
     Vec3 centre = normalized(plus(scaled(middle, std::cos(curl)), scaled(normal, -std::sin(curl))));
 
@@ -499,7 +508,7 @@ void paintBall(const Attitude& attitude, const Window& window, int width, int he
     const std::vector<uint8_t>& cells = landCells();
 
     const double radius = window.radius;
-    const Vec3 light = normalized(Vec3{-0.5, 0.6, 0.62});
+    const Vec3 light = normalized(Vec3{-0.35, 0.5, 0.79});
     const Vec3 halfway = normalized(plus(light, Vec3{0.0, 0.0, 1.0}));
     const double degreesPerPixel = DEGREES / radius;
 
@@ -538,7 +547,12 @@ void paintBall(const Attitude& attitude, const Window& window, int width, int he
 
                 double lambert = std::max(0.0, dot(normal, light));
                 double shade = 0.28 + 0.82 * lambert;
-                double shine = std::pow(std::max(0.0, dot(normal, halfway)), 40.0) * 50.0;
+                double glint = std::max(0.0, dot(normal, halfway));
+                double glint8 = glint * glint * glint * glint;
+                glint8 *= glint8;
+                double glint32 = glint8 * glint8;
+                glint32 *= glint32;
+                double shine = glint32 * glint8 * 50.0;     // to the 40th
                 for (int k = 0; k < 3; k++)
                 {
                     double lit = surface[k] * shade + shine;
@@ -547,7 +561,7 @@ void paintBall(const Attitude& attitude, const Window& window, int width, int he
             }
 
             uint8_t* out = &rgb[((size_t)py * width + px) * 3];
-            for (int k = 0; k < 3; k++) out[k] = (uint8_t)std::clamp(std::lround(colour[k]), 0L, 255L);
+            for (int k = 0; k < 3; k++) out[k] = (uint8_t)std::clamp(colour[k] + 0.5, 0.0, 255.0);
         }
     }
 }

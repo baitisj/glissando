@@ -279,15 +279,15 @@ them, are kept in the chat database (`station_locators`, which older builds
 ignore).
 
 The console's map ball, right of the Engaged, Receiving and Transmitting
-lamps, shows them: a map of the world on a ball under a window twice as wide
-as it is tall, with the Maidenhead fields ruled on it. It follows the station
-last heard, or last sent to, whose locator is known, and a station whose
-locator is not known leaves it where it is. When that station changes, the
-ball rolls to show the great circle path from our square to its square and
-eases to a stop, north up unless turning it shows more of the path, and the
-path curls out from our dot to the station's red square. Under the window go
-the station's square, the distance in km and the bearing from us, or our own
-square while there is no station. The sums are in
+lamps, shows them: a map of the world on a big ball seen through a window
+four times as wide as it is tall, with the Maidenhead fields ruled on it. It
+follows the station last heard, or last sent to, whose locator is known, and
+a station whose locator is not known leaves it where it is. When that station
+changes, the ball rolls to show the great circle path from our square to its
+square and eases to a stop, north up unless turning it shows more of the
+path, and the path curls out from our dot to the station's red square. Under
+the window go the station's square, the distance in km and the bearing from
+us, or our own square while there is no station. The sums are in
 `app/src/gui/glissando/Globe.cpp`. The land is a 0.25 degree mask
 (`LandMask.h`) made from the Natural Earth 1:110m countries, which are public
 domain; `prototype/globe/gen_land_mask.py` remakes it from that shapefile.
