@@ -72,6 +72,7 @@ MapBall::MapBall(wxWindow* parent)
     , placed_(false)
     , haveHome_(false)
     , haveStation_(false)
+    , stationCurrent_(true)
     , pathDrawn_(1.0)
     , timer_(this)
     , lastTickMs_(0)
@@ -129,16 +130,25 @@ void MapBall::pointer(const wxMouseEvent& event, double& x, double& y) const
     y = (BEZEL + WINDOW_HEIGHT / 2.0) - event.GetY();
 }
 
-void MapBall::setLocators(const std::string& home, const std::string& station)
+void MapBall::setLocators(const std::string& home, const std::string& station, bool stationCurrent)
 {
-    if (home == home_ && station == station_) return;
+    if (home == home_ && station == station_ && stationCurrent == stationCurrent_) return;
+    bool moved = home != home_ || station != station_;
     bool stationChanged = station != station_;
     home_ = home;
     station_ = station;
+    stationCurrent_ = stationCurrent;
     haveHome_ = Globe::locatorCentre(home, homeAt_);
     haveStation_ = Globe::locatorCentre(station, stationAt_);
-    caption_ = haveHome_ || haveStation_ ? wxString::FromUTF8(Globe::caption(home, station).c_str())
-                                         : _("Set your grid square in Preferences, Station");
+    caption_ = haveHome_ || haveStation_
+                   ? wxString::FromUTF8(Globe::caption(home, station, stationCurrent).c_str())
+                   : _("Set your grid square in Preferences, Station");
+    if (!moved)
+    {
+        // Only the square's standing changed: the caption says so.
+        Refresh();
+        return;
+    }
 
     if (!placed_ && (haveHome_ || haveStation_))
     {
@@ -356,7 +366,7 @@ void MapBall::paint(wxGraphicsContext* gc, const wxSize&)
     if (!caption_.empty())
     {
         double tw = 0, th = 0;
-        gc->SetFont(font(FontRole::Caption), haveStation_ ? Colour::Bone : Colour::Dim);
+        gc->SetFont(font(FontRole::Caption), haveStation_ && stationCurrent_ ? Colour::Bone : Colour::Dim);
         gc->GetTextExtent(caption_, &tw, &th);
         gc->DrawText(caption_, left + (WINDOW_WIDTH - tw) / 2.0,
                      top + WINDOW_HEIGHT + BEZEL + CAPTION_GAP + (CAPTION_HEIGHT - th) / 2.0);

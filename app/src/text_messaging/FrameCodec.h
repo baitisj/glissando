@@ -117,6 +117,20 @@ public:
     // packed, or if a text frame's text does not all fit behind its header.
     static std::vector<uint8_t> encode(const Frame& frame, int frameBytes);
 
+    // A locator frame cut down to what a duet's spare voice holds: its type,
+    // the sender's callsign and the grid square, with no destination and no
+    // bursts-following bit (it is always the end of its keying), so it fits
+    // nine bytes from any callsign the air alphabet packs. It has its own
+    // type code, so builds that know only the full form pass it over;
+    // decode() reads it as a Locator with destinationCrc and burstsFollowing
+    // zero. Zero padded to frameBytes; empty if the callsign or the locator
+    // cannot be packed.
+    static std::vector<uint8_t> encodeShortLocator(const Frame& frame, int frameBytes);
+
+    // Whether a TYPE_BITS type code is the short locator's, whose callsign
+    // starts at TYPE_BITS rather than ORIGIN_BIT.
+    static bool isShortLocatorCode(uint8_t code);
+
     // Parses a frame received from the modem. Returns false when the frame is
     // too short for its header, the type is not one of ours, or a field holds
     // a value no sender produces.

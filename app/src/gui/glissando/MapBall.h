@@ -36,10 +36,12 @@ class MapBall : public Chaotica::Control
 public:
     explicit MapBall(wxWindow* parent);
 
-    // Our locator and the station's, either of them possibly empty. The
-    // ball rolls when they change; the first ones it is given, it starts
-    // at. Until then it shows the North Atlantic, and asks for our square.
-    void setLocators(const std::string& home, const std::string& station);
+    // Our locator and the station's, either of them possibly empty, and
+    // whether the station's came from it this contact. The ball rolls when
+    // they change; the first ones it is given, it starts at. Until then it
+    // shows the North Atlantic, and asks for our square. A station's square
+    // kept from an earlier contact is shown dim and marked as such.
+    void setLocators(const std::string& home, const std::string& station, bool stationCurrent = true);
 
 protected:
     virtual void paint(wxGraphicsContext* gc, const wxSize& size) override;
@@ -77,6 +79,7 @@ private:
     std::string station_;
     bool haveHome_;
     bool haveStation_;
+    bool stationCurrent_;
     Globe::LatLon homeAt_;
     Globe::LatLon stationAt_;
     double pathDrawn_;              // how much of the path is drawn so far, 0 to 1

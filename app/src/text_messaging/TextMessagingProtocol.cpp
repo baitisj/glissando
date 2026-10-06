@@ -258,6 +258,14 @@ std::string TextMessagingProtocol::stationLocator(const std::string& callsign) c
     return found == locatorPeers_.end() ? std::string() : found->second.gridSquare;
 }
 
+bool TextMessagingProtocol::stationLocatorIsCurrent(const std::string& callsign) const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto found = locatorPeers_.find(FrameCodec::normalizeCallsign(callsign));
+    if (found == locatorPeers_.end() || !found->second.heardTheirs) return false;
+    return monotonicMs_() - found->second.lastContactMs <= LOCATOR_CONTACT_IDLE_MILLISECONDS;
+}
+
 std::string TextMessagingProtocol::mapStation() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -1881,11 +1889,11 @@ std::vector<OutgoingBurst> TextMessagingProtocol::keyingBurstsLocked(
 
     // Whatever the keying, a duet with a voice to spare sings our locator in
     // it: it costs no air time, and builds that do not know it skip a filler
-    // unread. One segment holds it only from a standard callsign.
-    if (!keying.empty() && !myLocator_.empty() && sendLocator_ && FrameCodec::isStandardCallsign(myCallsign_))
+    // unread. The short form fits the one segment from any callsign.
+    if (!keying.empty() && !myLocator_.empty() && sendLocator_)
     {
-        keying.back().duetFiller = FrameCodec::encode(locatorFrameLocked(entries.front()->destination),
-                                                      SIGNALLING_FRAME_BYTES);
+        keying.back().duetFiller = FrameCodec::encodeShortLocator(locatorFrameLocked(std::string()),
+                                                                  SIGNALLING_FRAME_BYTES);
     }
 
     return keying;

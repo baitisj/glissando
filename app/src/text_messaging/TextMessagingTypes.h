@@ -90,8 +90,11 @@ constexpr int TEXT_FRAME_BYTES = 54;       // DATAC4: 448 bits - CRC16
 // characters in LOCATOR_BITS, packed as FT8 packs them. 69 bits with a
 // standard callsign, one Glissando segment. It rides as the last burst of a
 // directed message to a station that has said it understands it, until that
-// station acknowledges it (FEATURE_HEARD_YOUR_LOCATOR), and fills the empty
-// second voice of a duet keying. Older builds drop it as not one of theirs.
+// station acknowledges it (FEATURE_HEARD_YOUR_LOCATOR). The empty second
+// voice of a duet keying carries a short form, type 0xF, with no
+// destination or "more follows" bit, which fits one segment from any
+// callsign (FrameCodec::encodeShortLocator). Older builds drop both as not
+// one of theirs.
 //
 // A station with Auto acknowledge off says so in the type of its pings,
 // messages and broadcasts, so that others do not retry to it. Pongs and

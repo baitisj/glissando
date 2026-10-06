@@ -272,7 +272,9 @@ acknowledgement says it has it; one with Auto acknowledge off gets it once.
 That is once per contact, a contact ending after 30 minutes without a frame
 either way, and again to everybody when the locator changes. A duet keying
 with a voice to spare also sings it in the filler segment, to anybody, for
-free; 0.5 skips a filler unread. Hearing a locator ends that station's
+free, in a short form of its own, type 0xF: the type, the callsign and the
+square with no destination or "more follows" bit, which fits the one
+segment from any callsign, /P included. 0.5 skips a filler unread. Hearing a locator ends that station's
 keying for the listener, so an answer goes out at once rather than after the
 text fragment the message booked. Locators heard, and which stations read
 them, are kept in the chat database (`station_locators`, which older builds

@@ -2721,6 +2721,21 @@ void testOlderStationGetsNoLocator()
     later.protocol.restoreStationLocators({heard});
     CHECK(later.protocol.stationLocator("DJ2LS") == "JO62");
     CHECK(later.protocol.stationLocator("K1ABC").empty());
+
+    // A square kept from an earlier session is not current: the station
+    // may have moved. Heard again it is, until its contact is over.
+    CHECK(!later.protocol.stationLocatorIsCurrent("DJ2LS"));
+    CHECK(!later.protocol.stationLocatorIsCurrent("K1ABC"));
+    Frame locator;
+    locator.type = FrameType::Locator;
+    locator.originCallsign = "DJ2LS";
+    locator.locator = "JO43";
+    later.protocol.onFrameReceived(locator, 5.0f);
+    CHECK(later.protocol.stationLocator("dj2ls") == "JO43");
+    CHECK(later.protocol.stationLocatorIsCurrent("dj2ls"));
+    later.nowMs += LOCATOR_CONTACT_IDLE_MILLISECONDS + 1;
+    CHECK(!later.protocol.stationLocatorIsCurrent("DJ2LS"));
+    CHECK(later.protocol.stationLocator("DJ2LS") == "JO43");
 }
 
 // The locator ends the sender's keying. Whoever hears it lets go of the
@@ -2786,10 +2801,14 @@ void testLocatorEndsTheKeying()
 }
 
 // A duet keying with a voice to spare sings our locator in it, to anybody,
-// whatever else the keying holds; one segment holds it only from a standard
-// callsign.
+// whatever else the keying holds, in the short form that fits one nine-byte
+// segment from any callsign.
 void testDuetFillerCarriesTheLocator()
 {
+    auto oneSegment = [](const std::vector<uint8_t>& filler) {
+        return filler.size() > 9 && std::all_of(filler.begin() + 9, filler.end(), [](uint8_t b) { return b == 0; });
+    };
+
     Station sender("W1AW");
     std::string error;
     CHECK(sender.protocol.sendMessage("CQ", "", error));
@@ -2801,22 +2820,36 @@ void testDuetFillerCarriesTheLocator()
     sender.completeOneTransmission();
     CHECK(sender.transport.transmissions.back().size() == 1); // a broadcast carries no rider
     const std::vector<uint8_t>& filler = sender.transport.fillers.back();
+    CHECK((filler[0] >> 4) == 0xF);
     Frame frame = decodeOne(filler);
     CHECK(frame.type == FrameType::Locator && frame.locator == "CN87");
-    CHECK(frame.originCallsign == "W1AW" && frame.destinationCrc == 0);
-    CHECK(std::all_of(filler.begin() + 9, filler.end(), [](uint8_t byte) { return byte == 0; }));
+    CHECK(frame.originCallsign == "W1AW" && frame.destinationCrc == 0 && frame.burstsFollowing == 0);
+    CHECK(oneSegment(filler));
 
     CHECK(sender.protocol.sendPing("VK3ABC", error));
     sender.completeOneTransmission();
     frame = decodeOne(sender.transport.fillers.back());
-    CHECK(frame.type == FrameType::Locator && frame.destinationCrc == FrameCodec::callsignHash("VK3ABC"));
+    CHECK(frame.type == FrameType::Locator && frame.locator == "CN87" && frame.destinationCrc == 0);
 
+    // A portable call is too long for the full form in one segment, but the
+    // short form fits, and whoever hears it books it.
     CHECK(!FrameCodec::isStandardCallsign("TEST1/P"));
     Station portable("TEST1/P");
     portable.protocol.setMyLocator("CN87", true);
     CHECK(portable.protocol.sendMessage("CQ", "", error));
     portable.completeOneTransmission();
-    CHECK(portable.transport.fillers.back().empty());
+    const std::vector<uint8_t>& portableFiller = portable.transport.fillers.back();
+    CHECK(oneSegment(portableFiller));
+    frame = decodeOne(portableFiller);
+    CHECK(frame.type == FrameType::Locator && frame.originCallsign == "TEST1/P" && frame.locator == "CN87");
+    Frame full = frame;
+    full.destinationCrc = 0;
+    CHECK(!oneSegment(FrameCodec::encode(full, SIGNALLING_FRAME_BYTES)));
+
+    Station listener("TEST2/P");
+    listener.protocol.onFrameReceived(frame, 5.0f);
+    CHECK(listener.protocol.stationLocator("TEST1/P") == "CN87");
+    CHECK(listener.protocol.mapStation() == "TEST1/P");
 }
 
 // The console's map follows the last station heard or keyed to whose
