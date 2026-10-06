@@ -9,7 +9,6 @@
 #include <cmath>
 
 #include <wx/graphics.h>
-#include <wx/image.h>
 #include <wx/time.h>
 
 #include "ChaoticaTheme.h"
@@ -21,7 +20,6 @@ namespace
 
 constexpr int WINDOW_WIDTH = 416;
 constexpr int WINDOW_HEIGHT = 104;
-constexpr double BALL_RADIUS = 245.0;
 constexpr int BEZEL = 2;
 constexpr int CAPTION_GAP = 4;
 constexpr int CAPTION_HEIGHT = 14;
@@ -32,13 +30,34 @@ constexpr int FRAME_MILLISECONDS = 30;
 constexpr double PATH_SECONDS = 1.6;
 constexpr int PATH_SEGMENTS = 96;
 
+// Each notch of the mouse wheel comes this much closer or backs this much
+// off.
+constexpr double WHEEL_STEP = 1.25;
+
+// Silver land on a dark sea in darker fluid, as the rest of the console is
+// silver on black, with the Maidenhead fields ruled faintly over both.
+const wxColour FLUID(14, 13, 12);
+const wxColour SEA(50, 52, 56);
+const wxColour LAND(186, 181, 168);
+const wxColour RULING(232, 236, 230, 44);
 const wxColour PATH_CASING(0, 0, 0, 150);
+
+// Where the light comes from, over the viewer's left shoulder, as a point
+// on the ball's face: the highlight sits there and the ball darkens away
+// from it.
+constexpr double LIGHT_X = -0.35;
+constexpr double LIGHT_Y = 0.5;
 
 // Eases the path out quickly and in slowly, like the ball.
 double eased(double t)
 {
     t = std::clamp(t, 0.0, 1.0);
     return 1.0 - std::pow(1.0 - t, 3.0);
+}
+
+wxPoint2DDouble at(const Globe::Point& p, double left, double top)
+{
+    return wxPoint2DDouble(left + p.x, top + p.y);
 }
 
 } // namespace
@@ -52,15 +71,33 @@ MapBall::MapBall(wxWindow* parent)
     , pathDrawn_(1.0)
     , timer_(this)
     , lastTickMs_(0)
-    , ballStale_(true)
 {
     window_.width = WINDOW_WIDTH;
     window_.height = WINDOW_HEIGHT;
-    window_.radius = BALL_RADIUS;
+    roller_.setBackOff(WINDOW_WIDTH / 2.0);
     SetToolTip(_("Where the last station heard or sent to is, if it has sent its grid square: "
-                 "the square, how far it is from yours and which way. Set yours in "
+                 "the square, how far it is from yours and which way. Turn the mouse wheel "
+                 "over it to zoom; double-click to fit the path again. Set your own square in "
                  "Preferences, Station."));
     Bind(wxEVT_TIMER, &MapBall::OnTimer, this);
+    Bind(wxEVT_MOUSEWHEEL, &MapBall::OnMouseWheel, this);
+    Bind(wxEVT_LEFT_DCLICK, &MapBall::OnDoubleClick, this);
+}
+
+Globe::View MapBall::fitted() const
+{
+    if (haveHome_ && haveStation_) return Globe::framePath(homeAt_, stationAt_, window_, zoom_);
+    Globe::View view;
+    view.radius = zoom_.standard;
+    view.attitude = Globe::lookingAt(Globe::toVector(haveStation_ ? stationAt_ : homeAt_));
+    return view;
+}
+
+void MapBall::rollTo(const Globe::View& view)
+{
+    roller_.rollTo(view);
+    lastTickMs_ = wxGetLocalTimeMillis().GetValue();
+    if (!timer_.IsRunning()) timer_.Start(FRAME_MILLISECONDS);
 }
 
 void MapBall::setLocators(const std::string& home, const std::string& station)
@@ -73,11 +110,7 @@ void MapBall::setLocators(const std::string& home, const std::string& station)
     haveStation_ = Globe::locatorCentre(station, stationAt_);
     caption_ = wxString::FromUTF8(Globe::caption(home, station).c_str());
 
-    Globe::Attitude target;
-    if (haveHome_ && haveStation_) target = Globe::framePath(homeAt_, stationAt_, window_);
-    else if (haveStation_) target = Globe::lookingAt(Globe::toVector(stationAt_));
-    else if (haveHome_) target = Globe::lookingAt(Globe::toVector(homeAt_));
-    else
+    if (!haveHome_ && !haveStation_)
     {
         Refresh();
         return;
@@ -86,18 +119,15 @@ void MapBall::setLocators(const std::string& home, const std::string& station)
     if (!placed_)
     {
         // Where it starts: no rolling to get there.
-        roller_.jump(target);
+        roller_.jump(fitted());
         placed_ = true;
         pathDrawn_ = 1.0;
     }
     else
     {
-        roller_.rollTo(target);
         if (stationChanged) pathDrawn_ = 0.0;
-        lastTickMs_ = wxGetLocalTimeMillis().GetValue();
-        if (!timer_.IsRunning()) timer_.Start(FRAME_MILLISECONDS);
+        rollTo(fitted());
     }
-    ballStale_ = true;
     Refresh();
 }
 
@@ -107,24 +137,79 @@ void MapBall::OnTimer(wxTimerEvent&)
     double seconds = std::clamp((now - lastTickMs_) / 1000.0, 0.0, 0.1);
     lastTickMs_ = now;
 
-    if (roller_.moving())
-    {
-        roller_.step(seconds);
-        ballStale_ = true;
-    }
+    roller_.step(seconds);
     pathDrawn_ = std::min(1.0, pathDrawn_ + seconds / PATH_SECONDS);
     if (!roller_.moving() && pathDrawn_ >= 1.0) timer_.Stop();
     Refresh();
 }
 
-void MapBall::drawPath(wxGraphicsContext* gc, const Globe::Attitude& attitude, double left, double top)
+void MapBall::OnMouseWheel(wxMouseEvent& event)
 {
-    double cx = left + WINDOW_WIDTH / 2.0;
-    double cy = top + WINDOW_HEIGHT / 2.0;
-    auto onScreen = [&](const Globe::Vec3& v) {
-        return wxPoint2DDouble(cx + v.x * BALL_RADIUS, cy - v.y * BALL_RADIUS);
-    };
+    if (!placed_ || event.GetWheelAxis() != wxMOUSE_WHEEL_VERTICAL || event.GetWheelDelta() == 0) return;
 
+    // From where it is going, so quick turns of the wheel add up.
+    Globe::View view = roller_.target();
+    double notches = (double)event.GetWheelRotation() / event.GetWheelDelta();
+    view.radius = std::clamp(view.radius * std::pow(WHEEL_STEP, notches), zoom_.farthest, zoom_.nearest);
+    rollTo(view);
+}
+
+void MapBall::OnDoubleClick(wxMouseEvent&)
+{
+    if (placed_) rollTo(fitted());
+}
+
+void MapBall::drawBall(wxGraphicsContext* gc, const Globe::View& view, double left, double top)
+{
+    const double radius = view.radius;
+    const double cx = left + WINDOW_WIDTH / 2.0;
+    const double cy = top + WINDOW_HEIGHT / 2.0;
+
+    gc->SetPen(*wxTRANSPARENT_PEN);
+    gc->SetBrush(wxBrush(FLUID));
+    gc->DrawRectangle(left, top, WINDOW_WIDTH, WINDOW_HEIGHT);
+    gc->SetBrush(wxBrush(SEA));
+    gc->DrawEllipse(cx - radius, cy - radius, 2.0 * radius, 2.0 * radius);
+
+    // The land in one go, so where two countries meet there is no seam.
+    wxGraphicsPath land = gc->CreatePath();
+    for (const Globe::Outline& outline : Globe::landOutlines(view, window_))
+    {
+        land.MoveToPoint(at(outline.front(), left, top));
+        for (size_t i = 1; i < outline.size(); i++) land.AddLineToPoint(at(outline[i], left, top));
+        land.CloseSubpath();
+    }
+    gc->SetBrush(wxBrush(LAND));
+    gc->FillPath(land, wxWINDING_RULE);
+
+    wxGraphicsPath fields = gc->CreatePath();
+    for (const Globe::Outline& line : Globe::fieldLines(view, window_))
+    {
+        fields.MoveToPoint(at(line.front(), left, top));
+        for (size_t i = 1; i < line.size(); i++) fields.AddLineToPoint(at(line[i], left, top));
+    }
+    gc->SetPen(wxPen(RULING, 1));
+    gc->StrokePath(fields);
+
+    // Light over the left shoulder: darker the farther round from it, and
+    // a soft shine where it catches.
+    gc->SetPen(*wxTRANSPARENT_PEN);
+    wxGraphicsGradientStops shade(wxColour(0, 0, 0, 0), wxColour(0, 0, 0, 175));
+    shade.Add(wxColour(0, 0, 0, 40), 0.55f);
+    shade.Add(wxColour(0, 0, 0, 105), 0.85f);
+    gc->SetBrush(gc->CreateRadialGradientBrush(cx + LIGHT_X * radius, cy - LIGHT_Y * radius, cx, cy, radius, shade));
+    gc->DrawEllipse(cx - radius, cy - radius, 2.0 * radius, 2.0 * radius);
+
+    wxGraphicsGradientStops shine(wxColour(255, 255, 255, 46), wxColour(255, 255, 255, 0));
+    double glow = 0.45 * radius;
+    double gx = cx + LIGHT_X * radius;
+    double gy = cy - LIGHT_Y * radius;
+    gc->SetBrush(gc->CreateRadialGradientBrush(gx, gy, gx, gy, glow, shine));
+    gc->DrawEllipse(gx - glow, gy - glow, 2.0 * glow, 2.0 * glow);
+}
+
+void MapBall::drawPath(wxGraphicsContext* gc, const Globe::View& view, double left, double top)
+{
     Globe::Vec3 home = Globe::toVector(homeAt_);
     Globe::Vec3 station = Globe::toVector(stationAt_);
 
@@ -136,22 +221,23 @@ void MapBall::drawPath(wxGraphicsContext* gc, const Globe::Attitude& attitude, d
         std::vector<std::vector<wxPoint2DDouble>> runs(1);
         for (int i = 0; i <= PATH_SEGMENTS; i++)
         {
-            Globe::Vec3 v;
-            if (i <= reach)
-            {
-                v = Globe::toView(attitude, path[(size_t)i]);
-            }
-            else
+            Globe::Vec3 p = path[(size_t)i];
+            if (i > reach)
             {
                 // The last piece, part of a segment.
                 double f = reach - std::floor(reach);
                 const Globe::Vec3& a = path[(size_t)i - 1];
                 const Globe::Vec3& b = path[(size_t)i];
-                Globe::Vec3 p{a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, a.z + (b.z - a.z) * f};
-                v = Globe::toView(attitude, p);
+                p = Globe::Vec3{a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, a.z + (b.z - a.z) * f};
             }
-            if (v.z > 0.0) runs.back().push_back(onScreen(v));
-            else if (!runs.back().empty()) runs.emplace_back();
+            if (Globe::toView(view.attitude, p).z > 0.0)
+            {
+                runs.back().push_back(at(Globe::onScreen(view, window_, p), left, top));
+            }
+            else if (!runs.back().empty())
+            {
+                runs.emplace_back();
+            }
             if (i > reach) break;
         }
 
@@ -166,27 +252,19 @@ void MapBall::drawPath(wxGraphicsContext* gc, const Globe::Attitude& attitude, d
     }
 
     // Our dot and the station's red square, where they are on the near side.
-    if (haveHome_)
+    if (haveHome_ && Globe::toView(view.attitude, home).z > 0.0)
     {
-        Globe::Vec3 v = Globe::toView(attitude, home);
-        if (v.z > 0.0)
-        {
-            wxPoint2DDouble p = onScreen(v);
-            gc->SetPen(wxPen(PATH_CASING, 1));
-            gc->SetBrush(wxBrush(Colour::Glow));
-            gc->DrawEllipse(p.m_x - 2.5, p.m_y - 2.5, 5, 5);
-        }
+        wxPoint2DDouble p = at(Globe::onScreen(view, window_, home), left, top);
+        gc->SetPen(wxPen(PATH_CASING, 1));
+        gc->SetBrush(wxBrush(Colour::Glow));
+        gc->DrawEllipse(p.m_x - 2.5, p.m_y - 2.5, 5, 5);
     }
-    if (haveStation_)
+    if (haveStation_ && Globe::toView(view.attitude, station).z > 0.0)
     {
-        Globe::Vec3 v = Globe::toView(attitude, station);
-        if (v.z > 0.0)
-        {
-            wxPoint2DDouble p = onScreen(v);
-            gc->SetPen(wxPen(PATH_CASING, 1));
-            gc->SetBrush(wxBrush(Colour::Alarm));
-            gc->DrawRectangle(p.m_x - 2.5, p.m_y - 2.5, 5, 5);
-        }
+        wxPoint2DDouble p = at(Globe::onScreen(view, window_, station), left, top);
+        gc->SetPen(wxPen(PATH_CASING, 1));
+        gc->SetBrush(wxBrush(Colour::Alarm));
+        gc->DrawRectangle(p.m_x - 2.5, p.m_y - 2.5, 5, 5);
     }
 }
 
@@ -194,15 +272,7 @@ void MapBall::paint(wxGraphicsContext* gc, const wxSize&)
 {
     const double left = BEZEL;
     const double top = BEZEL;
-    Globe::Attitude attitude = roller_.attitude();
-
-    if (ballStale_ || !ball_.IsOk())
-    {
-        Globe::paintBall(attitude, window_, WINDOW_WIDTH, WINDOW_HEIGHT, rgb_);
-        wxImage image(WINDOW_WIDTH, WINDOW_HEIGHT, rgb_.data(), true);
-        ball_ = wxBitmap(image);
-        ballStale_ = false;
-    }
+    Globe::View view = roller_.view();
 
     // A recessed window in the plate, the ball under it.
     gc->SetPen(wxPen(Colour::PlateEdge, 1));
@@ -211,8 +281,17 @@ void MapBall::paint(wxGraphicsContext* gc, const wxSize&)
 
     gc->PushState();
     gc->Clip(left, top, WINDOW_WIDTH, WINDOW_HEIGHT);
-    gc->DrawBitmap(ball_, left, top, WINDOW_WIDTH, WINDOW_HEIGHT);
-    if (placed_) drawPath(gc, attitude, left, top);
+    if (placed_)
+    {
+        drawBall(gc, view, left, top);
+        drawPath(gc, view, left, top);
+    }
+    else
+    {
+        gc->SetPen(*wxTRANSPARENT_PEN);
+        gc->SetBrush(wxBrush(FLUID));
+        gc->DrawRectangle(left, top, WINDOW_WIDTH, WINDOW_HEIGHT);
+    }
 
     // The glass over it: a sheen across the top, and the fluid's edge
     // darkening into the frame top and bottom.

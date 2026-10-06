@@ -6,19 +6,19 @@
 //                  and Transmitting lamps.
 //
 // Given our grid square and a station's, it rolls to show the path between
-// them and eases to a stop, the path curling out from our dot to the
-// station's red square, with the square, the distance and the bearing
-// under the window. A station whose square is not known leaves the ball
-// where it is. The sums are in Globe.h.
+// them as close as it can and eases to a stop, the path curling out from
+// our dot to the station's red square, with the square, the distance and
+// the bearing under the window. A station whose square is not known leaves
+// the ball where it is. The mouse wheel over it zooms in and out; a double
+// click fits the path again. It is all drawn as outlines, so it is sharp at
+// any size. The sums are in Globe.h.
 //=========================================================================
 
 #ifndef GUI_GLISSANDO__MAP_BALL_H
 #define GUI_GLISSANDO__MAP_BALL_H
 
 #include <string>
-#include <vector>
 
-#include <wx/bitmap.h>
 #include <wx/timer.h>
 
 #include "ChaoticaControls.h"
@@ -39,9 +39,18 @@ protected:
 
 private:
     void OnTimer(wxTimerEvent& event);
-    void drawPath(wxGraphicsContext* gc, const Globe::Attitude& attitude, double left, double top);
+    void OnMouseWheel(wxMouseEvent& event);
+    void OnDoubleClick(wxMouseEvent& event);
+
+    // The view that shows what we have best: the path, or one end of it.
+    Globe::View fitted() const;
+    void rollTo(const Globe::View& view);
+
+    void drawBall(wxGraphicsContext* gc, const Globe::View& view, double left, double top);
+    void drawPath(wxGraphicsContext* gc, const Globe::View& view, double left, double top);
 
     Globe::Window window_;
+    Globe::Zoom zoom_;
     Globe::Roller roller_;
     bool placed_;                   // the ball has been put somewhere
 
@@ -56,10 +65,6 @@ private:
 
     wxTimer timer_;
     long long lastTickMs_;
-
-    std::vector<uint8_t> rgb_;
-    wxBitmap ball_;
-    bool ballStale_;
 };
 
 #endif // GUI_GLISSANDO__MAP_BALL_H

@@ -2,10 +2,11 @@
 // Name:            Globe.h
 // Purpose:         The sums behind the console's map ball: where a
 //                  Maidenhead locator is, how far and which way, which way
-//                  up the ball shows a path best, how it rolls there, and
-//                  its land and sea pixel by pixel.
+//                  up and how close the ball shows a path best, how it rolls
+//                  there, and the outlines of its land and grid as the
+//                  window shows them.
 //
-// Nothing here depends on wxWidgets: MapBall paints what this works out.
+// Nothing here depends on wxWidgets: MapBall draws what this works out.
 //
 // Earth coordinates are unit vectors with x through 0 N 0 E, y through
 // 0 N 90 E and z through the north pole. A view looks down on the ball with
@@ -16,7 +17,6 @@
 #ifndef GUI_GLISSANDO__GLOBE_H
 #define GUI_GLISSANDO__GLOBE_H
 
-#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -77,42 +77,80 @@ double angleBetween(const Attitude& a, const Attitude& b);
 // points, a first.
 std::vector<Vec3> greatCircle(const Vec3& a, const Vec3& b, int segments);
 
-// The window the ball is seen through and the ball under it, in pixels: the
-// ball is centred in the window.
+// The window the ball is seen through, in pixels. The ball is centred in
+// it.
 struct Window
 {
     double width = 416.0;
     double height = 104.0;
+};
+
+// How the ball is seen: which way it is turned, and how big it is, its
+// radius in pixels. The bigger, the closer the view.
+struct View
+{
+    Attitude attitude;
     double radius = 245.0;
 };
 
-// The attitude that best shows the path from home to a station. The ball
-// centres a little to the equator side of the path's midpoint, so the path
-// curls over the ball rather than running straight through the middle,
-// and turns from north up only as far as it has to show as much of the
-// path as can be shown in the window.
-Attitude framePath(const LatLon& home, const LatLon& station, const Window& window);
+// How close the ball comes: the radius when it is showing a path, at most
+// nearest (closer than that the outlines run out of detail) and at least
+// farthest; and when it is showing one place, standard.
+struct Zoom
+{
+    double nearest = 1200.0;
+    double farthest = 50.0;
+    double standard = 245.0;
+};
 
-// How many of the path's points the window shows with the ball at attitude.
-int pointsInView(const Attitude& attitude, const std::vector<Vec3>& path, const Window& window);
+// A point in the window, in pixels from its top left corner, and the point
+// of the earth a view puts there (view z positive on the near side).
+struct Point
+{
+    double x = 0.0;
+    double y = 0.0;
+};
+Point onScreen(const View& view, const Window& window, const Vec3& earth);
 
-// A ball floating in something thick: it rolls towards the attitude it is
-// sent to and eases to a stop there over about two seconds, without
-// overshooting.
+// The view that best shows the path from home to a station: as close as
+// shows all of it, north up if that is nearly as close as any turn of the
+// picture, else turned. The ball centres a little to the equator side of
+// the path's midpoint, so the path curls over the ball rather than running
+// straight through the middle.
+View framePath(const LatLon& home, const LatLon& station, const Window& window, const Zoom& zoom);
+
+// The attitude that best shows the path at a given radius: north up if
+// that shows the whole path, or as much of it as any turn does; otherwise
+// the smallest turn, either way, that shows the most.
+Attitude framePathAt(const LatLon& home, const LatLon& station, const Window& window, double radius);
+
+// How many of the path's points the window shows.
+int pointsInView(const View& view, const std::vector<Vec3>& path, const Window& window);
+
+// A ball floating in something thick: it rolls towards the view it is sent
+// to and eases to a stop there over about two seconds, without
+// overshooting. Sent far, it backs away as it starts, so the roll can be
+// followed, and comes in again as it arrives.
 class Roller
 {
 public:
     Roller();
 
+    // How wide, in pixels from the window's middle to its side, the ball
+    // backs off to keep what is left of a long roll in sight. Zero, the
+    // start, does not back off.
+    void setBackOff(double halfWidth) { backOff_ = halfWidth; }
+
     // Straight there, no rolling.
-    void jump(const Attitude& attitude);
-    void rollTo(const Attitude& attitude);
+    void jump(const View& view);
+    void rollTo(const View& view);
 
     // Advances the roll by seconds. Returns whether the ball is still
     // moving afterwards.
     bool step(double seconds);
 
-    Attitude attitude() const;
+    View view() const;
+    View target() const;
     bool moving() const { return moving_; }
 
 private:
@@ -128,18 +166,27 @@ private:
 
     Quaternion current_;
     Quaternion target_;
-    Vec3 spin_;         // radians a second, about view axes
+    Vec3 spin_;             // radians a second, about view axes
+    double logRadius_;
+    double targetLogRadius_;
+    double zoomSpeed_;      // of logRadius_, a second
+    double backOff_;
     bool moving_;
 };
 
-// Paints the window's picture into rgb, width * height pixels of three
-// bytes, top row first: the ball at attitude, lit from the upper left,
-// with its land, its sea and the Maidenhead fields ruled on it, floating in
-// the dark around it.
-void paintBall(const Attitude& attitude, const Window& window, int width, int height,
-               std::vector<uint8_t>& rgb);
+// A run of points in the window, in order.
+using Outline = std::vector<Point>;
 
-// Whether the land mask has land at a position, for tests.
+// The land the window shows, as outlines to fill together by the non-zero
+// winding rule: a hole runs the other way round from the land around it.
+// Where land goes round the back of the ball its outline follows the rim.
+std::vector<Outline> landOutlines(const View& view, const Window& window);
+
+// The lines of the Maidenhead fields, 20 degrees of longitude by 10 of
+// latitude, on the near side of the ball, as lines to stroke.
+std::vector<Outline> fieldLines(const View& view, const Window& window);
+
+// Whether the outlines have land at a position.
 bool isLand(const LatLon& position);
 
 } // namespace Globe
