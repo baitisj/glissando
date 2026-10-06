@@ -3,6 +3,7 @@
 // Purpose:         Checks the sums behind the console's map ball.
 //=========================================================================
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -355,6 +356,183 @@ void testRolling()
     CHECK(near(lengthRight, 1.0, 1e-9));
 }
 
+// How fast the ball turns over the next sixtieth of a second, in radians a
+// second.
+double spinOver(Roller& roller)
+{
+    Attitude before = roller.view().attitude;
+    roller.step(1.0 / 60.0);
+    return angleBetween(before, roller.view().attitude) * 60.0;
+}
+
+// Drags the ball from one point to another over a fifth of a second and
+// lets go.
+void flick(Roller& roller, double fromX, double fromY, double toX, double toY)
+{
+    CHECK(roller.grab(fromX, fromY));
+    for (int i = 1; i <= 12; i++)
+    {
+        roller.dragTo(fromX + (toX - fromX) * i / 12.0, fromY + (toY - fromY) * i / 12.0);
+        roller.step(1.0 / 60.0);
+    }
+    roller.letGo();
+}
+
+void testSpinning()
+{
+    LatLon cn87 = centreOf("CN87");
+    LatLon jo62 = centreOf("JO62");
+
+    // The magnet runs from the southern end of the path to the northern,
+    // whichever end is home.
+    Vec3 magnet = magnetFor(cn87, jo62);
+    Vec3 chord{toVector(jo62).x - toVector(cn87).x, toVector(jo62).y - toVector(cn87).y,
+               toVector(jo62).z - toVector(cn87).z};
+    double chordLength = std::sqrt(chord.x * chord.x + chord.y * chord.y + chord.z * chord.z);
+    CHECK(near(magnet.x * magnet.x + magnet.y * magnet.y + magnet.z * magnet.z, 1.0, 1e-9));
+    CHECK(near((magnet.x * chord.x + magnet.y * chord.y + magnet.z * chord.z) / chordLength, 1.0, 1e-9));
+    Vec3 swapped = magnetFor(jo62, cn87);
+    CHECK(near(swapped.x, magnet.x, 1e-12) && near(swapped.y, magnet.y, 1e-12) && near(swapped.z, magnet.z, 1e-12));
+
+    View home{lookingAt(toVector(cn87)), 245.0};
+
+    // Free, a flick sets it spinning, and it keeps going for a while,
+    // slowing, then stops: somewhere else, as nothing draws it back.
+    Roller roller;
+    roller.setBackOff(208.0);
+    roller.jump(home);
+    CHECK(roller.fieldOn());
+    roller.coast();
+    CHECK(!roller.fieldOn());
+    flick(roller, -100.0, 0.0, 100.0, 0.0);
+    double first = spinOver(roller);
+    CHECK(first > 2.0);
+    double travelled = 0.0;
+    double t = 0.0;
+    double atTwoSeconds = 0.0;
+    while (roller.moving() && t < 30.0)
+    {
+        Attitude before = roller.view().attitude;
+        roller.step(1.0 / 60.0);
+        t += 1.0 / 60.0;
+        travelled += angleBetween(before, roller.view().attitude);
+        if (near(t, 2.0, 0.009)) atTwoSeconds = angleBetween(before, roller.view().attitude) * 60.0;
+    }
+    CHECK(atTwoSeconds > 0.3 * first && atTwoSeconds < first);
+    CHECK(t > 5.0 && t < 20.0);
+    CHECK(travelled > 3.0);
+    CHECK(!roller.moving());
+    CHECK(near(roller.view().radius, 245.0, 1e-9));
+
+    // A zoom while it coasts leaves it coasting.
+    flick(roller, 0.0, -40.0, 0.0, 40.0);
+    roller.zoomTo(400.0);
+    CHECK(!roller.fieldOn());
+    for (int i = 0; i < 60; i++) roller.step(1.0 / 60.0);
+    CHECK(spinOver(roller) > 0.5);
+
+    // Held, a spinning ball stops almost at once, with the point pressed
+    // on still under the pointer.
+    flick(roller, -100.0, 0.0, 100.0, 0.0);
+    CHECK(spinOver(roller) > 2.0);
+    CHECK(roller.grab(30.0, 10.0));
+    t = 0.0;
+    while (spinOver(roller) > 0.05 && t < 2.0) t += 1.0 / 60.0;
+    CHECK(t < 0.4);
+    for (int i = 0; i < 60; i++) roller.step(1.0 / 60.0);
+    CHECK(roller.moving());     // held still counts
+
+    // Dragged, the point pressed on follows the pointer.
+    roller.letGo();
+    View still = roller.view();
+    roller.jump(still);
+    roller.coast();
+    Window window;
+    double r = still.radius;
+    Vec3 under{20.0 / r, 10.0 / r, std::sqrt(1.0 - (400.0 + 100.0) / (r * r))};
+    Vec3 grabbed = toEarth(still.attitude, under);
+    CHECK(roller.grab(20.0, 10.0));
+    roller.dragTo(-60.0, -25.0);
+    for (int i = 0; i < 60; i++) roller.step(1.0 / 60.0);
+    Point seen = onScreen(roller.view(), window, grabbed);
+    CHECK(near(seen.x, window.width / 2.0 - 60.0, 1.0));
+    CHECK(near(seen.y, window.height / 2.0 + 25.0, 1.0));
+    roller.letGo();
+
+    // Off the ball there is nothing to hold.
+    roller.jump(View{home.attitude, 50.0});
+    CHECK(!roller.grab(150.0, 0.0));
+    CHECK(!roller.held());
+    CHECK(roller.grab(20.0, 0.0));
+    roller.letGo();
+
+    // Spinning, then sent to a path: the field brakes it far harder than
+    // the fluid alone, and it tumbles into the path's view and settles
+    // there.
+    View path = framePath(cn87, jo62, window, Zoom());
+    Roller coasting;
+    Roller drawn;
+    for (Roller* each : {&coasting, &drawn})
+    {
+        each->setBackOff(208.0);
+        each->jump(home);
+        each->coast();
+        flick(*each, -100.0, 0.0, 100.0, 0.0);
+    }
+    drawn.rollTo(path, magnet);
+    double coasted = 0.0;
+    double tumbled = 0.0;
+    t = 0.0;
+    while ((coasting.moving() || drawn.moving()) && t < 30.0)
+    {
+        for (Roller* each : {&coasting, &drawn})
+        {
+            Attitude before = each->view().attitude;
+            each->step(1.0 / 60.0);
+            (each == &drawn ? tumbled : coasted) += angleBetween(before, each->view().attitude);
+        }
+        t += 1.0 / 60.0;
+        if (!drawn.moving() && tumbled > 0.0)
+        {
+            CHECK(t < 5.0);
+            tumbled = -tumbled;     // settled: stop counting
+        }
+    }
+    CHECK(!drawn.moving());
+    CHECK(-tumbled < coasted / 3.0);
+    CHECK(near(angleBetween(drawn.view().attitude, path.attitude), 0.0, 1e-6));
+    CHECK(near(drawn.view().radius, path.radius, 1e-6));
+
+    // However it was spinning, and wherever it is sent, it gets there.
+    unsigned seed = 7;
+    auto random = [&seed]() {
+        seed = seed * 1103515245u + 12345u;
+        return ((seed >> 8) & 0xFFFF) / 32768.0 - 1.0;
+    };
+    double slowest = 0.0;
+    for (int k = 0; k < 200; k++)
+    {
+        LatLon a{random() * 80.0, random() * 180.0};
+        LatLon b{random() * 80.0, random() * 180.0};
+        View to = framePath(a, b, window, Zoom());
+        Roller each;
+        each.setBackOff(208.0);
+        each.jump(View{lookingAt(Vec3{random(), random(), random()}, random() * 3.0), 245.0});
+        each.coast();
+        flick(each, 0.0, 0.0, random() * 200.0, random() * 50.0);
+        each.rollTo(to, magnetFor(a, b));
+        t = 0.0;
+        while (each.moving() && t < 10.0)
+        {
+            each.step(1.0 / 60.0);
+            t += 1.0 / 60.0;
+        }
+        slowest = std::max(slowest, t);
+        CHECK(near(angleBetween(each.view().attitude, to.attitude), 0.0, 1e-6));
+    }
+    CHECK(slowest < 6.0);
+}
+
 } // namespace
 
 int main()
@@ -367,6 +545,7 @@ int main()
     testGreatCircle();
     testFraming();
     testRolling();
+    testSpinning();
     testOutlines();
 
     if (failures > 0)

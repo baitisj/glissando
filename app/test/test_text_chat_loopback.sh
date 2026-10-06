@@ -32,6 +32,12 @@ FREEDV_TEXT_CHAT_FREQUENCY_HZ="${FREEDV_TEXT_CHAT_FREQUENCY_HZ:-14080000}"
 STATION_A_CALLSIGN="${STATION_A_CALLSIGN:-TEST1/P}"
 STATION_B_CALLSIGN="${STATION_B_CALLSIGN:-TEST2/P}"
 
+# Grid squares, so the map ball has a home on each station and the stations
+# send each other their locators. Western Washington and Utah by default: far
+# enough apart for a path to show. Set one empty to see a station without.
+STATION_A_GRID="${STATION_A_GRID-CN87}"
+STATION_B_GRID="${STATION_B_GRID-DN40}"
+
 # A's transmit audio lands in the sink that B listens to, and the other way
 # round. The monitor of a null sink already carries whatever was played to it,
 # so no module-loopback is needed.
@@ -75,11 +81,12 @@ waitForCableUp () {
 # the same text_messaging.db and each would show the other's sent messages as
 # its own history.
 writeStationConfig () {
-    local dir=$1 callsign=$2 rxin=$3 txout=$4
+    local dir=$1 callsign=$2 rxin=$3 txout=$4 grid=$5
     mkdir -p "$dir"
     sed -e "s|@FREEDV_RADIO_TO_COMPUTER_DEVICE@|$rxin|g" \
         -e "s|@FREEDV_COMPUTER_TO_RADIO_DEVICE@|$txout|g" \
         -e "s|@FREEDV_CALLSIGN@|$callsign|g" \
+        -e "s|@FREEDV_GRID_SQUARE@|$grid|g" \
         -e "s|@FREEDV_FREQUENCY_HZ@|$FREEDV_TEXT_CHAT_FREQUENCY_HZ|g" \
         "$SCRIPTPATH/freedv-text-chat-station.conf.tmpl" > "$dir/freedv.conf"
 }
@@ -124,9 +131,9 @@ doUp () {
     done
 
     writeStationConfig "$WORKDIR/stationA" "$STATION_A_CALLSIGN" \
-        "$CABLE_B_TO_A.monitor" "$CABLE_A_TO_B"
+        "$CABLE_B_TO_A.monitor" "$CABLE_A_TO_B" "$STATION_A_GRID"
     writeStationConfig "$WORKDIR/stationB" "$STATION_B_CALLSIGN" \
-        "$CABLE_A_TO_B.monitor" "$CABLE_B_TO_A"
+        "$CABLE_A_TO_B.monitor" "$CABLE_B_TO_A" "$STATION_B_GRID"
 
     echo "Starting stations..."
     startStation "A ($STATION_A_CALLSIGN)" "$WORKDIR/stationA"

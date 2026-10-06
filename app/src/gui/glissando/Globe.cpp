@@ -22,11 +22,31 @@ constexpr double PI = 3.14159265358979323846;
 constexpr double DEGREES = 180.0 / PI;
 constexpr double EARTH_RADIUS_KM = 6371.0088;
 
-// How the ball moves through its fluid: a spring towards where it is sent,
-// damped a little past critical so it never overshoots, and stiff enough to
-// settle in about two seconds.
-constexpr double SPRING_RATE = 5.0;     // radians a second
-constexpr double DAMPING_RATIO = 1.15;
+// How the ball moves through its fluid. Taking its weight as one, a pull is
+// the spin it adds a second for each radian it has to turn, and a brake the
+// share of the spin it takes away a second.
+//
+// Coasting, the fluid takes a tenth of its spin a third of a second, and
+// takes 0.08 radians a second off it every second besides, so that at a
+// crawl it is too thick to turn in at all.
+constexpr double FLUID_DRAG = 0.3;
+constexpr double FLUID_STICK = 0.08;
+// The field: the magnet's pull towards lining up, the view's middle floating
+// up to the window, a little pull straight towards the view so nothing can
+// balance it the wrong way round, and the braking, all coming on over a
+// third of a second. From still it settles in about two seconds, barely
+// swinging past; spinning, in about three.
+constexpr double MAGNET_PULL = 12.0;
+constexpr double FLOAT_PULL = 10.0;
+constexpr double STRAIGHT_PULL = 3.0;
+constexpr double FIELD_BRAKE = 7.0;
+constexpr double FIELD_RISE_SECONDS = 0.35;
+// Held, a stiff spring from the point held to the pointer, braked hard.
+constexpr double HOLD_PULL = 600.0;
+constexpr double HOLD_BRAKE = 49.0;
+// The zoom's spring, a little past critical.
+constexpr double ZOOM_RATE = 5.0;   // radians a second
+constexpr double ZOOM_DAMPING_RATIO = 1.15;
 constexpr double STEP_SECONDS = 1.0 / 240.0;
 constexpr double SETTLED_RADIANS = 0.002;    // a fifth of a pixel at the edge of the ball
 constexpr double SETTLED_SPIN = 0.005;
@@ -460,11 +480,24 @@ View framePath(const LatLon& home, const LatLon& station, const Window& window, 
     return View{framePathAt(home, station, window, zoom.farthest), zoom.farthest};
 }
 
+Vec3 magnetFor(const LatLon& home, const LatLon& station)
+{
+    bool homeNorth = home.lat > station.lat;
+    Vec3 south = toVector(homeNorth ? station : home);
+    Vec3 north = toVector(homeNorth ? home : station);
+    return normalized(plus(north, scaled(south, -1.0)));
+}
+
 Roller::Roller()
     : logRadius_(std::log(View().radius))
     , targetLogRadius_(logRadius_)
     , zoomSpeed_(0.0)
     , backOff_(0.0)
+    , fieldOn_(false)
+    , field_(0.0)
+    , held_(false)
+    , pointerX_(0.0)
+    , pointerY_(0.0)
     , moving_(false)
 {
     // empty
@@ -531,14 +564,72 @@ void Roller::jump(const View& view)
     logRadius_ = std::log(view.radius);
     targetLogRadius_ = logRadius_;
     zoomSpeed_ = 0.0;
-    moving_ = false;
+    fieldOn_ = true;
+    field_ = 1.0;
+    magnet_ = view.attitude.up;
+    floats_ = view.attitude.out;
+    moving_ = held_;
 }
 
 void Roller::rollTo(const View& view)
 {
+    rollTo(view, view.attitude.up);
+}
+
+void Roller::rollTo(const View& view, const Vec3& magnet)
+{
     target_ = fromAttitude(view.attitude);
     targetLogRadius_ = std::log(view.radius);
+    if (!fieldOn_) field_ = 0.0;
+    fieldOn_ = true;
+    magnet_ = length(magnet) > 1e-9 ? normalized(magnet) : view.attitude.up;
+    floats_ = view.attitude.out;
     moving_ = true;
+}
+
+void Roller::coast()
+{
+    fieldOn_ = false;
+    field_ = 0.0;
+    moving_ = true;
+}
+
+void Roller::zoomTo(double radius)
+{
+    targetLogRadius_ = std::log(radius);
+    moving_ = true;
+}
+
+Vec3 Roller::underPointer(double radius) const
+{
+    double x = pointerX_ / radius;
+    double y = pointerY_ / radius;
+    double off = x * x + y * y;
+    if (off >= 1.0) return Vec3{x / std::sqrt(off), y / std::sqrt(off), 0.0};
+    return Vec3{x, y, std::sqrt(1.0 - off)};
+}
+
+bool Roller::grab(double x, double y)
+{
+    double radius = std::exp(logRadius_);
+    if (x * x + y * y >= radius * radius) return false;
+    pointerX_ = x;
+    pointerY_ = y;
+    grabbed_ = toEarth(toAttitude(current_), underPointer(radius));
+    held_ = true;
+    moving_ = true;
+    return true;
+}
+
+void Roller::dragTo(double x, double y)
+{
+    pointerX_ = x;
+    pointerY_ = y;
+}
+
+void Roller::letGo()
+{
+    held_ = false;
 }
 
 bool Roller::step(double seconds)
@@ -554,13 +645,15 @@ bool Roller::step(double seconds)
         return r;
     };
 
-    const double stiffness = SPRING_RATE * SPRING_RATE;
-    const double damping = 2.0 * DAMPING_RATIO * SPRING_RATE;
+    const Vec3 TOWARDS_WINDOW{0.0, 0.0, 1.0};
+    const double zoomStiffness = ZOOM_RATE * ZOOM_RATE;
+    const double zoomDamping = 2.0 * ZOOM_DAMPING_RATIO * ZOOM_RATE;
     Vec3 error;
     while (seconds > 0.0)
     {
         double dt = std::min(seconds, STEP_SECONDS);
         seconds -= dt;
+        Attitude now = toAttitude(current_);
 
         // What is left to turn, as a turn about the view's axes: the
         // target is that turn applied after where the ball is now.
@@ -571,7 +664,37 @@ bool Roller::step(double seconds)
         double sinHalf = std::sin(half);
         error = sinHalf > 1e-12 ? scaled(Vec3{e.x, e.y, e.z}, 2.0 * half / sinHalf) : Vec3{};
 
-        spin_ = plus(spin_, scaled(plus(scaled(error, stiffness), scaled(spin_, -damping)), dt));
+        // Each pull turns the ball about the axis that brings a point of it
+        // round towards where it is pulled, harder the more nearly at right
+        // angles they are.
+        Vec3 torque;
+        double brake = FLUID_DRAG;
+        if (fieldOn_)
+        {
+            field_ = std::min(1.0, field_ + dt / FIELD_RISE_SECONDS);
+            Attitude goal = toAttitude(target_);
+            Vec3 pulls = scaled(cross(toView(now, magnet_), toView(goal, magnet_)), MAGNET_PULL);
+            pulls = plus(pulls, scaled(cross(toView(now, floats_), TOWARDS_WINDOW), FLOAT_PULL));
+            pulls = plus(pulls, scaled(error, STRAIGHT_PULL));
+            torque = plus(torque, scaled(pulls, field_));
+            brake += FIELD_BRAKE * field_;
+        }
+        if (held_)
+        {
+            Vec3 pointer = underPointer(std::exp(logRadius_));
+            torque = plus(torque, scaled(cross(toView(now, grabbed_), pointer), HOLD_PULL));
+            brake += HOLD_BRAKE;
+        }
+
+        // The braking taken as it will be at the end of the step, so a hard
+        // brake cannot turn the ball back the other way.
+        spin_ = scaled(plus(spin_, scaled(torque, dt)), 1.0 / (1.0 + brake * dt));
+        if (!fieldOn_ && !held_)
+        {
+            // Too slow to stir the fluid: it holds still.
+            double speed = length(spin_);
+            spin_ = speed > FLUID_STICK * dt ? scaled(spin_, 1.0 - FLUID_STICK * dt / speed) : Vec3{};
+        }
 
         Vec3 turn = scaled(spin_, dt);
         double angle = length(turn);
@@ -586,20 +709,31 @@ bool Roller::step(double seconds)
             current_ = Quaternion{current_.w / norm, current_.x / norm, current_.y / norm, current_.z / norm};
         }
 
-        // The zoom goes by the same spring, held back while there is far to
-        // roll: no closer than shows the rest of the roll across backOff_.
+        // The zoom goes by a spring of its own, held back while the field
+        // has far to roll the ball: no closer than shows the rest of the
+        // roll across backOff_.
         double goal = targetLogRadius_;
         double left = std::min(length(error), PI / 2.0);
-        if (backOff_ > 0.0 && left > 1e-6) goal = std::min(goal, std::log(backOff_ / std::sin(left)));
-        zoomSpeed_ += (stiffness * (goal - logRadius_) - damping * zoomSpeed_) * dt;
+        if (fieldOn_ && !held_ && backOff_ > 0.0 && left > 1e-6)
+        {
+            goal = std::min(goal, std::log(backOff_ / std::sin(left)));
+        }
+        zoomSpeed_ += (zoomStiffness * (goal - logRadius_) - zoomDamping * zoomSpeed_) * dt;
         logRadius_ += zoomSpeed_ * dt;
     }
 
-    if (length(error) < SETTLED_RADIANS && length(spin_) < SETTLED_SPIN &&
-        std::fabs(targetLogRadius_ - logRadius_) < SETTLED_RADIANS && std::fabs(zoomSpeed_) < SETTLED_SPIN)
+    bool zoomed = std::fabs(targetLogRadius_ - logRadius_) < SETTLED_RADIANS && std::fabs(zoomSpeed_) < SETTLED_SPIN;
+    if (held_ || !zoomed) return moving_;
+    if (fieldOn_ && field_ >= 1.0 && length(error) < SETTLED_RADIANS && length(spin_) < SETTLED_SPIN)
     {
         current_ = target_;
         spin_ = Vec3{};
+        logRadius_ = targetLogRadius_;
+        zoomSpeed_ = 0.0;
+        moving_ = false;
+    }
+    else if (!fieldOn_ && length(spin_) == 0.0)
+    {
         logRadius_ = targetLogRadius_;
         zoomSpeed_ = 0.0;
         moving_ = false;
@@ -614,7 +748,7 @@ View Roller::view() const
 
 View Roller::target() const
 {
-    return View{toAttitude(target_), std::exp(targetLogRadius_)};
+    return View{toAttitude(fieldOn_ ? target_ : current_), std::exp(targetLogRadius_)};
 }
 
 std::vector<Outline> landOutlines(const View& view, const Window& window)
