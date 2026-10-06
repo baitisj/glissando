@@ -34,6 +34,10 @@ constexpr int PATH_SEGMENTS = 96;
 // off.
 constexpr double WHEEL_STEP = 1.25;
 
+// Where the ball looks before it knows any grid square: the North Atlantic,
+// the Americas to one side and Europe and Africa to the other.
+const Globe::LatLon NOWHERE_YET{30.0, -30.0};
+
 // Silver land on a dark sea in darker fluid, as the rest of the console is
 // silver on black, with the Maidenhead fields ruled faintly over both.
 const wxColour FLUID(14, 13, 12);
@@ -75,50 +79,71 @@ MapBall::MapBall(wxWindow* parent)
     window_.width = WINDOW_WIDTH;
     window_.height = WINDOW_HEIGHT;
     roller_.setBackOff(WINDOW_WIDTH / 2.0);
+    roller_.jump(fitted());
+    caption_ = _("Set your grid square in Preferences, Station");
     SetToolTip(_("Where the last station heard or sent to is, if it has sent its grid square: "
-                 "the square, how far it is from yours and which way. Turn the mouse wheel "
-                 "over it to zoom; double-click to fit the path again. Set your own square in "
-                 "Preferences, Station."));
+                 "the square, how far it is from yours and which way. Drag the ball to spin it "
+                 "and hold it to stop it; turn the mouse wheel over it to zoom; double-click to "
+                 "fit the path again. Set your own square in Preferences, Station."));
+    SetCursor(wxCursor(wxCURSOR_HAND));
     Bind(wxEVT_TIMER, &MapBall::OnTimer, this);
     Bind(wxEVT_MOUSEWHEEL, &MapBall::OnMouseWheel, this);
     Bind(wxEVT_LEFT_DCLICK, &MapBall::OnDoubleClick, this);
+    Bind(wxEVT_LEFT_DOWN, &MapBall::OnMouseDown, this);
+    Bind(wxEVT_LEFT_UP, &MapBall::OnMouseUp, this);
+    Bind(wxEVT_MOTION, &MapBall::OnMouseMove, this);
+    Bind(wxEVT_MOUSE_CAPTURE_LOST, &MapBall::OnCaptureLost, this);
 }
 
 Globe::View MapBall::fitted() const
 {
-    if (haveHome_ && haveStation_) return Globe::framePath(homeAt_, stationAt_, window_, zoom_);
+    if (showsPath()) return Globe::framePath(homeAt_, stationAt_, window_, zoom_);
     Globe::View view;
     view.radius = zoom_.standard;
-    view.attitude = Globe::lookingAt(Globe::toVector(haveStation_ ? stationAt_ : homeAt_));
+    view.attitude = Globe::lookingAt(Globe::toVector(haveStation_ ? stationAt_ : haveHome_ ? homeAt_ : NOWHERE_YET));
     return view;
+}
+
+Globe::Vec3 MapBall::magnet() const
+{
+    if (showsPath()) return Globe::magnetFor(homeAt_, stationAt_);
+    return fitted().attitude.up;
 }
 
 void MapBall::rollTo(const Globe::View& view)
 {
-    roller_.rollTo(view);
+    roller_.rollTo(view, magnet());
+    wake();
+}
+
+void MapBall::wake()
+{
+    if (timer_.IsRunning()) return;
     lastTickMs_ = wxGetLocalTimeMillis().GetValue();
-    if (!timer_.IsRunning()) timer_.Start(FRAME_MILLISECONDS);
+    timer_.Start(FRAME_MILLISECONDS);
+}
+
+void MapBall::pointer(const wxMouseEvent& event, double& x, double& y) const
+{
+    x = event.GetX() - (BEZEL + WINDOW_WIDTH / 2.0);
+    y = (BEZEL + WINDOW_HEIGHT / 2.0) - event.GetY();
 }
 
 void MapBall::setLocators(const std::string& home, const std::string& station)
 {
-    if (placed_ && home == home_ && station == station_) return;
+    if (home == home_ && station == station_) return;
     bool stationChanged = station != station_;
     home_ = home;
     station_ = station;
     haveHome_ = Globe::locatorCentre(home, homeAt_);
     haveStation_ = Globe::locatorCentre(station, stationAt_);
-    caption_ = wxString::FromUTF8(Globe::caption(home, station).c_str());
+    caption_ = haveHome_ || haveStation_ ? wxString::FromUTF8(Globe::caption(home, station).c_str())
+                                         : _("Set your grid square in Preferences, Station");
 
-    if (!haveHome_ && !haveStation_)
+    if (!placed_ && (haveHome_ || haveStation_))
     {
-        Refresh();
-        return;
-    }
-
-    if (!placed_)
-    {
-        // Where it starts: no rolling to get there.
+        // The first square it is given, it starts at: no rolling to get
+        // there.
         roller_.jump(fitted());
         placed_ = true;
         pathDrawn_ = 1.0;
@@ -145,18 +170,49 @@ void MapBall::OnTimer(wxTimerEvent&)
 
 void MapBall::OnMouseWheel(wxMouseEvent& event)
 {
-    if (!placed_ || event.GetWheelAxis() != wxMOUSE_WHEEL_VERTICAL || event.GetWheelDelta() == 0) return;
+    if (event.GetWheelAxis() != wxMOUSE_WHEEL_VERTICAL || event.GetWheelDelta() == 0) return;
 
     // From where it is going, so quick turns of the wheel add up.
-    Globe::View view = roller_.target();
     double notches = (double)event.GetWheelRotation() / event.GetWheelDelta();
-    view.radius = std::clamp(view.radius * std::pow(WHEEL_STEP, notches), zoom_.farthest, zoom_.nearest);
-    rollTo(view);
+    roller_.zoomTo(std::clamp(roller_.target().radius * std::pow(WHEEL_STEP, notches), zoom_.farthest, zoom_.nearest));
+    wake();
 }
 
 void MapBall::OnDoubleClick(wxMouseEvent&)
 {
-    if (placed_) rollTo(fitted());
+    rollTo(fitted());
+}
+
+void MapBall::OnMouseDown(wxMouseEvent& event)
+{
+    double x = 0.0, y = 0.0;
+    pointer(event, x, y);
+    if (std::fabs(y) > WINDOW_HEIGHT / 2.0 || !roller_.grab(x, y)) return;
+
+    // With nothing but our own square to show, nothing draws the ball
+    // back: let go, it is free to spin.
+    if (!showsPath()) roller_.coast();
+    if (!HasCapture()) CaptureMouse();
+    wake();
+}
+
+void MapBall::OnMouseUp(wxMouseEvent&)
+{
+    if (HasCapture()) ReleaseMouse();
+    roller_.letGo();
+}
+
+void MapBall::OnMouseMove(wxMouseEvent& event)
+{
+    if (!roller_.held()) return;
+    double x = 0.0, y = 0.0;
+    pointer(event, x, y);
+    roller_.dragTo(x, y);
+}
+
+void MapBall::OnCaptureLost(wxMouseCaptureLostEvent&)
+{
+    roller_.letGo();
 }
 
 void MapBall::drawBall(wxGraphicsContext* gc, const Globe::View& view, double left, double top)
@@ -281,17 +337,8 @@ void MapBall::paint(wxGraphicsContext* gc, const wxSize&)
 
     gc->PushState();
     gc->Clip(left, top, WINDOW_WIDTH, WINDOW_HEIGHT);
-    if (placed_)
-    {
-        drawBall(gc, view, left, top);
-        drawPath(gc, view, left, top);
-    }
-    else
-    {
-        gc->SetPen(*wxTRANSPARENT_PEN);
-        gc->SetBrush(wxBrush(FLUID));
-        gc->DrawRectangle(left, top, WINDOW_WIDTH, WINDOW_HEIGHT);
-    }
+    drawBall(gc, view, left, top);
+    drawPath(gc, view, left, top);
 
     // The glass over it: a sheen across the top, and the fluid's edge
     // darkening into the frame top and bottom.

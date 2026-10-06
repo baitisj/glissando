@@ -290,7 +290,18 @@ can be followed. The path curls out from our dot to the station's red square.
 The mouse wheel over the ball zooms in and out until the next station, and a
 double click fits the path again. Under the window go the station's square,
 the distance in km and the bearing from us, or our own square while there is
-no station. It is drawn as outlines, so it is sharp at any size: the
+no station; with no square of our own set, the ball shows the North Atlantic
+and asks for one.
+
+The ball is heavy and floats in something thick. Dragged, it spins, and
+while it shows only our own square it coasts on, slowing, until the fluid is
+too thick for it to turn in. Held down, it stops almost at once, the point
+pressed on staying under the pointer. With a path to show, a magnet in the
+ball, running from the path's southern end to its northern end, is pulled
+into line by a field that also brakes it, the way a magnet is braked moving
+past copper, and the side of the ball the path is on floats up towards the
+window: a spinning ball soon gives up its spin and tumbles round into the
+path's view, and a still one rolls there in about two seconds. It is drawn as outlines, so it is sharp at any size: the
 coastlines (`LandOutlines.h`) are the Natural Earth 1:110m countries, which
 are public domain, and `prototype/globe/gen_land_outlines.py` remakes them from
 that shapefile. They are coarse closer in than about a degree to 20 pixels,
@@ -402,7 +413,9 @@ The text chat loopback bench runs Glissando too:
 
     app/test/test_text_chat_loopback.sh up
 
-Press Engage in both consoles and send from either COMMS window.
+Press Engage in both consoles and send from either COMMS window. The two
+stations are in CN87 and DN40 (`STATION_A_GRID` and `STATION_B_GRID` change
+them; empty for none).
 
 ![Two stations on the loopback bench: B (right) hearing A's reply at Presto on the visi-scope, both chat windows below with the conversation both ways](images/glissando-bench.png)
 

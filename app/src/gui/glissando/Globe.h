@@ -127,10 +127,25 @@ Attitude framePathAt(const LatLon& home, const LatLon& station, const Window& wi
 // How many of the path's points the window shows.
 int pointsInView(const View& view, const std::vector<Vec3>& path, const Window& window);
 
-// A ball floating in something thick: it rolls towards the view it is sent
-// to and eases to a stop there over about two seconds, without
-// overshooting. Sent far, it backs away as it starts, so the roll can be
-// followed, and comes in again as it arrives.
+// The magnet in the ball for a path: the direction from its southern end to
+// its northern end, through the ball. Ends at the same latitude go from home
+// to the station.
+Vec3 magnetFor(const LatLon& home, const LatLon& station);
+
+// A heavy ball floating in something thick, with a magnet in it.
+//
+// Left to itself it coasts: spun, it keeps turning, the fluid slowing it
+// gently until it is too slow to stir the fluid at all and stops.
+//
+// Sent to a view, a field comes on that lines the magnet up with where the
+// view has it, and the middle of the view floats up to the window, so the
+// ball tumbles round into the view and settles there. The field also brakes
+// the magnet as it turns, as a magnet is braked moving past copper, so a
+// spinning ball soon gives up its spin. Sent far, it backs away as it rolls,
+// so the roll can be followed, and comes in again as it arrives.
+//
+// Held by the mouse, the point of the ball under the pointer follows the
+// pointer, and anything else it was doing stops almost at once.
 class Roller
 {
 public:
@@ -141,16 +156,38 @@ public:
     // start, does not back off.
     void setBackOff(double halfWidth) { backOff_ = halfWidth; }
 
-    // Straight there, no rolling.
+    // Straight there, still, the field on.
     void jump(const View& view);
-    void rollTo(const View& view);
 
-    // Advances the roll by seconds. Returns whether the ball is still
-    // moving afterwards.
+    // The field on, to draw the ball to a view; with the magnet along an
+    // earth direction, or else the view's up.
+    void rollTo(const View& view);
+    void rollTo(const View& view, const Vec3& magnet);
+
+    // The field off: the ball coasts on as it was going.
+    void coast();
+
+    // Nearer or farther, whatever it is doing.
+    void zoomTo(double radius);
+
+    // The mouse pressed at a point of the window, in pixels right and up
+    // from its middle: whether the ball is there to hold. While held, the
+    // point of the ball first pressed on follows the pointer; let go, the
+    // ball keeps the spin the pointer gave it.
+    bool grab(double x, double y);
+    void dragTo(double x, double y);
+    void letGo();
+    bool held() const { return held_; }
+
+    // Advances it by seconds. Returns whether the ball is still moving, or
+    // held, afterwards.
     bool step(double seconds);
 
     View view() const;
+    // Where it is going: the view the field draws it to, or where it is
+    // when coasting; at the radius it is zooming to.
     View target() const;
+    bool fieldOn() const { return fieldOn_; }
     bool moving() const { return moving_; }
 
 private:
@@ -164,6 +201,10 @@ private:
     static Quaternion fromAttitude(const Attitude& attitude);
     static Attitude toAttitude(const Quaternion& q);
 
+    // The point of the ball under the pointer, in view axes: on the rim
+    // when the pointer is off the ball.
+    Vec3 underPointer(double radius) const;
+
     Quaternion current_;
     Quaternion target_;
     Vec3 spin_;             // radians a second, about view axes
@@ -171,6 +212,17 @@ private:
     double targetLogRadius_;
     double zoomSpeed_;      // of logRadius_, a second
     double backOff_;
+
+    bool fieldOn_;
+    double field_;          // how far the field has come on, 0 to 1
+    Vec3 magnet_;           // in the earth
+    Vec3 floats_;           // the earth point that floats up to the window
+
+    bool held_;
+    Vec3 grabbed_;          // the point held, in the earth
+    double pointerX_;
+    double pointerY_;
+
     bool moving_;
 };
 
