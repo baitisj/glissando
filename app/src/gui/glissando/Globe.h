@@ -51,8 +51,10 @@ double bearingDegrees(const LatLon& from, const LatLon& to);
 
 // What the caption under the ball says: the station's grid square, and
 // from home its distance and bearing, as in "DN06 · 1,240 km · 104°".
-// Without a home locator, just the square; without a station, our own.
-std::string caption(const std::string& homeLocator, const std::string& stationLocator);
+// Without a home locator, just the square; without a station, our own. A
+// square kept from an earlier contact, not current, says so after it:
+// "DN06 (last contact) · 1,240 km · 104°".
+std::string caption(const std::string& homeLocator, const std::string& stationLocator, bool current = true);
 
 // Which way the ball is turned: the earth directions that point right, up
 // and out of the screen.

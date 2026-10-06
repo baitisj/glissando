@@ -174,9 +174,22 @@ void testBroadcastAndJunk()
     check(has(tokens, AnnotationToken::Role::Station, "TO ALL"), "broadcast to all");
     check(text == "CQ", "broadcast text");
 
-    std::vector<uint8_t> junk(SEGMENT, 0xFF);
+    // A type code no frame uses: 9 began a Glissando 0.3 frame.
+    std::vector<uint8_t> junk(SEGMENT, 0x99);
     std::vector<AnnotationToken> t = describeSegment(junk, 0, 0, true, nullptr);
     check(t.size() == 1 && t[0].role == AnnotationToken::Role::Unknown, "not a chat frame");
+
+    // The short locator a duet's spare voice carries.
+    Frame locator;
+    locator.type = FrameType::Locator;
+    locator.originCallsign = "TEST1/P";
+    locator.locator = "CN87";
+    std::vector<uint8_t> shortForm = FrameCodec::encodeShortLocator(locator, SIGNALLING_FRAME_BYTES);
+    shortForm.resize(SEGMENT);
+    std::vector<std::string> read = readOut(shortForm, false, text);
+    check(has(read, AnnotationToken::Role::Kind, "LOCATOR"), "short locator kind");
+    check(has(read, AnnotationToken::Role::Station, "DE TEST1/P"), "short locator callsign");
+    check(has(read, AnnotationToken::Role::Field, "LOC CN87"), "short locator square");
 }
 
 } // namespace

@@ -101,6 +101,11 @@ void testCaption()
     CHECK(caption("CN87", "CN87") == "CN87");      // same square
     CHECK(caption("", "").empty());
     CHECK(caption("bogus", "DN06") == "DN06");
+
+    // A square kept from an earlier contact says so.
+    CHECK(caption("CN87", "DN06", false) == "DN06 (last contact)" + expected.substr(4));
+    CHECK(caption("", "DN06", false) == "DN06 (last contact)");
+    CHECK(caption("CN87", "", false) == "CN87");
 }
 
 void testLand()

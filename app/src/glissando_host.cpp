@@ -266,7 +266,9 @@ GlissandoTelemetry MainFrame::glissandoTelemetry()
     // The map ball: where we are, and where the station it shows is.
     auto& protocol = TextMessaging::TextMessagingSession::instance().protocol();
     telemetry.homeLocator = protocol.myLocator();
-    telemetry.stationLocator = protocol.stationLocator(protocol.mapStation());
+    std::string mapStation = protocol.mapStation();
+    telemetry.stationLocator = protocol.stationLocator(mapStation);
+    telemetry.stationLocatorCurrent = protocol.stationLocatorIsCurrent(mapStation);
 
     int64_t frequency = wxGetApp().appConfiguration.reportingConfiguration.reportingFrequency;
     telemetry.rigFrequencyKnown = frequency > 0;

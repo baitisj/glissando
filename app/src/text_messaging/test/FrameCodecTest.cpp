@@ -704,6 +704,53 @@ void testLocatorFrame()
     CHECK(sentBytes(encoded) > 9 && sentBytes(encoded) <= 12);
 }
 
+// The short form, for a duet's spare voice, is one segment from any
+// callsign the air alphabet packs, the longest included, and reads back as
+// a locator with no destination that ends its keying.
+void testShortLocatorFrame()
+{
+    for (const char* call : {"W1AW", "VK3ABC/P", "TEST1/P", "VE3/W1ABC"})
+    {
+        Frame frame;
+        frame.type = FrameType::Locator;
+        frame.destinationCrc = FrameCodec::callsignHash("K1ABC"); // ignored
+        frame.burstsFollowing = 1;                                // ignored
+        frame.originCallsign = call;
+        frame.locator = "rr99xx";
+        std::vector<uint8_t> encoded = FrameCodec::encodeShortLocator(frame, SIGNALLING_FRAME_BYTES);
+        CHECK(encoded.size() == (size_t)SIGNALLING_FRAME_BYTES);
+        CHECK(sentBytes(encoded) <= 9);
+        CHECK((encoded[0] >> 4) == 0xF);
+
+        Frame decoded;
+        CHECK(FrameCodec::decode(encoded.data(), 9, decoded));
+        CHECK(decoded.type == FrameType::Locator);
+        CHECK(decoded.originCallsign == FrameCodec::normalizeCallsign(call));
+        CHECK(decoded.locator == "RR99");
+        CHECK(decoded.destinationCrc == 0 && decoded.burstsFollowing == 0);
+
+        // Cut short, or past the last square, it is not a frame.
+        CHECK(!FrameCodec::decode(encoded.data(), 1, decoded));
+        int at = TYPE_BITS + FrameCodec::originBits(FrameCodec::isStandardCallsign(call));
+        CHECK(getBits(encoded.data(), at, LOCATOR_BITS) == (uint64_t)FrameCodec::packGridSquare("RR99"));
+        putBits(encoded.data(), at, (1u << LOCATOR_BITS) - 1, LOCATOR_BITS);
+        CHECK(!FrameCodec::decode(encoded.data(), (int)encoded.size(), decoded));
+    }
+
+    Frame frame;
+    frame.type = FrameType::Locator;
+    frame.originCallsign = "W1AW";
+    CHECK(FrameCodec::encodeShortLocator(frame, SIGNALLING_FRAME_BYTES).empty()); // no square
+    frame.locator = "CN87";
+    CHECK(FrameCodec::encodeShortLocator(frame, 5).empty());                       // no room
+    frame.originCallsign = "";
+    CHECK(FrameCodec::encodeShortLocator(frame, SIGNALLING_FRAME_BYTES).empty()); // no callsign
+
+    FrameType type;
+    bool noAutoAck = true;
+    CHECK(FrameCodec::typeFromCode(0xF, type, noAutoAck) && type == FrameType::Locator && !noAutoAck);
+}
+
 // Pings and acknowledgements end in the feature byte, in the ninth byte
 // that Glissando 0.5 sent as zero and never read; pongs and partial
 // acknowledgements have their own byte there and carry none.
@@ -759,6 +806,7 @@ int main()
     testDecodeRejections();
     testGridSquares();
     testLocatorFrame();
+    testShortLocatorFrame();
     testFeatureByte();
 
     if (failures > 0)

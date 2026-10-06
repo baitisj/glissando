@@ -101,6 +101,28 @@ std::vector<AnnotationToken> describeSegment(const std::vector<uint8_t>& bytes, 
     Reader r(bytes, segmentFrom, knownFrom);
     if (segmentFrom >= (int)bytes.size()) return tokens;
 
+    // A duet's spare voice may carry the short locator, one segment, its
+    // callsign straight after the type.
+    if (r.known(0, TYPE_BITS) && FrameCodec::isShortLocatorCode((uint8_t)r.value(0, TYPE_BITS)))
+    {
+        add(tokens, Role::Kind, kindName(FrameType::Locator));
+        if (!r.known(TYPE_BITS, 1)) return tokens;
+        const bool standard = r.value(TYPE_BITS, 1) == 0;
+        const int originBits = FrameCodec::originBits(standard);
+        add(tokens, Role::Station, "TO ALL");
+        if (r.known(TYPE_BITS, originBits))
+        {
+            std::string origin = FrameCodec::unpackCallsign(r.data(), TYPE_BITS + 1, standard);
+            add(tokens, Role::Station, "DE " + (origin.empty() ? std::string("?") : origin));
+        }
+        if (r.known(TYPE_BITS + originBits, LOCATOR_BITS))
+        {
+            std::string grid = FrameCodec::unpackGridSquare((int)r.value(TYPE_BITS + originBits, LOCATOR_BITS));
+            add(tokens, Role::Field, "LOC " + (grid.empty() ? std::string("?") : grid));
+        }
+        return tokens;
+    }
+
     // Without the type and the origin's form there is no telling where the
     // header ends: say what was lost, and read any segment past the longest
     // header as text.

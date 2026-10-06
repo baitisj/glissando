@@ -292,7 +292,7 @@ double bearingDegrees(const LatLon& from, const LatLon& to)
     return bearing < 0.0 ? bearing + 360.0 : bearing;
 }
 
-std::string caption(const std::string& homeLocator, const std::string& stationLocator)
+std::string caption(const std::string& homeLocator, const std::string& stationLocator, bool current)
 {
     static const std::string DOT = " \xC2\xB7 ";       // a middle dot, in UTF-8
     static const std::string DEGREE = "\xC2\xB0";
@@ -300,15 +300,16 @@ std::string caption(const std::string& homeLocator, const std::string& stationLo
     std::string home = tidyLocator(homeLocator);
     std::string station = tidyLocator(stationLocator);
     if (station.empty()) return home;
+    std::string label = current ? station : station + " (last contact)";
 
     LatLon from;
     LatLon to;
-    if (!locatorCentre(home, from) || !locatorCentre(station, to)) return station;
+    if (!locatorCentre(home, from) || !locatorCentre(station, to)) return label;
     long km = std::lround(distanceKm(from, to));
-    if (km < 1) return station;
+    if (km < 1) return label;
 
     long bearing = std::lround(bearingDegrees(from, to)) % 360;
-    return station + DOT + withThousands(km) + " km" + DOT + std::to_string(bearing) + DEGREE;
+    return label + DOT + withThousands(km) + " km" + DOT + std::to_string(bearing) + DEGREE;
 }
 
 Vec3 toView(const Attitude& attitude, const Vec3& earth)

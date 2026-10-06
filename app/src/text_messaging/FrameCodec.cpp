@@ -89,6 +89,7 @@ constexpr uint8_t CODE_MESSAGE_NO_AUTO_ACK = 0xB;
 constexpr uint8_t CODE_BROADCAST = 0xC;
 constexpr uint8_t CODE_BROADCAST_NO_AUTO_ACK = 0xD;
 constexpr uint8_t CODE_LOCATOR = 0xE;
+constexpr uint8_t CODE_SHORT_LOCATOR = 0xF;
 
 uint8_t typeCode(FrameType type, bool autoAck)
 {
@@ -258,7 +259,8 @@ bool FrameCodec::typeFromCode(uint8_t code, FrameType& typeOut, bool& noAutoAckO
         case CODE_MESSAGE: typeOut = FrameType::Message; return true;
         case CODE_BROADCAST_NO_AUTO_ACK: noAutoAckOut = true; [[fallthrough]];
         case CODE_BROADCAST: typeOut = FrameType::Broadcast; return true;
-        case CODE_LOCATOR: typeOut = FrameType::Locator; return true;
+        case CODE_LOCATOR:
+        case CODE_SHORT_LOCATOR: typeOut = FrameType::Locator; return true;
         default: return false;
     }
 }
@@ -441,10 +443,55 @@ std::vector<uint8_t> FrameCodec::encode(const Frame& frame, int frameBytes)
     return out;
 }
 
+bool FrameCodec::isShortLocatorCode(uint8_t code)
+{
+    return code == CODE_SHORT_LOCATOR;
+}
+
+std::vector<uint8_t> FrameCodec::encodeShortLocator(const Frame& frame, int frameBytes)
+{
+    const std::string origin = normalizeCallsign(frame.originCallsign);
+    const std::string positions = standardPositions(origin);
+    const bool standard = !positions.empty();
+    const int gridSquare = packGridSquare(frame.locator);
+    if (origin.empty() || gridSquare < 0) return {};
+    if (frameBytes <= 0 || 8 * frameBytes < TYPE_BITS + originBits(standard) + LOCATOR_BITS) return {};
+
+    std::vector<uint8_t> out((size_t)frameBytes, 0);
+    int bit = 0;
+    auto put = [&](uint64_t value, int count) {
+        putBits(out.data(), bit, value, count);
+        bit += count;
+    };
+    put(CODE_SHORT_LOCATOR, TYPE_BITS);
+    put(standard ? 0 : 1, 1);
+    if (standard) put(packStandard(positions), STANDARD_CALLSIGN_BITS);
+    else put(packExtended(origin), EXTENDED_CALLSIGN_BITS);
+    put((uint64_t)gridSquare, LOCATOR_BITS);
+    return out;
+}
+
 bool FrameCodec::decode(const uint8_t* data, int length, Frame& frameOut)
 {
     if (data == nullptr || length < 1) return false;
     const int available = 8 * length;
+
+    // The short locator: the callsign straight after the type, then the
+    // grid square.
+    if (getBits(data, 0, TYPE_BITS) == CODE_SHORT_LOCATOR)
+    {
+        if (available < TYPE_BITS + 1) return false;
+        const bool standard = getBits(data, TYPE_BITS, 1) == 0;
+        if (available < TYPE_BITS + originBits(standard) + LOCATOR_BITS) return false;
+        Frame frame;
+        frame.type = FrameType::Locator;
+        frame.originCallsign = unpackCallsign(data, TYPE_BITS + 1, standard);
+        frame.locator = unpackGridSquare((int)getBits(data, TYPE_BITS + originBits(standard), LOCATOR_BITS));
+        if (frame.originCallsign.empty() || frame.locator.empty()) return false;
+        frameOut = frame;
+        return true;
+    }
+
     if (available < ORIGIN_BIT + 1) return false;
 
     FrameType type;

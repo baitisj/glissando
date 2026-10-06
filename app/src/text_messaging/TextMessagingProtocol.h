@@ -146,6 +146,10 @@ public:
     // earlier one, or empty.
     std::string stationLocator(const std::string& callsign) const;
 
+    // Whether that grid square came from the station in this contact, rather
+    // than being kept from an earlier one, when it may have moved since.
+    bool stationLocatorIsCurrent(const std::string& callsign) const;
+
     // What earlier sessions learned of stations' locators, from the store.
     void restoreStationLocators(const std::vector<StationLocator>& stations);
 
