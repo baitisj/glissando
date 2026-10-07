@@ -190,6 +190,7 @@ void testBroadcastAndJunk()
     check(has(read, AnnotationToken::Role::Kind, "LOCATOR"), "short locator kind");
     check(has(read, AnnotationToken::Role::Station, "DE TEST1/P"), "short locator callsign");
     check(has(read, AnnotationToken::Role::Field, "LOC CN87"), "short locator square");
+    check(!has(read, AnnotationToken::Role::Station, "TO ALL"), "short locator addressed to nobody");
 }
 
 } // namespace

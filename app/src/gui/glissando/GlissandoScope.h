@@ -64,6 +64,7 @@ struct GlissandoScopeFrame
     wxString title;                 // tempo and segment, e.g. "ALLEGRO  TEXT 2"
     std::vector<Token> tokens;
     bool completed = false;         // this frame finished a chat frame
+    bool filler = false;            // a duet's spare voice: its caption gives way to the other's
 };
 
 // A frame we are sending. While it goes out its tune is printed into the
