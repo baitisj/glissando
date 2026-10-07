@@ -91,6 +91,13 @@ bool sameTiming(const TextMessaging::AirTiming& a, const TextMessaging::AirTimin
 
 } // namespace
 
+int MainFrame::chatTempo_()
+{
+    int gear = textMessagingModem().glissandoStatus().transmitGear;
+    if (gear < Glissando::MIN_GEAR || gear > Glissando::MAX_GEAR) gear = wxGetApp().appConfiguration.glissandoGear;
+    return std::min(Glissando::MAX_GEAR, std::max(Glissando::MIN_GEAR, gear));
+}
+
 GlissandoConsoleSettings MainFrame::loadGlissandoSettings_() const
 {
     auto& config = wxGetApp().appConfiguration;
@@ -200,10 +207,19 @@ void MainFrame::applyGlissandoToModem_(bool enabled)
     textMessagingModem().setGlissando(modemConfig);
 
     // Automatic shifting can change the tempo at any frame heard, and every
-    // protocol timer scales with it. Not while chat goes through Data2G,
-    // whose timers applyChatModem_() set.
-    if (data2gChatActive_.load(std::memory_order_acquire)) return;
-    TextMessaging::AirTiming timing = textMessagingModem().airTiming();
+    // protocol timer scales with it. With Data2G carrying chat the tempo
+    // picks its Data2G mode, and the timers follow that mode, which can also
+    // change when data2g-host lists the modes it offers.
+    TextMessaging::AirTiming timing;
+    if (data2gChatActive_.load(std::memory_order_acquire))
+    {
+        m_data2gTransport->setGear(chatTempo_());
+        timing = m_data2gTransport->airTiming();
+    }
+    else
+    {
+        timing = textMessagingModem().airTiming();
+    }
     if (!sameTiming(timing, appliedAirTiming_))
     {
         TextMessaging::TextMessagingSession::instance().protocol().setAirTiming(timing);

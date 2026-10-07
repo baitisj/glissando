@@ -1,8 +1,11 @@
 //=========================================================================
 // Name:            Data2GTransport.h
-// Purpose:         Carries chat through a separately running data2g-host:
-//                  frames over its KISS port, and when the transmitter is
-//                  keyed and the channel busy from its command port.
+// Purpose:         Carries chat through a separately running data2g-host.
+//                  Broadcasts, and anything else for more than one station,
+//                  go to the GLISS broadcast group on its KISS port, in the
+//                  mode the Glissando tempo maps to. A keying for a single
+//                  station can instead go through a connected (ARQ) session
+//                  with it, which data2g-host negotiates and rate-shifts.
 //
 // data2g-host owns the sound card and the PTT; this only talks TCP to it.
 // The operator starts it. Nothing of Data2G is built into this program.
@@ -13,8 +16,11 @@
 
 #include <atomic>
 #include <cstdint>
+#include <deque>
 #include <functional>
+#include <map>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -33,12 +39,11 @@ public:
     {
         std::string host = "127.0.0.1";
         int kissPort = Data2G::DEFAULT_KISS_PORT;
+        int commandPort = Data2G::DEFAULT_COMMAND_PORT; // session data on the next port
 
-        // The command port reports PTT and BUSY. data2g-host serves one
-        // command client at a time, so a station that also runs VarAC or
-        // Pat against the same host turns this off.
-        bool useCommandPort = true;
-        int commandPort = Data2G::DEFAULT_COMMAND_PORT;
+        // Directed traffic through connected sessions; off, everything goes
+        // to the GLISS group.
+        bool useSessions = true;
     };
 
     struct Status
@@ -46,9 +51,13 @@ public:
         bool running = false;           // start() called, stop() not
         bool kissConnected = false;
         bool commandConnected = false;
+        int groupPort = 0;              // the GLISS group's KISS port, 0 before it opens
         bool transmitting = false;      // data2g-host reports PTT on
         bool channelBusy = false;
-        std::string mode;               // last MODE reported, empty if none
+        std::string groupMode;          // the mode GLISS bursts go out in now
+        std::string mode;               // the submode of the last burst sent
+        std::string sessionPeer;        // a connected session's far end
+        bool sessionConnecting = false;
         std::string error;              // why the last connection failed
     };
 
@@ -65,6 +74,14 @@ public:
     void setFrameCallback(FrameCallback callback);
     void setLogFunction(LogFunction log);
 
+    // Our callsign, for MYCALL, BCAST FROM and sessions. A change while
+    // connected reopens the command connection under the new one.
+    void setMyCallsign(const std::string& callsign);
+
+    // The Glissando tempo set now (1 Adagio .. 5 Duet), which a keying with
+    // no tempo of its own goes out at.
+    void setGear(int gear);
+
     // Connects, and keeps reconnecting while data2g-host is not there.
     // Calling it again with other settings reconnects with those.
     void start(const Settings& settings);
@@ -72,40 +89,88 @@ public:
 
     Status status() const;
 
+    // The mode a tempo maps to on this host, and the chat timers for the
+    // tempo set now.
+    Data2G::ModeInfo modeForGear(int gear) const;
+    AirTiming airTiming() const;
+
     bool transmit(const std::vector<OutgoingBurst>& bursts) override;
     bool isTransmitting() const override;
     bool isChannelBusy() const override;
+    double airTimeScale(int gear) const override;
 
-    // Test hooks: the clock the keying timers read.
+    // Test hook: the clock the keying and session timers read.
     void setClock(std::function<uint64_t()> monotonicMs);
 
-    // Without the command port, or when data2g-host never keys for what we
-    // queued (it holds KISS traffic during an ARQ session or while the
-    // channel is busy), a keying is taken as over after this long.
-    static constexpr uint64_t NO_PTT_TIMEOUT_MS = 60000;
+    // A keying data2g-host never puts on the air (it holds broadcasts during
+    // a session, and while the channel is busy) is given up after this long.
+    static constexpr uint64_t NOT_SENT_TIMEOUT_MS = 120000;
+
+    // A session we opened is closed once nothing has gone either way in it
+    // for this long: long enough for the far end's acknowledgement.
+    static constexpr uint64_t SESSION_IDLE_MS = 45000;
+
+    // A station that would not take a session is sent broadcasts for this
+    // long before a session is tried again.
+    static constexpr uint64_t NO_SESSION_HOLD_MS = 10 * 60 * 1000;
+
+    // How long a CONNECT may take before the keying goes to the group.
+    static constexpr uint64_t CONNECT_TIMEOUT_MS = 90000;
 
 private:
-    enum class Keying
+    // A keying from transmit() to the moment it has left the transmitter.
+    struct Keying
     {
-        Idle,
-        Queued,     // written to the KISS port, not yet keyed
-        OnAir,      // data2g-host reported PTT ON since we queued
+        std::vector<OutgoingBurst> bursts;
+        std::string destination;    // the one station every burst is for; empty otherwise
+        int gear = 0;
+        uint64_t queuedAtMs = 0;
+
+        enum class Stage
+        {
+            Waiting,        // for the group's mode, or a session to open
+            Sent,           // written; waiting for data2g-host to transmit it
+            Done,
+        } stage = Stage::Waiting;
+
+        bool viaSession = false;
+        std::set<uint16_t> tags;    // ACKMODE tags not yet reported transmitted
+        bool sawPtt = false;        // a session keying: PTT went on after the write
+        bool pttCycled = false;     // ... and off again
+    };
+
+    enum class SessionState
+    {
+        None,
+        Connecting,
+        Connected,
+        Disconnecting,
     };
 
     void run(Settings settings);
+    void deliver(const std::vector<uint8_t>& bytes);
     void log(const std::string& line);
-    void handleCommandLine(const std::string& line);
-    void handleKissFrame(const std::vector<uint8_t>& payload);
     uint64_t now() const;
 
     mutable std::mutex mutex_;
     Status status_;
-    Keying keying_;
-    uint64_t queuedAtMs_;
+    std::vector<Data2G::ModeInfo> modes_;   // the host's MODES, once it has said
+    std::string myCallsign_;
+    int gear_;
     bool pttOn_;
+    bool busy_;
+    bool hasKeying_;
+    Keying keying_;
+    bool callsignChanged_;
 
-    std::mutex sendMutex_;
-    int kissFd_;            // written by transmit(), owned by the thread
+    // Session bookkeeping, read by the thread under mutex_.
+    SessionState session_;
+    std::string sessionPeer_;
+    bool sessionOurs_;
+    uint64_t sessionActivityMs_;
+    uint64_t connectStartedMs_;
+    int sessionBuffer_;
+    std::map<std::string, uint64_t> noSessionUntil_;
 
     FrameCallback frameCallback_;
     LogFunction log_;

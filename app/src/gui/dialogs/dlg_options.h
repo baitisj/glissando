@@ -143,8 +143,8 @@ class OptionsDlg : public wxDialog
         wxCheckBox*  m_ckboxData2G;
         wxTextCtrl*  m_txtData2GHost;
         wxTextCtrl*  m_txtData2GKissPort;
-        wxCheckBox*  m_ckboxData2GCommandPort;
         wxTextCtrl*  m_txtData2GCommandPort;
+        wxCheckBox*  m_ckboxData2GSessions;
         void updateData2GControls_();
         
         wxListBox*  m_freqList;

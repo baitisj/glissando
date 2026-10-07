@@ -1058,30 +1058,37 @@ void MainFrame::applyChatModem_()
     protocol.setMyLocator(config.reportingConfiguration.reportingGridSquare->ToStdString(),
                           config.reportingConfiguration.reportingSendGridSquare);
 
+    // data2g-host's MYCALL, BCAST FROM and sessions use the chat callsign.
+    m_data2gTransport->setMyCallsign(config.reportingConfiguration.reportingCallsign->ToStdString());
+
     if (config.data2gEnabled)
     {
         TextMessaging::Data2GTransport::Settings settings;
         settings.host = ((wxString)config.data2gHost).ToStdString();
         settings.kissPort = config.data2gKissPort;
-        settings.useCommandPort = config.data2gUseCommandPort;
         settings.commandPort = config.data2gCommandPort;
+        settings.useSessions = config.data2gSessions;
 
         bool changed = !data2gChatActive_.load() || settings.host != appliedData2GSettings_.host ||
                        settings.kissPort != appliedData2GSettings_.kissPort ||
-                       settings.useCommandPort != appliedData2GSettings_.useCommandPort ||
-                       settings.commandPort != appliedData2GSettings_.commandPort;
+                       settings.commandPort != appliedData2GSettings_.commandPort ||
+                       settings.useSessions != appliedData2GSettings_.useSessions;
         if (!changed) return;
 
-        log_info("Text chat now goes through data2g-host at %s:%d%s", settings.host.c_str(), settings.kissPort,
-                 settings.useCommandPort ? "" : " (command port off)");
+        log_info("Text chat now goes through data2g-host at %s (KISS %d, commands %d)%s", settings.host.c_str(),
+                 settings.kissPort, settings.commandPort,
+                 settings.useSessions ? "" : ", group only");
         // Anything our own transmitter still had queued for chat goes.
         m_textMessagingTransport->abort();
+        m_data2gTransport->setGear(chatTempo_());
         m_data2gTransport->start(settings);
         appliedData2GSettings_ = settings;
         data2gChatActive_.store(true, std::memory_order_release);
         protocol.setTransport(m_data2gTransport);
 
-        TextMessaging::AirTiming timing = TextMessaging::Data2G::airTiming();
+        // The timers follow the tempo's Data2G mode from here on
+        // (applyGlissandoToModem_()).
+        TextMessaging::AirTiming timing = m_data2gTransport->airTiming();
         protocol.setAirTiming(timing);
         appliedAirTiming_ = timing;
     }
@@ -1102,7 +1109,8 @@ void MainFrame::applyChatModem_()
 
 double MainFrame::chatMessageAirSeconds(const std::string& text)
 {
-    // Data2G picks its own mode and says nothing about how long it will take.
+    // Not estimated for Data2G, whose burst length depends on how the host
+    // packs the frames into codewords.
     if (data2gChatActive_.load()) return 0.0;
     return textMessagingModem().glissandoMessageSeconds(
         text, wxGetApp().appConfiguration.reportingConfiguration.reportingCallsign->ToStdString());
@@ -1110,7 +1118,10 @@ double MainFrame::chatMessageAirSeconds(const std::string& text)
 
 int MainFrame::chatTransmitGear()
 {
-    if (data2gChatActive_.load() || !textMessagingModem().glissandoConfig().enabled) return 0;
+    // With Data2G each tempo is a Data2G mode, so a message can still take
+    // a tempo of its own.
+    if (data2gChatActive_.load()) return chatTempo_();
+    if (!textMessagingModem().glissandoConfig().enabled) return 0;
     return textMessagingModem().glissandoStatus().transmitGear;
 }
 
@@ -1158,11 +1169,30 @@ wxString MainFrame::chatModemStatus()
     }
 
     wxString line = wxString::Format(_("Data2G at %s"), where);
-    if (appliedData2GSettings_.useCommandPort && !status.commandConnected)
+    if (!status.commandConnected)
     {
         line += _(", command port not connected");
     }
-    if (!status.mode.empty()) line += wxString::Format(_(", last sent in %s"), wxString::FromUTF8(status.mode));
+    else if (status.groupPort == 0)
+    {
+        line += _(", opening the GLISS group");
+    }
+    else if (!status.groupMode.empty())
+    {
+        line += wxString::Format(_(", group GLISS in %s"), wxString::FromUTF8(status.groupMode));
+    }
+    if (!status.sessionPeer.empty())
+    {
+        line += wxString::Format(_(", session with %s"), wxString::FromUTF8(status.sessionPeer));
+    }
+    else if (status.sessionConnecting)
+    {
+        line += _(", calling for a session");
+    }
+    if (!status.error.empty() && !status.commandConnected)
+    {
+        line += wxString::Format(" (%s)", wxString::FromUTF8(status.error));
+    }
     return line + ".";
 }
 
