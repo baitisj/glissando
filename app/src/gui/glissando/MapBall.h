@@ -9,7 +9,9 @@
 // them as close as it can and eases to a stop, the path curling out from
 // our dot to the station's red square, with the square, the distance and
 // the bearing under the window. A station whose square is not known leaves
-// the ball where it is. The mouse wheel over it zooms in and out; a double
+// the ball where it is; with no station at all, it lets the ball go where it
+// is. Every other station in the station list whose square we know is a red
+// dot. The mouse wheel over it zooms in and out; a double
 // click fits the path again. It is all drawn as outlines, so it is sharp at
 // any size; the borders between countries, and the land as brushed metal,
 // can each be turned off in Preferences. The sums are in Globe.h.
@@ -26,6 +28,8 @@
 #define GUI_GLISSANDO__MAP_BALL_H
 
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <wx/graphics.h>
 #include <wx/timer.h>
@@ -44,6 +48,10 @@ public:
     // shows the North Atlantic, and asks for our square. A station's square
     // kept from an earlier contact is shown dim and marked as such.
     void setLocators(const std::string& home, const std::string& station, bool stationCurrent = true);
+
+    // The squares of the stations in the station list, each with whether it
+    // came from the station this contact: red dots, dim for an old square.
+    void setStations(const std::vector<std::pair<std::string, bool>>& stations);
 
     // Whether the land shows the borders between countries, and whether it
     // looks like brushed metal. Both cost a little more to draw.
@@ -92,6 +100,8 @@ private:
     bool brushedMetal_;
     Globe::LatLon homeAt_;
     Globe::LatLon stationAt_;
+    std::vector<std::pair<std::string, bool>> stations_;
+    std::vector<std::pair<Globe::LatLon, bool>> dots_;
     double pathDrawn_;              // how much of the path is drawn so far, 0 to 1
     wxString caption_;
 

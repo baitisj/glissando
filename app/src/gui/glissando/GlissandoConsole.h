@@ -15,6 +15,7 @@
 #define GUI_GLISSANDO__GLISSANDO_CONSOLE_H
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <wx/frame.h>
@@ -77,8 +78,11 @@ struct GlissandoTelemetry
     bool channelHeld = false;       // somebody else has the channel: our transmit queue waits
     std::vector<double> carrierHz;  // the notes carrier sense hears holding it, if it hears any
     std::string homeLocator;        // our Maidenhead locator, empty if none is set
-    std::string stationLocator;     // the last station heard or sent to whose locator is known
+    std::string stationLocator;     // the map's station: picked in COMMS, else the last heard or sent to
     bool stationLocatorCurrent = false; // that locator came from it this contact
+    // The locators of the stations in the station list that we know, each
+    // with whether it came from the station this contact.
+    std::vector<std::pair<std::string, bool>> listedLocators;
     bool mapBorders = true;         // the map ball draws the borders between countries
     bool mapBrushedMetal = true;    // and its land as brushed metal
 };

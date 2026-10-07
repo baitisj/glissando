@@ -104,6 +104,7 @@ TextMessagingProtocol::TextMessagingProtocol(MessageStore& store, HeardStationLi
     , myCallsignCrc_(0)
     , autoReplyEnabled_(true)
     , sendLocator_(false)
+    , mapPicked_(false)
     , keyingCarriesLocator_(false)
     , nextAirId_(randomAirId())
     , quietUntilMs_(0)
@@ -269,7 +270,14 @@ bool TextMessagingProtocol::stationLocatorIsCurrent(const std::string& callsign)
 std::string TextMessagingProtocol::mapStation() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    return mapStation_;
+    return mapPicked_ ? mapPick_ : mapStation_;
+}
+
+void TextMessagingProtocol::setMapSelection(const std::string& callsign)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    mapPicked_ = true;
+    mapPick_ = FrameCodec::normalizeCallsign(callsign);
 }
 
 void TextMessagingProtocol::noteMapStationLocked(const std::string& callsign)

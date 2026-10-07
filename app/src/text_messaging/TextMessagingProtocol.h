@@ -153,10 +153,17 @@ public:
     // What earlier sessions learned of stations' locators, from the store.
     void restoreStationLocators(const std::vector<StationLocator>& stations);
 
-    // The station the console's map shows: the last one we heard or keyed
-    // to whose locator we know. A station whose locator we do not know
-    // leaves it as it was. Empty until there is one.
+    // The station the console's map shows. Until the operator picks one in
+    // the station list, the last one we heard or keyed to whose locator we
+    // know; a station whose locator we do not know leaves it as it was.
+    // Empty until there is one.
     std::string mapStation() const;
+
+    // The operator's pick in the station list, which the map then follows
+    // instead of the traffic: the station picked, whether or not its
+    // locator is known yet, or with the pick cleared, none, so the map
+    // shows no path until another station is picked.
+    void setMapSelection(const std::string& callsign);
 
     // Stops every chat transmission, for a station on a frequency where it
     // may not send data. Whatever is waiting to go out is discarded as not
@@ -421,7 +428,9 @@ private:
     std::string myLocator_;       // normalized; empty for none
     bool sendLocator_;
     std::map<std::string, LocatorPeer> locatorPeers_;
-    std::string mapStation_;      // see mapStation()
+    std::string mapStation_;      // the last station heard or keyed to whose locator we know
+    bool mapPicked_;              // the operator has picked a station, or cleared the pick
+    std::string mapPick_;         // that station; empty when cleared
 
     // Whether the keying now on the air ends in our locator. A station that
     // misses that burst holds its answer for a text burst's time after the

@@ -34,6 +34,11 @@ constexpr int PATH_SEGMENTS = 96;
 // off.
 constexpr double WHEEL_STEP = 1.25;
 
+// The other stations in the station list: red dots this big, and this
+// faint for a square kept from an earlier contact.
+constexpr double DOT_RADIUS = 2.0;
+constexpr unsigned char STALE_DOT_ALPHA = 120;
+
 // Where the ball looks before it knows any grid square: the North Atlantic,
 // the Americas to one side and Europe and Africa to the other.
 const Globe::LatLon NOWHERE_YET{30.0, -30.0};
@@ -94,10 +99,12 @@ MapBall::MapBall(wxWindow* parent)
     roller_.setBackOff(WINDOW_WIDTH / 2.0);
     roller_.jump(fitted());
     caption_ = _("Set your grid square in Preferences, Station");
-    SetToolTip(_("Where the last station heard or sent to is, if it has sent its grid square: "
-                 "the square, how far it is from yours and which way. Drag the ball to spin it "
-                 "and hold it to stop it; turn the mouse wheel over it to zoom; double-click to "
-                 "fit the path again. Set your own square in Preferences, Station."));
+    SetToolTip(_("Where the station picked in COMMS is, or until you pick one the last station "
+                 "heard or sent to, if it has sent its grid square: the square, how far it is from "
+                 "yours and which way. The red dots are the other stations in the list whose squares "
+                 "are known. Drag the ball to spin it and hold it to stop it; turn the mouse wheel "
+                 "over it to zoom; double-click to fit the path again. Set your own square in "
+                 "Preferences, Station."));
     SetCursor(wxCursor(wxCURSOR_HAND));
     Bind(wxEVT_TIMER, &MapBall::OnTimer, this);
     Bind(wxEVT_MOUSEWHEEL, &MapBall::OnMouseWheel, this);
@@ -170,10 +177,30 @@ void MapBall::setLocators(const std::string& home, const std::string& station, b
         placed_ = true;
         pathDrawn_ = 1.0;
     }
+    else if (stationChanged && station.empty())
+    {
+        // The station is gone, picked off in the station list: the path
+        // with it, and the ball is let go where it is.
+        roller_.coast();
+        wake();
+    }
     else
     {
         if (stationChanged) pathDrawn_ = 0.0;
         rollTo(fitted());
+    }
+    Refresh();
+}
+
+void MapBall::setStations(const std::vector<std::pair<std::string, bool>>& stations)
+{
+    if (stations == stations_) return;
+    stations_ = stations;
+    dots_.clear();
+    for (const auto& station : stations)
+    {
+        Globe::LatLon at;
+        if (Globe::locatorCentre(station.first, at)) dots_.push_back({at, station.second});
     }
     Refresh();
 }
@@ -402,6 +429,20 @@ void MapBall::drawPath(wxGraphicsContext* gc, const Globe::View& view, double le
                 if (run.size() >= 2) gc->StrokeLines(run.size(), run.data());
             }
         }
+    }
+
+    // The stations in the list, as red dots, dim for a square kept from an
+    // earlier contact; the station on the path has its square over its dot.
+    for (const auto& dot : dots_)
+    {
+        Globe::Vec3 v = Globe::toVector(dot.first);
+        if (Globe::toView(view.attitude, v).z <= 0.0) continue;
+        wxPoint2DDouble p = at(Globe::onScreen(view, window_, v), left, top);
+        wxColour red = Colour::Alarm;
+        if (!dot.second) red = wxColour(red.Red(), red.Green(), red.Blue(), STALE_DOT_ALPHA);
+        gc->SetPen(wxPen(PATH_CASING, 1));
+        gc->SetBrush(wxBrush(red));
+        gc->DrawEllipse(p.m_x - DOT_RADIUS, p.m_y - DOT_RADIUS, 2.0 * DOT_RADIUS, 2.0 * DOT_RADIUS);
     }
 
     // Our dot and the station's red square, where they are on the near side.

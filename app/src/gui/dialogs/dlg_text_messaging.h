@@ -230,6 +230,10 @@ private:
     StatusKind m_statusKind;
     TextMessaging::AckWait m_lastAckWait;
 
+    // The station last picked in the list, as the console's map was told:
+    // it is told only when that changes.
+    std::string m_mapPick;
+
     // The station the context menu was opened on. Looked up again by name
     // when an item is chosen, since the list may have changed underneath.
     std::string m_menuCallsign;

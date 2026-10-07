@@ -282,10 +282,14 @@ ignore).
 
 The console's map ball, right of the Engaged, Receiving and Transmitting
 lamps, shows them: a map of the world on a ball seen through a window four
-times as wide as it is tall, with the Maidenhead fields ruled on it. It
-follows the station last heard, or last sent to, whose locator is known, and
-a station whose locator is not known leaves it where it is. When that station
-changes, the ball rolls to show the great circle path from our square to its
+times as wide as it is tall, with the Maidenhead fields ruled on it. Once a
+station is picked in the COMMS station list it shows that one, as soon as its
+locator is known; clearing the pick takes the path away and lets the ball go
+where it is, free to spin, until another station is picked. Until the first
+pick it follows the station last heard, or last sent to, whose locator is
+known, and a station whose locator is not known leaves it where it is. Every
+other station in the list whose locator is known is a red dot, dim for one
+kept from an earlier contact. When the station it shows changes, the ball rolls to show the great circle path from our square to its
 square, as close as shows all of it, and eases to a stop, north up unless
 turning it lets it come much closer; a long roll backs off on the way so it
 can be followed. The path curls out from our dot to the station's red square.

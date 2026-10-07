@@ -2853,7 +2853,8 @@ void testDuetFillerCarriesTheLocator()
 }
 
 // The console's map follows the last station heard or keyed to whose
-// locator we know, and stays put for one whose locator we do not.
+// locator we know, and stays put for one whose locator we do not, until the
+// operator picks a station in the list.
 void testMapFollowsStationsWithKnownLocators()
 {
     Station station("W1AW");
@@ -2896,6 +2897,27 @@ void testMapFollowsStationsWithKnownLocators()
     // And to one without, leaves it.
     CHECK(station.protocol.sendPing("G0ABC", error));
     station.completeOneTransmission();
+    CHECK(station.protocol.mapStation() == "VK3ABC");
+
+    // Once the operator picks a station in the list, the map follows the
+    // pick rather than the traffic, its locator known or not.
+    station.protocol.setMapSelection("dj2ls");
+    CHECK(station.protocol.mapStation() == "DJ2LS");
+    hear("VK3ABC", FrameType::Ping);
+    CHECK(station.protocol.mapStation() == "DJ2LS");
+    station.protocol.setMapSelection("G0ABC");
+    CHECK(station.protocol.mapStation() == "G0ABC");
+    CHECK(station.protocol.stationLocator(station.protocol.mapStation()).empty());
+
+    // With the pick cleared it shows none, whatever is heard or keyed to,
+    // until another is picked.
+    station.protocol.setMapSelection("");
+    CHECK(station.protocol.mapStation().empty());
+    hear("DJ2LS", FrameType::Locator);
+    CHECK(station.protocol.sendPing("VK3ABC", error));
+    station.completeOneTransmission();
+    CHECK(station.protocol.mapStation().empty());
+    station.protocol.setMapSelection("VK3ABC");
     CHECK(station.protocol.mapStation() == "VK3ABC");
 }
 
