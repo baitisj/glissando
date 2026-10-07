@@ -102,14 +102,15 @@ std::vector<AnnotationToken> describeSegment(const std::vector<uint8_t>& bytes, 
     if (segmentFrom >= (int)bytes.size()) return tokens;
 
     // A duet's spare voice may carry the short locator, one segment, its
-    // callsign straight after the type.
+    // callsign straight after the type. It is addressed to nobody, so it
+    // says no "TO": beside a message in the other voice, "TO ALL" read as
+    // though the message had gone to everyone.
     if (r.known(0, TYPE_BITS) && FrameCodec::isShortLocatorCode((uint8_t)r.value(0, TYPE_BITS)))
     {
         add(tokens, Role::Kind, kindName(FrameType::Locator));
         if (!r.known(TYPE_BITS, 1)) return tokens;
         const bool standard = r.value(TYPE_BITS, 1) == 0;
         const int originBits = FrameCodec::originBits(standard);
-        add(tokens, Role::Station, "TO ALL");
         if (r.known(TYPE_BITS, originBits))
         {
             std::string origin = FrameCodec::unpackCallsign(r.data(), TYPE_BITS + 1, standard);

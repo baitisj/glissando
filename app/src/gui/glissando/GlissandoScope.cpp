@@ -1104,7 +1104,10 @@ void GlissandoScope::paintHeard(wxGraphicsContext* gc, const wxRect& trace)
     }
 
     // Captions, newest first; one that would cover a newer one is left out,
-    // which is what happens to most of them where the lens squeezes.
+    // which is what happens to most of them where the lens squeezes. A duet's
+    // filler comes after all the rest, so the locator in its spare voice never
+    // hides the message beside it: it shows only where there is room.
+    std::stable_partition(placed.begin(), placed.end(), [](const Placed& p) { return p.frame->filler; });
     std::vector<wxRect2DDouble> taken;
     for (auto it = placed.rbegin(); it != placed.rend(); ++it)
     {

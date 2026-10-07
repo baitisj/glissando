@@ -427,6 +427,7 @@ std::vector<GlissandoScopeFrame> MainFrame::glissandoHeardFrames()
         frame.melody.assign(h.melody.begin(), h.melody.end());
         for (int k = 0; k < Glissando::SYMBOLS_PER_FRAME; k++) frame.motif.push_back(Glissando::isMotifSymbol(k));
         frame.completed = segment.completed;
+        frame.filler = segment.filler;
 
         wxString part = segment.filler ? wxString(_("FILLER"))
                                        : wxString::Format(segment.text ? _("TEXT %d") : _("SIGNAL %d"),
