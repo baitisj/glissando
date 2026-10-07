@@ -263,12 +263,22 @@ GlissandoTelemetry MainFrame::glissandoTelemetry()
     telemetry.engageToSend =
         chatWaitsForEngage() && TextMessaging::TextMessagingSession::instance().protocol().hasQueuedTransmissions();
 
-    // The map ball: where we are, and where the station it shows is.
-    auto& protocol = TextMessaging::TextMessagingSession::instance().protocol();
+    // The map ball: where we are, where the station it shows is, and where
+    // the others in the station list are.
+    auto& session = TextMessaging::TextMessagingSession::instance();
+    auto& protocol = session.protocol();
     telemetry.homeLocator = protocol.myLocator();
     std::string mapStation = protocol.mapStation();
     telemetry.stationLocator = protocol.stationLocator(mapStation);
     telemetry.stationLocatorCurrent = protocol.stationLocatorIsCurrent(mapStation);
+    for (const TextMessaging::HeardStation& station : session.stations().stations())
+    {
+        std::string locator = protocol.stationLocator(station.callsign);
+        if (!locator.empty())
+        {
+            telemetry.listedLocators.push_back({locator, protocol.stationLocatorIsCurrent(station.callsign)});
+        }
+    }
     telemetry.mapBorders = wxGetApp().appConfiguration.glissandoMapBorders;
     telemetry.mapBrushedMetal = wxGetApp().appConfiguration.glissandoMapBrushedMetal;
 

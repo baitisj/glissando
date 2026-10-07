@@ -951,11 +951,20 @@ void TextMessagingDialog::setStationSelected(long item, bool selected)
 
 // Ping and the send button follow the selection: the send button names where
 // the message goes, so there is no second button for broadcasting. Clearing
-// the selection is how the operator reaches everybody.
+// the selection is how the operator reaches everybody. The console's map
+// follows it too: the path to the station picked, and none once the pick
+// is cleared.
 void TextMessagingDialog::updateSelectionControls()
 {
     std::string callsign = selectedCallsign();
     bool selected = !callsign.empty();
+
+    if (callsign != m_mapPick)
+    {
+        m_mapPick = callsign;
+        TextMessagingSession::instance().protocol().setMapSelection(callsign);
+        if (uiLogEnabled()) log_info("UI: map follows \"%s\"", callsign.c_str());
+    }
 
     bool pingable = selected && m_inhibitReason.empty();
     if (m_btnPing->IsEnabled() != pingable) m_btnPing->Enable(pingable);
