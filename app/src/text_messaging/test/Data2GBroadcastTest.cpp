@@ -1202,6 +1202,256 @@ void testHintsOutliveTheRound()
     CHECK(window.slots == 5);
 }
 
+// A sender alone, driven by hand: each keying of its goes out the moment
+// it is taken, unless the test holds it, and the tests play the listeners.
+struct LoneSender
+{
+    explicit LoneSender(int gear)
+    {
+        engine.setMyCallsign("AG7EW");
+        engine.setGear(gear);
+        engine.setRandomSeed(1);
+    }
+
+    // Time passes until the sender takes a keying; it is not sent yet.
+    bool take(std::vector<std::vector<uint8_t>>& frames, uint64_t maxMs = 30ull * 60 * 1000)
+    {
+        for (uint64_t waited = 0; waited < maxMs; waited += 100)
+        {
+            now += 100;
+            engine.tick(now, false, false);
+            if (!engine.takeKeying(now, frames)) continue;
+            keyings.push_back(frames);
+            return true;
+        }
+        return false;
+    }
+
+    void sent() { engine.keyingSent(now); }
+
+    // Keyings go until one carries a Window.
+    bool untilWindow(GroupWindow& window)
+    {
+        std::vector<std::vector<uint8_t>> frames;
+        while (take(frames))
+        {
+            sent();
+            for (const auto& f : frames)
+            {
+                if (decodeGroupWindow(f.data(), f.size(), window)) return true;
+            }
+        }
+        return false;
+    }
+
+    void ask(const GroupWindow& window, const std::string& call, const std::vector<int>& pieces, int missingTotal)
+    {
+        GroupRequest request;
+        request.fileId = window.fileId;
+        request.round = window.round;
+        request.missingTotal = missingTotal;
+        request.call = call;
+        request.pieces = pieces;
+        size_t listed = 0;
+        std::vector<uint8_t> bytes = encodeGroupRequest(request, GROUP_FRAME_MAX_BYTES, listed);
+        engine.onFrame(bytes.data(), bytes.size(), now);
+    }
+
+    // The Grants, and the pieces sent, in keyings from the nth on.
+    std::vector<GroupGrant> grantsSince(size_t from) const
+    {
+        std::vector<GroupGrant> out;
+        for (size_t i = from; i < keyings.size(); i++)
+        {
+            for (const auto& f : keyings[i])
+            {
+                GroupGrant g;
+                if (decodeGroupGrant(f.data(), f.size(), g)) out.push_back(g);
+            }
+        }
+        return out;
+    }
+
+    std::vector<int> piecesSince(size_t from) const
+    {
+        std::vector<int> out;
+        for (size_t i = from; i < keyings.size(); i++)
+        {
+            for (const auto& f : keyings[i])
+            {
+                GroupData d;
+                if (decodeGroupData(f.data(), f.size(), d)) out.push_back(d.index);
+            }
+        }
+        return out;
+    }
+
+    GroupFileEngine engine;
+    uint64_t now = 1000;
+    std::vector<std::vector<std::vector<uint8_t>>> keyings;
+};
+
+// The station named first in line has its pieces resent first, then the
+// others', the most asked for first.
+void testResendOrder()
+{
+    Scratch scratch("order");
+    std::string source = scratch.write("O.BIN", 7000); // 31 pieces at Duet
+    LoneSender s(5);
+    std::string error;
+    CHECK(s.engine.send(source, s.now, error) != 0);
+    GroupWindow window;
+    CHECK(s.untilWindow(window) && window.round == 0);
+    s.ask(window, "K7ABC", {20, 25}, 2);
+    s.ask(window, "VK3XYZ", {3, 7}, 2);
+    s.ask(window, "W1AW", {7}, 1);
+    size_t from = s.keyings.size();
+    CHECK(s.untilWindow(window) && window.round == 1);
+    std::vector<GroupGrant> grants = s.grantsSince(from);
+    CHECK(grants.size() == 1 && grants[0].call == "K7ABC");
+    CHECK((s.piecesSince(from) == std::vector<int>{20, 25, 7, 3}));
+}
+
+// At Adagio a round resends no more than ten minutes of air: one asking
+// for every piece gets as many as fit, and the rest the next round.
+void testResendCap()
+{
+    Scratch scratch("cap");
+    GroupFileEngine probe;
+    GroupFileEstimate estimate = probe.estimate(4000, 1);
+    CHECK(estimate.airSeconds < GroupFileEngine::REFUSE_AIR_SECONDS);
+    std::string source = scratch.write("C.BIN", 4000);
+    LoneSender s(1);
+    std::string error;
+    CHECK(s.engine.send(source, s.now, error) != 0);
+    GroupWindow window;
+    CHECK(s.untilWindow(window) && window.round == 0);
+    std::vector<int> all;
+    for (int i = 0; i < window.pieces; i++) all.push_back(i);
+    s.ask(window, "K7ABC", all, window.pieces);
+    size_t from = s.keyings.size();
+    CHECK(s.untilWindow(window) && window.round == 1);
+
+    std::vector<GroupGrant> grants = s.grantsSince(from);
+    std::vector<int> resent = s.piecesSince(from);
+    CHECK(grants.size() == 1);
+    if (grants.empty()) return;
+    CHECK(!resent.empty() && resent.size() < all.size());
+    CHECK(resent.size() == grants[0].pieces.size());
+    // As much as ten minutes takes, and no more: the round's keyings of
+    // pieces with their gaps, against the cap, and against one more piece.
+    ModeInfo mode = modeForGear(1, knownModes());
+    double air = 0.0;
+    for (size_t i = from; i < s.keyings.size(); i++)
+    {
+        if (!isData(s.keyings[i][0])) continue;
+        std::vector<int> sizes;
+        for (const auto& f : s.keyings[i]) sizes.push_back((int)f.size());
+        air += mode.burstSeconds(sizes) + GroupFileEngine::KEYING_GAP_MS / 1000.0;
+    }
+    CHECK(air <= GroupFileEngine::RESEND_CAP_SECONDS);
+    CHECK(air + air / (double)resent.size() > GroupFileEngine::RESEND_CAP_SECONDS);
+}
+
+// Three stations asking every round, the same one first and never getting
+// further: turns alternate between it and the next, and once it has been
+// named three times with nothing to show for it the third has a turn.
+void testStuckStationWaits()
+{
+    Scratch scratch("stuck");
+    std::string source = scratch.write("K.BIN", 3000);
+    LoneSender s(5);
+    std::string error;
+    CHECK(s.engine.send(source, s.now, error) != 0);
+    GroupWindow window;
+    std::vector<std::string> named;
+    CHECK(s.untilWindow(window));
+    for (int round = 0; round < 7; round++)
+    {
+        CHECK(window.round == round);
+        s.ask(window, "K7ABC", {2, 9}, 2);
+        s.ask(window, "VK3XYZ", {5, 11}, 2);
+        s.ask(window, "W1AW", {1, 12}, 2);
+        size_t from = s.keyings.size();
+        if (!s.untilWindow(window)) break;
+        std::vector<GroupGrant> grants = s.grantsSince(from);
+        CHECK(grants.size() == 1);
+        if (grants.size() == 1) named.push_back(grants[0].call);
+    }
+    CHECK((named == std::vector<std::string>{"K7ABC", "VK3XYZ", "K7ABC", "VK3XYZ", "K7ABC", "VK3XYZ", "W1AW"}));
+}
+
+// Cancelled while an End for stopping is on the air: two Ends that say
+// cancelled still follow.
+void testCancelDuringAnEnd()
+{
+    Scratch scratch("cancelend");
+    std::string source = scratch.write("E.BIN", 2000);
+    LoneSender s(5);
+    std::string error;
+    uint64_t id = s.engine.send(source, s.now, error);
+    GroupWindow window;
+    CHECK(s.untilWindow(window) && window.round == 0);
+    CHECK(s.engine.stopServing(id));
+    std::vector<std::vector<uint8_t>> frames;
+    CHECK(s.take(frames));
+    GroupEnd end;
+    CHECK(!frames.empty() && decodeGroupEnd(frames[0].data(), frames[0].size(), end) &&
+          end.reason == GroupFileEnd::Stopped);
+    CHECK(s.engine.cancel(id));
+    s.sent();
+    std::vector<GroupFileEnd> reasons;
+    while (s.engine.files(s.now)[0].state != State::Ended && s.take(frames))
+    {
+        s.sent();
+        if (!frames.empty() && decodeGroupEnd(frames[0].data(), frames[0].size(), end)) reasons.push_back(end.reason);
+    }
+    CHECK((reasons == std::vector<GroupFileEnd>{GroupFileEnd::Cancelled, GroupFileEnd::Cancelled}));
+    CHECK(s.engine.files(s.now)[0].endReason == GroupFileEnd::Cancelled);
+}
+
+// Pieces of a transfer never announced: none larger than a Data frame can
+// be is kept.
+void testOversizedPiecesDropped()
+{
+    GroupFileEngine listener;
+    listener.setMyCallsign("K7ABC");
+    listener.setGear(5);
+    for (int index = 0; index < 3; index++)
+    {
+        GroupData d;
+        d.fileId = 0x123456;
+        d.index = index;
+        d.bytes.assign(index == 1 ? 200 : 1500, (uint8_t)index);
+        std::vector<uint8_t> frame = encodeGroupData(d);
+        listener.onFrame(frame.data(), frame.size(), 1000);
+    }
+    std::vector<GroupFile> files = listener.files(1000);
+    CHECK(files.size() == 1 && files[0].have == 1);
+}
+
+// Data2G stopped while files are coming: their lines end, the pieces kept.
+void testStopAllEndsIncoming()
+{
+    Scratch scratch("stopall");
+    std::string source = scratch.write("A.BIN", 7000);
+    Group group;
+    group.add("AG7EW");
+    group.add("K7ABC");
+    group.add("VK3XYZ");
+    std::string error;
+    CHECK(group[0].engine.send(source, group.nowMs, error) != 0);
+    CHECK(group.runUntil([&]() { return group.file(1, false).have >= 10; }));
+    CHECK(group[2].engine.receive(group.file(2, false).id, scratch.path("a.bin"), group.nowMs, error));
+    CHECK(group.file(1, false).state == State::Heard && group.file(2, false).state == State::Receiving);
+    for (size_t n : {1, 2})
+    {
+        group[n].engine.stopAll("Data2G was stopped.");
+        GroupFile f = group.file(n, false);
+        CHECK(f.state == State::Incomplete && !f.live() && f.have >= 10);
+    }
+}
+
 } // namespace
 
 int main()
@@ -1230,6 +1480,12 @@ int main()
     testAutoReceiveTurnedOff();
     testReceiveAfterItEnded();
     testHintsOutliveTheRound();
+    testResendOrder();
+    testResendCap();
+    testStuckStationWaits();
+    testCancelDuringAnEnd();
+    testOversizedPiecesDropped();
+    testStopAllEndsIncoming();
 
     if (failures > 0)
     {

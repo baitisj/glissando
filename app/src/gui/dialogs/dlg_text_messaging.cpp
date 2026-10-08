@@ -2119,6 +2119,9 @@ void TextMessagingDialog::updateFileTransfers()
         auto finished = std::find_if(m_fileLines.begin(), m_fileLines.end(),
                                      [](const FileLine& l) { return !l.live(); });
         if (finished == m_fileLines.end()) break;
+        // Not to come back from the engines, which keep more than this.
+        if (finished->group) m_clearedGroupFiles.insert(finished->groupFile.id);
+        else m_clearedFiles.insert(finished->transfer.id);
         m_fileLines.erase(finished);
         added = true;
     }
@@ -2523,12 +2526,24 @@ void TextMessagingDialog::updateGroupFiles(bool& added, bool& changed, bool& inc
         }
 
         const Data2G::GroupFile& was = line->groupFile;
+        // Everything the line shows: the service time only by whether it is
+        // known, its clock not moving, and how long ago a station asked as
+        // the line words it.
+        bool askersDiffer = was.askers.size() != f.askers.size() ||
+                            !std::equal(was.askers.begin(), was.askers.end(), f.askers.begin(),
+                                        [](const Data2G::GroupFile::Asker& a, const Data2G::GroupFile::Asker& b) {
+                                            return a.call == b.call && a.missing == b.missing &&
+                                                   duration((double)a.secondsAgo) == duration((double)b.secondsAgo);
+                                        });
         bool differs = was.state != f.state || was.phase != f.phase || was.have != f.have || was.round != f.round ||
                        was.pieces != f.pieces || was.secondsLeftInPhase != f.secondsLeftInPhase ||
                        was.slot != f.slot || was.slotInSeconds != f.slotInSeconds || was.firstInLine != f.firstInLine ||
-                       was.comingForUs != f.comingForUs || was.resending != f.resending ||
-                       was.askers.size() != f.askers.size() || was.path != f.path || was.name != f.name ||
-                       was.sender != f.sender || was.verified != f.verified || was.size != f.size;
+                       was.comingForUs != f.comingForUs || was.resending != f.resending || askersDiffer ||
+                       was.path != f.path || was.name != f.name || was.sender != f.sender ||
+                       was.verified != f.verified || was.size != f.size || was.othersAsking != f.othersAsking ||
+                       (was.serviceSecondsLeft >= 0) != (f.serviceSecondsLeft >= 0) ||
+                       (was.serviceSecondsLeft > 0) != (f.serviceSecondsLeft > 0) ||
+                       was.endReason != f.endReason || was.autoReceived != f.autoReceived || was.error != f.error;
         if (!differs) continue;
         if (f.state == Data2G::GroupFile::State::Failed && was.state != f.state && !f.error.empty())
         {
@@ -2599,7 +2614,7 @@ void TextMessagingDialog::sendFileToGroup()
     {
         Data2G::GroupFileEstimate at = frame->chatGroupFileEstimate(size.GetValue(), g);
         if (!faster.empty()) faster += ", ";
-        faster += GlissandoConsole::gearLabel(g) + ": " + duration(at.wallSeconds);
+        faster += GlissandoConsole::gearLabel(g) + ": " + duration(at.airSeconds);
     }
 
     if (estimate.airSeconds > Data2G::GroupFileEngine::REFUSE_AIR_SECONDS)
@@ -2613,10 +2628,11 @@ void TextMessagingDialog::sendFileToGroup()
     }
 
     wxString text = wxString::Format(
-        _("%s, %s bytes, %d pieces at %s: about %s on the air, then repairs until %s at the latest. "
-          "Stations will not confirm receipt."),
+        _("%s, %s bytes, %d pieces at %s: about %s on the air (%s with the pauses between keyings), then "
+          "repairs until %s at the latest. Stations will not confirm receipt."),
         name, groupDigits(size.GetValue()), estimate.pieces, GlissandoConsole::gearLabel(gear),
-        duration(estimate.wallSeconds), clockIn(estimate.wallSeconds + estimate.serviceSeconds));
+        duration(estimate.airSeconds), duration(estimate.wallSeconds),
+        clockIn(estimate.wallSeconds + estimate.serviceSeconds));
     bool long_ = estimate.airSeconds > Data2G::GroupFileEngine::WARN_AIR_SECONDS;
     if (long_)
     {

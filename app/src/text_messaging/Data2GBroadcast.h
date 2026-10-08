@@ -536,6 +536,7 @@ private:
         std::vector<std::vector<uint8_t>> frames;
         int gear = 0;
         bool retried = false;
+        GroupFileEnd endReason = GroupFileEnd::Quiet; // an End's reason
     };
 
     ModeInfo modeFor(int gear) const;

@@ -1055,7 +1055,10 @@ void GroupFileEngine::storePiece(Incoming& in, int index, const std::vector<uint
     }
     else
     {
-        // Before the geometry is known, no more than a whole file's worth.
+        // Before the geometry is known, no more than a whole file's worth:
+        // no piece larger than any Announce could name, and no more of them
+        // than a file of the largest size at that size.
+        if (bytes.size() > (size_t)MAX_PIECE_BYTES) return;
         if ((in.spool.size() + 1) * (size_t)MAX_PIECE_BYTES > GROUP_FILE_MAX_BYTES + (size_t)MAX_PIECE_BYTES) return;
     }
     in.spool[index] = bytes;
@@ -1786,6 +1789,7 @@ bool GroupFileEngine::takeSenderKeying(Outgoing& out, uint64_t nowMs, Taken& tak
             end.reason = out.endReason;
             end.rounds = out.round;
             taken.kind = KeyingKind::End;
+            taken.endReason = out.endReason;
             taken.frames.push_back(encodeGroupEnd(end));
             return true;
         }
@@ -2011,8 +2015,10 @@ void GroupFileEngine::keyingSent(uint64_t nowMs)
                                WINDOW_GUARD_MS;
             changed();
         }
-        else if (taken.kind == KeyingKind::End && out.step == Step::End)
+        else if (taken.kind == KeyingKind::End && out.step == Step::End && taken.endReason == out.endReason)
         {
+            // An End for an earlier reason (a cancel came while it was on
+            // the air) does not count towards the two of the new reason.
             if (--out.endsLeft <= 0) finishOutgoing(out, out.endReason);
         }
     }
@@ -2034,7 +2040,11 @@ void GroupFileEngine::keyingLost(uint64_t nowMs)
     for (Outgoing& out : outgoing_)
     {
         if (out.id != taken.id || out.step == Step::Over) continue;
-        if (taken.kind == KeyingKind::End) finishOutgoing(out, out.endReason);
+        if (taken.kind == KeyingKind::End)
+        {
+            // A cancel since then still has its own Ends to send.
+            if (out.step != Step::End || taken.endReason == out.endReason) finishOutgoing(out, out.endReason);
+        }
         else finishOutgoing(out, GroupFileEnd::Failed, "data2g-host did not send it.");
     }
 }
@@ -2053,10 +2063,18 @@ void GroupFileEngine::stopAll(const std::string& why)
     if (Outgoing* out = liveOutgoing()) finishOutgoing(*out, GroupFileEnd::Failed, why);
     inFlight_ = Taken();
     retry_ = Taken();
+    // Nothing more will be heard: what was coming ends as it would on the
+    // sender going quiet, its pieces kept a while for a later pass.
+    using State = GroupFile::State;
     for (Incoming& in : incoming_)
     {
         in.pending = false;
         in.lateAtMs = 0;
+        if ((in.state != State::Heard && in.state != State::Receiving) || in.ended) continue;
+        in.ended = true;
+        if (!in.verified) endIncoming(in, State::Incomplete);
+        else if (in.state == State::Receiving) save(in);
+        changed();
     }
 }
 

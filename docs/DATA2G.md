@@ -328,8 +328,9 @@ that is receive only.
 (dark, with a line saying why, as Send File... is). The file
 can be 64 KiB at most. Before it goes a box gives the estimate at the
 tempo the console has set now: `FRED.TXT, 7,000 bytes, 32 pieces at
-Presto: about 2 min on the air, then repairs until 14:32 at the latest.
-Stations will not confirm receipt.` Above 15 minutes of air the box warns
+Presto: about 2 min on the air (3 min with the pauses between keyings),
+then repairs until 14:32 at the latest. Stations will not confirm
+receipt.` Above 15 minutes of air the box warns
 that this holds the group for a long time, names the faster tempos with
 their times, and defaults to No. Above an hour it refuses, naming the
 faster tempos. One file goes to the group at a time.
@@ -360,7 +361,8 @@ size). Receive... on a file whose sender has stopped saves it there when
 it is sent again. A file cancelled by its sender, or that could not be
 saved or verified, is taken from the start when sent again. A station
 with all of it but the name saves it as `received-file` once the sender
-stops.
+stops. Data2G turned off ends every file still coming the same way: its
+line says incomplete, and its pieces are kept.
 
 Preferences, Modem tab: **Receive group files automatically** (off by
 default) saves every group file into the received files folder without
