@@ -9,6 +9,7 @@
 // Written for Glissando; no Data2G code is used (see docs/DATA2G.md).
 //=========================================================================
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>

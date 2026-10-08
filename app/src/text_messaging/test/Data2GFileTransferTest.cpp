@@ -5,6 +5,7 @@
 //                  for a session, with the files in a scratch folder.
 //=========================================================================
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
