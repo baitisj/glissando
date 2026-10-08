@@ -264,6 +264,7 @@ GlissandoTelemetry MainFrame::glissandoTelemetry()
                              (m_RxRunning && m_textMessagingTransport != nullptr &&
                               m_textMessagingTransport->isTransmitting());
     telemetry.audioRunning = m_RxRunning;
+    telemetry.data2g = data2gChatActive_.load(std::memory_order_acquire);
     if (glissandoChatShown()) m_chatUnread = false;
     telemetry.chatUnread = m_chatUnread;
 

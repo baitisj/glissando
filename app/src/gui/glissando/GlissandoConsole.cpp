@@ -860,6 +860,7 @@ void GlissandoConsole::refreshTelemetry()
     receivingLamp_->SetLit(t.receiving);
     transmittingLamp_->SetLit(t.transmitting);
     scope_->setActivity(t.receiving, t.transmitting);
+    scope_->setData2G(t.data2g);
     scope_->setSmoke(t.smoke);
     scope_->setCarrierSense(t.channelHeld, t.carrierHz);
     mapBall_->setLocators(t.homeLocator, t.stationLocator, t.stationLocatorCurrent);
