@@ -61,6 +61,7 @@ public:
         bool sessionConnecting = false;
         int sessionWaiting = 0;         // messages for sessions not yet acknowledged
         int64_t sessionUnacked = 0;     // data2g-host's last BUFFER in the session
+        bool sessionUnackedExact = false; // that BUFFER counts bytes (PR #51 host), not just "some"
         std::string error;              // why the last connection failed
     };
 
@@ -113,6 +114,7 @@ public:
     bool deliversReliablyTo(const std::string& destination) const override;
     bool transmitReliably(const std::vector<OutgoingBurst>& bursts, uint64_t keyingId) override;
     std::vector<KeyingReport> takeKeyingReports() override;
+    bool withdrawReliably(uint64_t keyingId) override;
     bool releaseStation(const std::string& destination) override;
 
     // Test hook: the clock the keying and session timers read.
@@ -147,6 +149,7 @@ private:
         std::vector<OutgoingBurst> bursts;
         int gear = 0;
         uint64_t queuedAtMs = 0;
+        uint64_t heldSinceMs = 0;   // NOT_SENT_TIMEOUT runs from here: not while a session holds the group
 
         enum class Stage
         {
@@ -217,7 +220,8 @@ private:
     std::vector<KeyingReport> reports_;
     uint64_t sessionWritten_;       // bytes written into this session
     uint64_t batchBytes_;           // the batch written last, while it is unsettled
-    bool batchCounted_;             // a BUFFER since that write has counted it
+    bool batchSeen_;                // a nonzero BUFFER since that write
+    bool batchCounted_;             // a BUFFER since that write has counted all of it
     int bufferExact_;               // -1 not known yet; 1 BUFFER counts bytes; 0 it does not
 
     FrameCallback frameCallback_;

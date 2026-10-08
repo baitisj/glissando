@@ -111,6 +111,15 @@ public:
     // in the order they were settled.
     virtual std::vector<KeyingReport> takeKeyingReports() { return {}; }
 
+    // Takes back a keying given to transmitReliably() that has not yet gone
+    // into the link. False once it has (it is the link's to finish and
+    // report on), or for one it never had.
+    virtual bool withdrawReliably(uint64_t keyingId)
+    {
+        (void)keyingId;
+        return false;
+    }
+
     // The operator has let go of this station. A transport that keeps
     // something open for one station, as Data2G keeps a session, ends it
     // at once, forgets every keying for the station it still holds without

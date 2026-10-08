@@ -1185,9 +1185,13 @@ wxString MainFrame::chatModemStatus()
     if (!status.sessionPeer.empty())
     {
         line += wxString::Format(_(", session with %s"), wxString::FromUTF8(status.sessionPeer));
-        if (status.sessionUnacked > 0)
+        if (status.sessionUnacked > 0 && status.sessionUnackedExact)
         {
             line += wxString::Format(_(" (%lld bytes not yet acknowledged)"), (long long)status.sessionUnacked);
+        }
+        else if (status.sessionUnacked > 0)
+        {
+            line += _(" (not all acknowledged yet)");
         }
     }
     else if (status.sessionConnecting)

@@ -715,7 +715,6 @@ struct Station
         transport.setGear(gear);
         protocol.setAirTiming(transport.airTiming());
 
-        Data2GTransport::Settings settings;
         settings.kissPort = host.kissPort;
         settings.commandPort = host.commandPort;
         settings.useSessions = useSessions;
@@ -723,6 +722,8 @@ struct Station
     }
 
     ~Station() { transport.stop(); }
+
+    Data2GTransport::Settings settings;
 
     void step(uint64_t ms = 100)
     {
@@ -827,12 +828,17 @@ void testDirectedMessageGoesThroughASession()
     CHECK(!hosts.heardCommand(0, "BCAST MODE")); // the session picks its own speed
     CHECK(a.transport.status().sessionPeer == "VK3ABC");
     CHECK(b.transport.status().sessionPeer == "W1AW");
+    CHECK(!b.transport.isTransmitting()); // no chat acknowledgement of its own waiting
 
     // Quiet for long enough, the caller closes it.
     runBoth(a, b, [&]() { return hosts.heardCommand(0, "DISCONNECT"); });
     CHECK(hosts.heardCommand(0, "DISCONNECT"));
     CHECK(waitFor([&]() { return a.transport.status().sessionPeer.empty(); }));
     CHECK(!hosts.heardCommand(1, "DISCONNECT")); // the called station leaves it to the caller
+
+    // Nor does one go on the group once the session has gone.
+    runBoth(a, b, [&]() { return false; }, 100);
+    CHECK(hosts.with([&]() { return hosts.sides[1].burstModes.size(); }) == 0);
 }
 
 // Three messages written into the session together are each settled as the
@@ -1013,6 +1019,33 @@ void testAPingThroughASessionIsAnsweredByTheModem()
     CHECK(b.observer.sawSystemLine("PING!"));
     runBoth(a, b, [&]() { return false; }, 50);
     CHECK(hosts.with([&]() { return hosts.sides[1].sessionBursts + (int)hosts.sides[1].burstModes.size(); }) == 0);
+    CHECK(!b.transport.isTransmitting()); // no pong waiting for the group
+}
+
+// Restarting the transport (new Data2G settings) ends what its session held:
+// the message is not left showing SENDING for good.
+void testRestartingTheTransportEndsWhatItHeld()
+{
+    FakeHostPair hosts;
+    hosts.with([&]() {
+        hosts.sides[0].holdAcks = true;
+        return 0;
+    });
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(settled(hosts, a, b));
+    CHECK(waitFor([&]() { return hosts.heardCommand(1, "LISTEN ON"); }));
+
+    std::string error;
+    CHECK(a.protocol.sendMessage("caught by a restart", "VK3ABC", error));
+    int64_t id = a.observer.lastAddedId();
+    runBoth(a, b, [&]() { return hosts.unackedBytes(0) != 0; });
+    CHECK(hosts.unackedBytes(0) != 0);
+
+    a.transport.start(a.settings);
+    a.protocol.setTransport(&a.transport);
+    runBoth(a, b, [&]() { return a.observer.statusOf(id) == MessageStatus::Failed; });
+    CHECK(a.observer.statusOf(id) == MessageStatus::Failed);
 }
 
 
@@ -1111,6 +1144,7 @@ int main()
     testAPingThroughASessionIsAnsweredByTheModem();
     testDeselectingTheStationEndsTheSession();
     testDeselectingAQuietSessionDisconnects();
+    testRestartingTheTransportEndsWhatItHeld();
     testAStationWithoutSessionsGetsTheGroup();
     testLosingTheCommandPortClearsBusyAndReopens();
     testACallsignChangeReopensTheGroup();

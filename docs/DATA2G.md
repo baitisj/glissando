@@ -133,11 +133,20 @@ group, so the protocol stands aside (Jeff, 2026-10-08):
   no tempo on such a message and offers no "Change Tempo to...". The
   console's tempo still picks the GLISS group's mode.
 
+- **Cancelling.** A message the app has not yet written into the session
+  can be cancelled, and is dropped when sending is inhibited (outside the
+  US data segments). One already written is the modem's to finish: it
+  ends OK or NO ACK as the modem decides. Deselecting the station (below)
+  ends the session itself.
+
 An older data2g-host (before PR #51) reports only 1 for "something is
 unacknowledged". The app tells the two apart from the first `BUFFER` after
 it writes, which on a new host counts at least what was written. With an
 older host, messages written together are settled together, at
-`BUFFER 0`.
+`BUFFER 0`. A host on another machine may read a large write in pieces and
+answer each with a `BUFFER`; nothing is settled by count until one has
+counted the whole write. The chat window shows how many bytes are waiting
+only when the host counts them.
 
 How the session itself runs:
 

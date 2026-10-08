@@ -247,6 +247,7 @@ Data2GTransport::Data2GTransport()
     , sessionAborted_(false)
     , sessionWritten_(0)
     , batchBytes_(0)
+    , batchSeen_(false)
     , batchCounted_(false)
     , bufferExact_(-1)
     , clock_(steadyMs)
@@ -324,11 +325,10 @@ void Data2GTransport::start(const Settings& settings)
         callsignChanged_ = false;
         useSessions_ = settings.useSessions;
         dataConnected_ = false;
-        sessionKeyings_.clear();
-        reports_.clear();
         released_.clear();
         batchBytes_ = 0;
         batchCounted_ = false;
+        batchSeen_ = false;
         bufferExact_ = -1;
     }
     stopping_ = false;
@@ -349,8 +349,15 @@ void Data2GTransport::stop()
     session_ = SessionState::None;
     sessionAborted_ = false;
     dataConnected_ = false;
+
+    // What the closed session was holding ends here, and the protocol is
+    // told, as for a lost session: what went into it failed, and what had
+    // not goes again however it can.
+    for (const SessionKeying& k : sessionKeyings_)
+    {
+        reports_.push_back({k.id, k.written ? KeyingReport::Result::Failed : KeyingReport::Result::NotTaken});
+    }
     sessionKeyings_.clear();
-    reports_.clear();
     batchBytes_ = 0;
 }
 
@@ -363,6 +370,7 @@ Data2GTransport::Status Data2GTransport::status() const
     status.sessionPeer = session_ == SessionState::Connected ? sessionPeer_ : std::string();
     status.sessionConnecting = session_ == SessionState::Connecting;
     status.sessionWaiting = (int)sessionKeyings_.size();
+    status.sessionUnackedExact = bufferExact_ == 1;
     return status;
 }
 
@@ -402,6 +410,7 @@ bool Data2GTransport::transmit(const std::vector<OutgoingBurst>& bursts)
     keying_.bursts = bursts;
     keying_.gear = bursts.front().gear != 0 ? bursts.front().gear : gear_;
     keying_.queuedAtMs = now();
+    keying_.heldSinceMs = keying_.queuedAtMs;
     hasKeying_ = true;
     return true;
 }
@@ -412,6 +421,10 @@ bool Data2GTransport::sessionPossibleLocked(const std::string& call) const
 {
     if (!useSessions_ || !status_.commandConnected || !dataConnected_) return false;
     if (myCallsign_.empty() || call.empty() || call == myCallsign_) return false;
+
+    // A session already open with it, whoever opened it, takes it whatever
+    // an earlier unanswered call said.
+    if (session_ == SessionState::Connected && sessionPeer_ == call) return true;
 
     auto hold = noSessionUntil_.find(call);
     return hold == noSessionUntil_.end() || now() >= hold->second;
@@ -449,6 +462,16 @@ bool Data2GTransport::transmitReliably(const std::vector<OutgoingBurst>& bursts,
     return true;
 }
 
+bool Data2GTransport::withdrawReliably(uint64_t keyingId)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = std::find_if(sessionKeyings_.begin(), sessionKeyings_.end(),
+                           [&](const SessionKeying& k) { return k.id == keyingId; });
+    if (it == sessionKeyings_.end() || it->written) return false;
+    sessionKeyings_.erase(it);
+    return true;
+}
+
 std::vector<KeyingReport> Data2GTransport::takeKeyingReports()
 {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -482,6 +505,7 @@ bool Data2GTransport::releaseStation(const std::string& destination)
     {
         batchBytes_ = 0;
         batchCounted_ = false;
+        batchSeen_ = false;
     }
 
     if (hasKeying_ && keying_.stage == Keying::Stage::Waiting && soleDestination(keying_.bursts) == peer)
@@ -525,17 +549,32 @@ void Data2GTransport::settleSessionLocked()
 
     if (!batchCounted_)
     {
-        if (unacked <= 0) return;
-        batchCounted_ = true;
-        if (bufferExact_ < 0)
+        if (unacked > 0)
         {
-            bufferExact_ = (uint64_t)unacked >= batchBytes_ ? 1 : 0;
-            if (log_)
+            batchSeen_ = true;
+            if (bufferExact_ < 0 && unacked == 1 && batchBytes_ > 1)
             {
-                log_(bufferExact_ ? "Data2G counts unacknowledged session bytes: each message is settled as its own"
-                                  : "Data2G reports only whether session bytes are unacknowledged: messages "
-                                    "written together are settled together");
+                bufferExact_ = 0;
+                if (log_)
+                {
+                    log_("Data2G reports only whether session bytes are unacknowledged: messages "
+                         "written together are settled together");
+                }
             }
+            if (bufferExact_ != 0)
+            {
+                // A host further away may read the batch in pieces, each
+                // answered with a BUFFER: nothing is settled by count until
+                // one has taken in the whole of it.
+                if ((uint64_t)unacked < batchBytes_) return;
+                if (bufferExact_ < 0 && log_) log_("Data2G counts unacknowledged session bytes: each message is settled as its own");
+                bufferExact_ = 1;
+            }
+            batchCounted_ = true;
+        }
+        else if (!batchSeen_)
+        {
+            return;
         }
     }
 
@@ -560,6 +599,7 @@ void Data2GTransport::settleSessionLocked()
     {
         batchBytes_ = 0;
         batchCounted_ = false;
+        batchSeen_ = false;
     }
 }
 
@@ -634,7 +674,13 @@ void Data2GTransport::run(Settings settings)
             dataConnected_ = false;
             // What was written is in the host now, but its BUFFER can no
             // longer be matched to it; nothing more can be written.
-            if (session_ == SessionState::Connected) reportLocked(sessionPeer_, true, KeyingReport::Result::Failed);
+            // The session goes too: its count of unacknowledged bytes covers
+            // what was written before, and would settle what comes after.
+            if (session_ == SessionState::Connected)
+            {
+                reportLocked(sessionPeer_, true, KeyingReport::Result::Failed);
+                released_.insert(sessionPeer_);
+            }
         }
         else
         {
@@ -791,8 +837,9 @@ void Data2GTransport::run(Settings settings)
                 if (awaitingReply && inFlight.kind == Command::Kind::Modes) modeLines.push_back(event.modeInfo);
                 break;
             case Type::Ptt:
+                // Not session activity: data2g-host keys for its idle polls
+                // too, which would keep a quiet session from ever closing.
                 pttOn_ = event.on;
-                if (session_ == SessionState::Connected) sessionActivityMs_ = now();
                 break;
             case Type::Busy:
                 busy_ = event.on;
@@ -814,10 +861,12 @@ void Data2GTransport::run(Settings settings)
                 sessionPeer_ = weCalled ? event.peer : event.text;
                 sessionOurs_ = weCalled;
                 session_ = SessionState::Connected;
+                noSessionUntil_.erase(sessionPeer_);
                 sessionActivityMs_ = now();
                 sessionWritten_ = 0;
                 batchBytes_ = 0;
                 batchCounted_ = false;
+                batchSeen_ = false;
                 status_.sessionUnacked = 0;
                 stream.reset();
                 if (log_) log_("Data2G session with " + sessionPeer_ + (weCalled ? " (we called)" : " (they called)"));
@@ -854,8 +903,8 @@ void Data2GTransport::run(Settings settings)
                 // One after the session has gone is about the next session,
                 // which data2g-host starts listening for at once.
                 if (session_ != SessionState::Connected) break;
+                if (event.count != status_.sessionUnacked) sessionActivityMs_ = now();
                 status_.sessionUnacked = event.count;
-                sessionActivityMs_ = now();
                 settleSessionLocked();
                 break;
             default:
@@ -926,7 +975,8 @@ void Data2GTransport::run(Settings settings)
         // channel held by sessions of other stations) goes to the group.
         for (auto it = sessionKeyings_.begin(); it != sessionKeyings_.end();)
         {
-            bool calling = session_ == SessionState::Connecting && sessionPeer_ == it->peer;
+            bool calling = (session_ == SessionState::Connecting || session_ == SessionState::Connected) &&
+                           sessionPeer_ == it->peer;
             if (it->written || calling || t - it->queuedAtMs < SESSION_WAIT_LIMIT_MS)
             {
                 ++it;
@@ -962,6 +1012,7 @@ void Data2GTransport::run(Settings settings)
                 }
                 batchBytes_ = bytes.size();
                 batchCounted_ = false;
+                batchSeen_ = false;
                 sessionActivityMs_ = t;
                 lock.unlock();
                 if (!sendBytes(data, bytes)) closeSocket_(data, "write failed");
@@ -1028,7 +1079,10 @@ void Data2GTransport::run(Settings settings)
             return;
         }
 
-        if (t - keying_.queuedAtMs >= NOT_SENT_TIMEOUT_MS)
+        // A session holds the group back for as long as it takes, so the
+        // time it does is not counted against the keying.
+        if (session_ != SessionState::None) keying_.heldSinceMs = t;
+        if (t - keying_.heldSinceMs >= NOT_SENT_TIMEOUT_MS)
         {
             hasKeying_ = false;
             if (log_) log_("Data2G: the chat keying could not be sent in time");

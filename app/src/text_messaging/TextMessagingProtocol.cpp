@@ -476,6 +476,14 @@ void TextMessagingProtocol::dropOutboxLocked(MessageStatus status, bool everythi
     for (auto it = outbox_.begin(); it != outbox_.end();)
     {
         bool drop = everything || it->state == TransmissionState::Queued;
+
+        // One a reliable link holds can be taken back only while the link
+        // has not started on it; after that it is the link's to finish.
+        if (it->state == TransmissionState::Delivering)
+        {
+            drop = transport_ != nullptr && transport_->withdrawReliably(it->keyingId);
+            if (drop && it->locatorRode) locatorPeers_[it->destination].sent = false;
+        }
         if (!drop)
         {
             ++it;
@@ -1236,8 +1244,13 @@ void TextMessagingProtocol::handlePartialAckLocked(const Frame& frame,
         }
 
         // Mid keying the report can only have been meant for an earlier one;
-        // what it confirms is recorded and the keying carries on.
-        if (pending.state == TransmissionState::Transmitting) return;
+        // what it confirms is recorded and the keying carries on. Likewise
+        // for one a reliable link holds, which it settles itself.
+        if (pending.state == TransmissionState::Transmitting ||
+            pending.state == TransmissionState::Delivering)
+        {
+            return;
+        }
 
         if (progress)
         {
@@ -1399,6 +1412,18 @@ TextMessagingProtocol::Cancel TextMessagingProtocol::cancelMessage(int64_t messa
 
             done = cancelForLocked(*it);
             if (done == Cancel::None) break;
+
+            // Already in a reliable link's hands: it will get there or be
+            // reported failed whatever is done here.
+            if (it->state == TransmissionState::Delivering)
+            {
+                if (transport_ == nullptr || !transport_->withdrawReliably(it->keyingId))
+                {
+                    done = Cancel::None;
+                    break;
+                }
+                if (it->locatorRode) locatorPeers_[it->destination].sent = false;
+            }
 
             if (onAirOut != nullptr) *onAirOut = it->state == TransmissionState::Transmitting;
             updateStatusLocked(*it, done == Cancel::Remove ? MessageStatus::NotSent : MessageStatus::Aborted, events);
@@ -1911,12 +1936,15 @@ void TextMessagingProtocol::settleReliableKeyingsLocked(std::vector<PendingEvent
                 break;
 
             case KeyingReport::Result::Failed:
+                if (it->locatorRode) locatorPeers_[it->destination].sent = false;
                 if (it->isPing) addSystemMessageLocked(it->destination + " : no response to PING", it->destination, events);
                 updateStatusLocked(*it, MessageStatus::Failed, events);
                 outbox_.erase(it);
                 break;
 
             case KeyingReport::Result::NotTaken:
+                // Nothing went, the locator included: it may ride again.
+                if (it->locatorRode) locatorPeers_[it->destination].sent = false;
                 it->state = TransmissionState::Queued;
                 it->keyingId = 0;
                 it->locatorRode = false;

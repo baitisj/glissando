@@ -130,6 +130,18 @@ public:
     bool releases = false;
     std::vector<std::string> released;
 
+    // Keyings the link has started on can no longer be taken back.
+    bool withdrawReliably(uint64_t keyingId) override
+    {
+        if (written.count(keyingId) != 0) return false;
+        auto it = std::find(reliableKeyings.begin(), reliableKeyings.end(), keyingId);
+        if (it == reliableKeyings.end()) return false;
+        withdrawn.push_back(keyingId);
+        return true;
+    }
+    std::set<uint64_t> written;
+    std::vector<uint64_t> withdrawn;
+
     std::vector<std::vector<std::vector<uint8_t>>> transmissions; // frames, per keying
     std::vector<std::vector<BurstMode>> modes;                    // and their modes
     std::vector<std::vector<int>> gears;                          // and tempos
@@ -3129,6 +3141,39 @@ void testReleasingAStationDropsWhatIsOutstanding()
     CHECK(a.observer.lastUpdateFor(delivering)->status == MessageStatus::Aborted);
 }
 
+// What a reliable link holds but has not started on can be cancelled, and
+// is dropped by a transmit inhibit; once it has started, it is the link's.
+void testWhatTheLinkHasNotStartedCanBeTakenBack()
+{
+    Station a("W1AW");
+    a.transport.reliableTo.insert("K1ABC");
+
+    std::string error;
+    CHECK(a.protocol.sendMessage("one", "K1ABC", error));
+    int64_t one = a.observer.added.back().id;
+    CHECK(a.protocol.sendMessage("two", "K1ABC", error));
+    int64_t two = a.observer.added.back().id;
+    CHECK(a.protocol.sendMessage("three", "K1ABC", error));
+    int64_t three = a.observer.added.back().id;
+    a.protocol.tick();
+    CHECK(a.transport.reliableKeyings.size() == 3);
+    a.transport.written.insert(a.transport.reliableKeyings[0]);
+
+    CHECK(a.protocol.cancelMessage(one) == TextMessagingProtocol::Cancel::None);
+    CHECK(a.observer.lastUpdateFor(one)->status == MessageStatus::Transmitting);
+    CHECK(a.protocol.cancelMessage(two) == TextMessagingProtocol::Cancel::Abort);
+    CHECK(a.observer.lastUpdateFor(two)->status == MessageStatus::Aborted);
+    CHECK(a.transport.withdrawn == std::vector<uint64_t>{a.transport.reliableKeyings[1]});
+
+    a.protocol.setTransmitInhibited("outside the data segment");
+    CHECK(a.observer.lastUpdateFor(three)->status == MessageStatus::NotSent);
+    CHECK(a.observer.lastUpdateFor(one)->status == MessageStatus::Transmitting);
+
+    a.transport.reports.push_back({a.transport.reliableKeyings[0], KeyingReport::Result::Delivered});
+    a.protocol.tick();
+    CHECK(a.observer.lastUpdateFor(one)->status == MessageStatus::Acknowledged);
+}
+
 // What arrives through such a link has been acknowledged by it: no
 // acknowledgement, pong or report of missing fragments of ours, whatever
 // the Auto acknowledge setting, and nothing held up on the channel.
@@ -3295,6 +3340,7 @@ int main()
     testMessageTheLinkDidNotTakeGoesTheOrdinaryWay();
     testFramesThroughAReliableLinkAreNotAnswered();
     testReleasingAStationDropsWhatIsOutstanding();
+    testWhatTheLinkHasNotStartedCanBeTakenBack();
     testQueuedWaitsLeaveTheLinkOut();
     testChangingTransportRequeuesWhatTheLinkHeld();
     testOlderStationGetsNoLocator();
