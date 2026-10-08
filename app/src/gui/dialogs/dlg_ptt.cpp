@@ -31,6 +31,10 @@
 
 #include <sstream>
 #include <chrono>
+#include <algorithm>
+
+#include <wx/display.h>
+#include <wx/scrolwin.h>
 
 #include "rig_control/HamlibRigController.h"
 #include "rig_control/SerialPortOutRigController.h"
@@ -59,7 +63,9 @@ ComPortsDlg::ComPortsDlg(wxWindow* parent, wxWindowID id, const wxString& title,
         SetTitle(wxString::Format("%s (%s)", title, wxGetApp().customConfigFileName));
     }
     
-    wxPanel* panel = new wxPanel(this);
+    // Everything but the buttons scrolls, so the dialog fits small screens.
+    wxScrolledWindow* panel = new wxScrolledWindow(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVSCROLL);
+    panel->SetScrollRate(0, 10);
     
     wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
     
@@ -184,6 +190,25 @@ ComPortsDlg::ComPortsDlg(wxWindow* parent, wxWindowID id, const wxString& title,
     mainSizer->Add(staticBoxSizer18, 0, static_cast<int>(wxEXPAND), 5);
 
     //----------------------------------------------------------------------
+    // Frequency control
+    //----------------------------------------------------------------------
+
+    // The radio's mode (USB, LSB, DIGU...) is the operator's to set; only the
+    // frequency is ever changed from here.
+    wxStaticBox* freqControlBox = new wxStaticBox(panel, wxID_ANY, _("Frequency Control"));
+    wxStaticBoxSizer* freqControlSizer = new wxStaticBoxSizer(freqControlBox, wxHORIZONTAL);
+
+    m_rbFrequencyControl = new wxRadioButton(freqControlBox, wxID_ANY, _("Set the radio's frequency"), wxDefaultPosition, wxDefaultSize, wxRB_GROUP);
+    m_rbFrequencyControl->SetToolTip(_("Presets and Set on the console tune the radio."));
+    freqControlSizer->Add(m_rbFrequencyControl, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
+
+    m_rbNoFrequencyControl = new wxRadioButton(freqControlBox, wxID_ANY, _("Leave the radio's frequency alone"), wxDefaultPosition, wxDefaultSize);
+    m_rbNoFrequencyControl->SetToolTip(_("The app only reads the radio's frequency and never tunes it."));
+    freqControlSizer->Add(m_rbNoFrequencyControl, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
+
+    mainSizer->Add(freqControlSizer, 0, static_cast<int>(wxEXPAND), 5);
+
+    //----------------------------------------------------------------------
     // Serial port PTT
     //----------------------------------------------------------------------
 
@@ -301,27 +326,34 @@ ComPortsDlg::ComPortsDlg(wxWindow* parent, wxWindowID id, const wxString& title,
 
     wxBoxSizer* boxSizer12 = new wxBoxSizer(wxHORIZONTAL);
 
-    m_buttonTest = new wxButton(panel, wxID_APPLY, _("Test PTT"), wxDefaultPosition, wxSize(-1,-1), 0);
+    m_buttonTest = new wxButton(this, wxID_APPLY, _("Test PTT"), wxDefaultPosition, wxSize(-1,-1), 0);
     boxSizer12->Add(m_buttonTest, 0, wxLEFT|wxRIGHT|wxTOP|wxBOTTOM, 5);
 
-    m_buttonOK = new wxButton(panel, wxID_OK, _("OK"), wxDefaultPosition, wxSize(-1,-1), 0);
+    m_buttonOK = new wxButton(this, wxID_OK, _("OK"), wxDefaultPosition, wxSize(-1,-1), 0);
     m_buttonOK->SetDefault();
     boxSizer12->Add(m_buttonOK, 0, wxLEFT|wxRIGHT|wxTOP|wxBOTTOM, 5);
 
-    m_buttonCancel = new wxButton(panel, wxID_CANCEL, _("Cancel"), wxDefaultPosition, wxSize(-1,-1), 0);
+    m_buttonCancel = new wxButton(this, wxID_CANCEL, _("Cancel"), wxDefaultPosition, wxSize(-1,-1), 0);
     boxSizer12->Add(m_buttonCancel, 0, wxLEFT|wxRIGHT|wxTOP|wxBOTTOM, 5);
 
-    m_buttonApply = new wxButton(panel, wxID_APPLY, _("Apply"), wxDefaultPosition, wxSize(-1,-1), 0);
+    m_buttonApply = new wxButton(this, wxID_APPLY, _("Apply"), wxDefaultPosition, wxSize(-1,-1), 0);
     boxSizer12->Add(m_buttonApply, 0, wxLEFT|wxRIGHT|wxTOP|wxBOTTOM, 5);
 
-    mainSizer->Add(boxSizer12, 0, wxLEFT|wxRIGHT|wxTOP|wxBOTTOM|wxALIGN_CENTER_HORIZONTAL, 5);
-
     panel->SetSizer(mainSizer);
-    
+
+    // Open tall enough to show everything when the screen has room, and no
+    // taller than most of it otherwise; the rest scrolls.
+    wxSize content = mainSizer->CalcMin();
+    int scrollbarWidth = wxSystemSettings::GetMetric(wxSYS_VSCROLL_X, panel);
+    wxDisplay display(this);
+    int maxHeight = std::max(display.GetClientArea().GetHeight(), display.GetGeometry().GetHeight()) * 3 / 4;
+    panel->SetMinSize(wxSize(content.GetWidth() + scrollbarWidth, std::min(content.GetHeight(), maxHeight)));
+
     wxBoxSizer* panelSizer = new wxBoxSizer(wxVERTICAL);
-    panelSizer->Add(panel, 0, static_cast<int>(wxEXPAND), 0);
+    panelSizer->Add(panel, 1, static_cast<int>(wxEXPAND), 0);
+    panelSizer->Add(boxSizer12, 0, wxLEFT|wxRIGHT|wxTOP|wxBOTTOM|wxALIGN_CENTER_HORIZONTAL, 5);
     this->SetSizerAndFit(panelSizer);
-    
+
     Centre(wxBOTH);
 
     // Connect events
@@ -598,6 +630,15 @@ void ComPortsDlg::ExchangeData(int inout)
         /* Hamlib */
 
         m_ckUseHamlibPTT->SetValue(wxGetApp().appConfiguration.rigControlConfiguration.hamlibUseForPTT);
+
+        // A FreeDV-era "frequency and mode changes" setting now means
+        // frequency changes: the mode is never touched.
+        bool frequencyControl =
+            wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqModeChanges ||
+            wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqChangesOnly;
+        m_rbFrequencyControl->SetValue(frequencyControl);
+        m_rbNoFrequencyControl->SetValue(!frequencyControl);
+
         m_spinAlcTarget->SetValue(wxGetApp().appConfiguration.rigControlConfiguration.alcTarget);
         m_cbRigName->SetSelection(wxGetApp().m_intHamlibRig);
         resetIcomCIVStatus();
@@ -659,6 +700,8 @@ void ComPortsDlg::ExchangeData(int inout)
         /* Hamlib settings. */
 
         wxGetApp().appConfiguration.rigControlConfiguration.hamlibUseForPTT = m_ckUseHamlibPTT->GetValue();
+        wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqModeChanges = false;
+        wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqChangesOnly = m_rbFrequencyControl->GetValue();
         wxGetApp().appConfiguration.rigControlConfiguration.alcTarget = (float)m_spinAlcTarget->GetValue();
         wxGetApp().m_intHamlibRig = m_cbRigName->GetSelection();
         

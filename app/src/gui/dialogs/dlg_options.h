@@ -77,8 +77,6 @@ class OptionsDlg : public wxDialog
         wxNotebookPage *m_debugTab; // Debug
         
         /* Hamlib options */
-        wxRadioButton *m_rbFrequencyControl;
-        wxRadioButton *m_rbNoFrequencyControl;
         wxTextCtrl    *m_txtTxRxDelayMilliseconds;
         wxCheckBox    *m_ckboxFrequencyEntryAsKHz;
 

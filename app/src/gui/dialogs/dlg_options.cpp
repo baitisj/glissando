@@ -177,30 +177,14 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
 
     sizerRigControl->Add(sbSizer_swr, 0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
     
-    wxStaticBoxSizer* sbSizer_hamlib;
-    wxStaticBox *sb_hamlib = new wxStaticBox(m_rigControlTab, wxID_ANY, _("Frequency Control Options"));
-    sbSizer_hamlib = new wxStaticBoxSizer(sb_hamlib, wxVERTICAL);
-    
-    // The radio's mode (USB, LSB, DIGU...) is the operator's to set; only the
-    // frequency is ever changed from here.
-    wxSizer* freqModeSizer = new wxBoxSizer(wxHORIZONTAL);
-    m_rbFrequencyControl = new wxRadioButton(sb_hamlib, wxID_ANY, _("Set the radio's frequency"), wxDefaultPosition, wxDefaultSize, wxRB_GROUP);
-    freqModeSizer->Add(m_rbFrequencyControl, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
-    
-    m_rbNoFrequencyControl = new wxRadioButton(sb_hamlib, wxID_ANY, _("Leave the radio's frequency alone"), wxDefaultPosition, wxDefaultSize);
-    freqModeSizer->Add(m_rbNoFrequencyControl, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
-    
-    sbSizer_hamlib->Add(freqModeSizer, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
-    
-    m_ckboxFrequencyEntryAsKHz = new wxCheckBox(sb_hamlib, wxID_ANY, _("Frequency entry in kHz"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    sbSizer_hamlib->Add(m_ckboxFrequencyEntryAsKHz, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
-
-    sizerRigControl->Add(sbSizer_hamlib,0, static_cast<int>(wxALL) | static_cast<int>(wxEXPAND), 5);
-    
     wxStaticBoxSizer* sbSizer_freqList;
     wxStaticBox *sb_freqList = new wxStaticBox(m_rigControlTab, wxID_ANY, _("Predefined Frequencies"));
     sbSizer_freqList = new wxStaticBoxSizer(sb_freqList, wxVERTICAL);
     
+    // Sets how this list and the console's frequencies are written.
+    m_ckboxFrequencyEntryAsKHz = new wxCheckBox(sb_freqList, wxID_ANY, _("Frequency entry in kHz"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
+    sbSizer_freqList->Add(m_ckboxFrequencyEntryAsKHz, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
+
     wxGridBagSizer* gridSizer = new wxGridBagSizer(5, 5);
     
     m_freqList = new wxListBox(sb_freqList, wxID_ANY, wxDefaultPosition, wxSize(350,150), 0, NULL, wxLB_SINGLE | wxLB_NEEDED_SB);
@@ -601,13 +585,6 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         m_ckboxSwrAutoAbort->SetValue(wxGetApp().appConfiguration.rigControlConfiguration.swrAutoAbort);
         m_ckboxSwrAutoAbort->Enable(wxGetApp().appConfiguration.rigControlConfiguration.swrMeter);
 
-        // A FreeDV-era "frequency and mode changes" setting now means
-        // frequency changes: the mode is never touched.
-        bool frequencyControl =
-            wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqModeChanges ||
-            wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqChangesOnly;
-        m_rbFrequencyControl->SetValue(frequencyControl);
-        m_rbNoFrequencyControl->SetValue(!frequencyControl);
         m_ckboxFrequencyEntryAsKHz->SetValue(wxGetApp().appConfiguration.reportingConfiguration.reportingFrequencyAsKhz);
         
         m_ckHalfDuplex->SetValue(wxGetApp().appConfiguration.halfDuplexMode);
@@ -696,8 +673,6 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         wxGetApp().appConfiguration.rigControlConfiguration.swrMeter = m_ckboxSwrMeter->GetValue();
         wxGetApp().appConfiguration.rigControlConfiguration.swrAutoAbort = m_ckboxSwrAutoAbort->GetValue();
 
-        wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqModeChanges = false;
-        wxGetApp().appConfiguration.rigControlConfiguration.hamlibEnableFreqChangesOnly = m_rbFrequencyControl->GetValue();
         
         wxGetApp().appConfiguration.halfDuplexMode = m_ckHalfDuplex->GetValue();
         wxGetApp().appConfiguration.textChatUsDataSegmentsOnly = m_ckboxTextChatUsDataSegmentsOnly->GetValue();
@@ -881,15 +856,11 @@ void OptionsDlg::updateRigControlState()
 {
     if (!sessionActive_)
     {
-        m_rbFrequencyControl->Enable(true);
-        m_rbNoFrequencyControl->Enable(true);
         m_txtTxRxDelayMilliseconds->Enable(true);
     }
     else
     {
         // Rig control settings cannot be updated during a session.
-        m_rbFrequencyControl->Enable(false);
-        m_rbNoFrequencyControl->Enable(false);
         m_txtTxRxDelayMilliseconds->Enable(false);
     }
 }
