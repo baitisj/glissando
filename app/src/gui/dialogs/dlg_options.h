@@ -64,14 +64,8 @@ class OptionsDlg : public wxDialog
 
         void    OnFifoReset(wxCommandEvent& event);
         
-        void    OnEnableSpacebarForPTT(wxCommandEvent& event);
-        void    OnSetPTTKey(wxCommandEvent& event);
         void    OnTOTTimerEnable(wxCommandEvent& event);
         void    OnSwrMeterEnable(wxCommandEvent& event);
-        void    OnDialogCharHook(wxKeyEvent& event);
-        void    OnPTTKeyCapture(wxKeyEvent& event);
-        void    enterPTTCaptureMode_();
-        void    exitPTTCaptureMode_(bool accept, int keyCode = 0);
 
         wxCheckBox* m_ckHalfDuplex;
 
@@ -85,12 +79,6 @@ class OptionsDlg : public wxDialog
         /* Hamlib options */
         wxRadioButton *m_rbFrequencyControl;
         wxRadioButton *m_rbNoFrequencyControl;
-        wxCheckBox    *m_ckboxEnableSpacebarForPTT;
-        wxCheckBox    *m_ckboxPTTMomentaryMode;
-        wxTextCtrl    *m_txtPTTKeyName;
-        wxButton      *m_btnSetPTTKey;
-        int            m_selectedPTTKeyCode;
-        bool           m_capturingPTTKey;
         wxTextCtrl    *m_txtTxRxDelayMilliseconds;
         wxCheckBox    *m_ckboxFrequencyEntryAsKHz;
 

@@ -723,8 +723,6 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("Glissando
     Bind(wxEVT_TIMER, &MainFrame::OnTOTTimer, this, ID_TIMER_TOT);
     m_totWarningTimer.SetOwner(this, ID_TIMER_TOT_WARNING);
     Bind(wxEVT_TIMER, &MainFrame::OnTOTWarningTimer, this, ID_TIMER_TOT_WARNING);
-    m_pttKeyPollTimer.SetOwner(this, ID_TIMER_PTT_KEY_POLL);
-    Bind(wxEVT_TIMER, &MainFrame::OnPttKeyPollTimer, this, ID_TIMER_PTT_KEY_POLL);
 #endif
     
     // Create PTT popup menu

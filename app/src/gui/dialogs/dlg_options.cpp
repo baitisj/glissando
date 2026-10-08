@@ -27,56 +27,6 @@
 #include "dlg_options.h"
 
 
-// F13-F24 on Linux (and possibly other platforms) return values different
-// than how they're defined in wxWidgets. These constants are so we can
-// check for these as well and do the right thing for key->name mapping.
-constexpr int WXK_F13_LINUX = 436;
-constexpr int WXK_F24_LINUX = WXK_F13_LINUX + 11;
-
-// Returns a human-readable name for a PTT key code.
-static wxString getPTTKeyName(int keyCode)
-{
-    if (keyCode >= 'A' && keyCode <= 'Z')
-    {
-        return wxString((char)keyCode);
-    }
-    else if (keyCode >= '0' && keyCode <= '9')
-    {
-        return wxString((char)keyCode);
-    }
-    else if (keyCode >= WXK_F1 && keyCode <= WXK_F24)
-    {
-        return wxString::Format(_("F%d"), (keyCode - WXK_F1) + 1);
-    }
-    else if (keyCode >= WXK_F13_LINUX && keyCode <= WXK_F24_LINUX)
-    {
-        return wxString::Format(_("F%d"), (keyCode - WXK_F13_LINUX) + 13);
-    }
-
-    switch (keyCode)
-    {
-        case WXK_SPACE:    return _("Space");
-        case WXK_TAB:      return _("Tab");
-        case WXK_RETURN:   return _("Enter");
-        case WXK_ESCAPE:   return _("Escape");
-        case WXK_BACK:     return _("Backspace");
-        case WXK_DELETE:   return _("Delete");
-        case WXK_INSERT:   return _("Insert");
-        case WXK_HOME:     return _("Home");
-        case WXK_END:      return _("End");
-        case WXK_PAGEUP:   return _("Page Up");
-        case WXK_PAGEDOWN: return _("Page Down");
-        case WXK_UP:       return _("Up");
-        case WXK_DOWN:     return _("Down");
-        case WXK_LEFT:     return _("Left");
-        case WXK_RIGHT:    return _("Right");
-        default:
-            if (keyCode > 32 && keyCode < 127)
-                return wxString((char)keyCode);
-            return wxString::Format(_("Key(%d)"), keyCode);
-    }
-}
-
 // PortAudio over/underflow counters
 
 extern std::atomic<int>    g_infifo1_full;
@@ -178,33 +128,16 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     //------------------------------
     
     wxStaticBoxSizer* sbSizer_ptt;
-    wxStaticBox *sb_ptt = new wxStaticBox(m_rigControlTab, wxID_ANY, _("PTT Options"));
+    wxStaticBox *sb_ptt = new wxStaticBox(m_rigControlTab, wxID_ANY, _("Transmit"));
     sbSizer_ptt = new wxStaticBoxSizer(sb_ptt, wxVERTICAL);
     
-    wxSizer* pttKeySizer = new wxBoxSizer(wxHORIZONTAL);
-    m_ckboxEnableSpacebarForPTT = new wxCheckBox(sb_ptt, wxID_ANY, _("Enable key for PTT:"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    pttKeySizer->Add(m_ckboxEnableSpacebarForPTT, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-
-    m_txtPTTKeyName = new wxTextCtrl(sb_ptt, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(120, -1), wxTE_READONLY | wxTE_PROCESS_ENTER);
-    m_txtPTTKeyName->SetToolTip(_("The key currently assigned to PTT."));
-    pttKeySizer->Add(m_txtPTTKeyName, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-
-    m_btnSetPTTKey = new wxButton(sb_ptt, wxID_ANY, _("Change..."), wxDefaultPosition, wxDefaultSize);
-    pttKeySizer->Add(m_btnSetPTTKey, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-
-    sbSizer_ptt->Add(pttKeySizer, 0, static_cast<int>(wxALL), 0);
-
-    m_ckboxPTTMomentaryMode = new wxCheckBox(sb_ptt, wxID_ANY, _("Momentary PTT (hold key to transmit)"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    m_ckboxPTTMomentaryMode->SetToolTip(_("When enabled, you must hold the PTT button or key to keep transmitting. Releasing it returns to receive."));
-    sbSizer_ptt->Add(m_ckboxPTTMomentaryMode, 0, static_cast<int>(wxALL), 5);
-
     wxSizer* txRxDelaySizer = new wxBoxSizer(wxHORIZONTAL);
 
     auto txRxDelayLabel = new wxStaticText(sb_ptt, wxID_ANY, _("TX/RX Delay (milliseconds): "));
     txRxDelaySizer->Add(txRxDelayLabel, 0, static_cast<int>(wxALL) | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL, 5);
 
     m_txtTxRxDelayMilliseconds = new wxTextCtrl(sb_ptt, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(80,-1), 0, wxTextValidator(wxFILTER_DIGITS));
-    m_txtTxRxDelayMilliseconds->SetToolTip(_("The amount of time to wait between toggling PTT and stopping/starting TX audio in milliseconds."));
+    m_txtTxRxDelayMilliseconds->SetToolTip(_("How long to wait after keying the radio before the audio starts, and after the audio ends before letting go, in milliseconds. Gives a slow amplifier or relay time to switch."));
     txRxDelaySizer->Add(m_txtTxRxDelayMilliseconds, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
 
     sbSizer_ptt->Add(txRxDelaySizer, 0, static_cast<int>(wxALL), 0);
@@ -212,11 +145,11 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     wxSizer* totTimerSizer = new wxBoxSizer(wxHORIZONTAL);
 
     m_ckboxTOTTimerEnabled = new wxCheckBox(sb_ptt, wxID_ANY, _("Enable Time-Out Timer (TOT):"), wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    m_ckboxTOTTimerEnabled->SetToolTip(_("When enabled, FreeDV will automatically stop transmitting after the configured time period has elapsed."));
+    m_ckboxTOTTimerEnabled->SetToolTip(_("When enabled, no single keying lasts longer than this. Longer messages are split into several keyings."));
     totTimerSizer->Add(m_ckboxTOTTimerEnabled, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
 
     m_txtTOTTimerSecs = new wxTextCtrl(sb_ptt, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(80, -1), 0, wxTextValidator(wxFILTER_DIGITS));
-    m_txtTOTTimerSecs->SetToolTip(_("The number of seconds FreeDV will transmit before automatically dropping back to receive."));
+    m_txtTOTTimerSecs->SetToolTip(_("The longest a single keying may last, in seconds."));
     totTimerSizer->Add(m_txtTOTTimerSecs, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
 
     auto totTimerSecsLabel = new wxStaticText(sb_ptt, wxID_ANY, _("seconds"));
@@ -598,11 +531,6 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     
     
 
-    m_ckboxEnableSpacebarForPTT->Connect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnEnableSpacebarForPTT), NULL, this);
-    m_btnSetPTTKey->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(OptionsDlg::OnSetPTTKey), NULL, this);
-    m_txtPTTKeyName->Bind(wxEVT_KEY_DOWN, &OptionsDlg::OnPTTKeyCapture, this);
-    m_txtPTTKeyName->Bind(wxEVT_CHAR, &OptionsDlg::OnPTTKeyCapture, this);
-    this->Bind(wxEVT_CHAR_HOOK, &OptionsDlg::OnDialogCharHook, this);
     
     m_freqList->Connect(wxEVT_LISTBOX, wxCommandEventHandler(OptionsDlg::OnReportingFreqSelectionChange), NULL, this);
     m_txtCtrlNewFrequency->Connect(wxEVT_TEXT, wxCommandEventHandler(OptionsDlg::OnReportingFreqTextChange), NULL, this);
@@ -641,11 +569,6 @@ OptionsDlg::~OptionsDlg()
     
     
 
-    m_ckboxEnableSpacebarForPTT->Disconnect(wxEVT_COMMAND_CHECKBOX_CLICKED, wxCommandEventHandler(OptionsDlg::OnEnableSpacebarForPTT), NULL, this);
-    m_btnSetPTTKey->Disconnect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(OptionsDlg::OnSetPTTKey), NULL, this);
-    m_txtPTTKeyName->Unbind(wxEVT_KEY_DOWN, &OptionsDlg::OnPTTKeyCapture, this);
-    m_txtPTTKeyName->Unbind(wxEVT_CHAR, &OptionsDlg::OnPTTKeyCapture, this);
-    this->Unbind(wxEVT_CHAR_HOOK, &OptionsDlg::OnDialogCharHook, this);
     
     m_freqList->Disconnect(wxEVT_LISTBOX, wxCommandEventHandler(OptionsDlg::OnReportingFreqSelectionChange), NULL, this);
     m_txtCtrlNewFrequency->Disconnect(wxEVT_TEXT, wxCommandEventHandler(OptionsDlg::OnReportingFreqTextChange), NULL, this);
@@ -668,15 +591,6 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
             m_freqList->Append(item);
         }
         
-        m_ckboxEnableSpacebarForPTT->SetValue(wxGetApp().appConfiguration.enableSpaceBarForPTT);
-        m_ckboxPTTMomentaryMode->SetValue(wxGetApp().appConfiguration.pttMomentaryMode);
-        m_selectedPTTKeyCode = wxGetApp().appConfiguration.pttKeyCode;
-        m_capturingPTTKey = false;
-        m_txtPTTKeyName->SetValue(getPTTKeyName(m_selectedPTTKeyCode));
-        m_txtPTTKeyName->SetEditable(false);
-        bool pttEnabled = wxGetApp().appConfiguration.enableSpaceBarForPTT;
-        m_txtPTTKeyName->Enable(pttEnabled);
-        m_btnSetPTTKey->Enable(pttEnabled);
         m_txtTxRxDelayMilliseconds->SetValue(wxString::Format("%d", wxGetApp().appConfiguration.txRxDelayMilliseconds.get()));
 
         m_ckboxTOTTimerEnabled->SetValue(wxGetApp().appConfiguration.rigControlConfiguration.totTimerEnabled);
@@ -769,10 +683,6 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         }
         wxGetApp().appConfiguration.reportingConfiguration.reportingFrequencyList = tmpList;
         
-        wxGetApp().appConfiguration.enableSpaceBarForPTT = m_ckboxEnableSpacebarForPTT->GetValue();
-        wxGetApp().appConfiguration.pttKeyCode = m_selectedPTTKeyCode;
-        wxGetApp().appConfiguration.pttMomentaryMode = m_ckboxPTTMomentaryMode->GetValue();
-
         wxGetApp().appConfiguration.txRxDelayMilliseconds = wxAtoi(m_txtTxRxDelayMilliseconds->GetValue());
 
         wxGetApp().appConfiguration.rigControlConfiguration.totTimerEnabled = m_ckboxTOTTimerEnabled->GetValue();
@@ -973,7 +883,6 @@ void OptionsDlg::updateRigControlState()
     {
         m_rbFrequencyControl->Enable(true);
         m_rbNoFrequencyControl->Enable(true);
-        m_ckboxEnableSpacebarForPTT->Enable(true);
         m_txtTxRxDelayMilliseconds->Enable(true);
     }
     else
@@ -981,20 +890,10 @@ void OptionsDlg::updateRigControlState()
         // Rig control settings cannot be updated during a session.
         m_rbFrequencyControl->Enable(false);
         m_rbNoFrequencyControl->Enable(false);
-        m_ckboxEnableSpacebarForPTT->Enable(false);
         m_txtTxRxDelayMilliseconds->Enable(false);
     }
 }
     
-void OptionsDlg::OnEnableSpacebarForPTT(wxCommandEvent&)
-{
-    bool enabled = m_ckboxEnableSpacebarForPTT->GetValue();
-    m_txtPTTKeyName->Enable(enabled);
-    m_btnSetPTTKey->Enable(enabled);
-    if (!enabled)
-        exitPTTCaptureMode_(false);
-}
-
 void OptionsDlg::OnTOTTimerEnable(wxCommandEvent&)
 {
     m_txtTOTTimerSecs->Enable(m_ckboxTOTTimerEnabled->GetValue());
@@ -1006,72 +905,6 @@ void OptionsDlg::OnSwrMeterEnable(wxCommandEvent&)
     m_ckboxSwrAutoAbort->Enable(m_ckboxSwrMeter->GetValue());
 }
 
-void OptionsDlg::OnSetPTTKey(wxCommandEvent&)
-{
-    if (m_capturingPTTKey)
-        exitPTTCaptureMode_(false);
-    else
-        enterPTTCaptureMode_();
-}
-
-void OptionsDlg::OnDialogCharHook(wxKeyEvent& event)
-{
-    // wxEVT_CHAR_HOOK reaches the dialog before wxEVT_KEY_DOWN reaches any child
-    // control, so this is the only place to intercept Escape while in capture mode
-    // — otherwise wxDialog's built-in handler closes the dialog first.
-    if (m_capturingPTTKey && event.GetKeyCode() == WXK_ESCAPE)
-    {
-        exitPTTCaptureMode_(false);
-        return; // consume — do not let the dialog treat Escape as Cancel
-    }
-    event.Skip();
-}
-
-void OptionsDlg::OnPTTKeyCapture(wxKeyEvent& event)
-{
-    if (!m_capturingPTTKey) { event.Skip(); return; }
-
-    int keyCode = event.GetKeyCode();
-    // Normalize lowercase letters to match wxEVT_KEY_DOWN uppercase convention.
-    if (keyCode >= 'a' && keyCode <= 'z')
-        keyCode -= ('a' - 'A');
-
-    if (keyCode == WXK_TAB)
-    {
-        exitPTTCaptureMode_(false);
-        event.Skip();
-        return;
-    }
-    // Ignore bare modifier keys.
-    if (keyCode == WXK_SHIFT || keyCode == WXK_CONTROL || keyCode == WXK_ALT ||
-        keyCode == WXK_CAPITAL || keyCode == WXK_NUMLOCK || keyCode == WXK_SCROLL ||
-        keyCode == WXK_NONE || keyCode == WXK_WINDOWS_LEFT || keyCode == WXK_WINDOWS_RIGHT ||
-        keyCode == WXK_WINDOWS_MENU || keyCode == WXK_COMMAND)
-    {
-        return;
-    }
-    exitPTTCaptureMode_(true, keyCode);
-    // Don't Skip() — prevents the key from typing into the text field.
-}
-
-void OptionsDlg::enterPTTCaptureMode_()
-{
-    m_capturingPTTKey = true;
-    m_txtPTTKeyName->SetEditable(true);
-    m_txtPTTKeyName->SetValue(_("Press any key..."));
-    m_txtPTTKeyName->SetFocus();
-    m_btnSetPTTKey->SetLabel(_("Cancel"));
-}
-
-void OptionsDlg::exitPTTCaptureMode_(bool accept, int keyCode)
-{
-    m_capturingPTTKey = false;
-    if (accept)
-        m_selectedPTTKeyCode = keyCode;
-    m_txtPTTKeyName->SetValue(getPTTKeyName(m_selectedPTTKeyCode));
-    m_txtPTTKeyName->SetEditable(false);
-    m_btnSetPTTKey->SetLabel(_("Change..."));
-}
 
 void OptionsDlg::DisplayFifoPACounters() {
     if (IsShownOnScreen())

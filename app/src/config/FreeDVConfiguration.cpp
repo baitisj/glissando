@@ -57,9 +57,6 @@ FreeDVConfiguration::FreeDVConfiguration()
     , playFileToMicInPath("/File/playFileToMicInPath", _(""))
     , playFileFromRadioPath("/File/playFileFromRadioPath", _(""))
         
-    , enableSpaceBarForPTT("/Rig/EnableSpacebarForPTT", true)
-    , pttKeyCode("/Rig/PttKeyCode", WXK_SPACE)
-    , pttMomentaryMode("/Rig/PttMomentaryMode", false)
 
         
     , halfDuplexMode("/Rig/HalfDuplex", true)
@@ -143,9 +140,6 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     load_(config, playFileToMicInPath);
     load_(config, playFileFromRadioPath);
     
-    load_(config, enableSpaceBarForPTT);
-    load_(config, pttKeyCode);
-    load_(config, pttMomentaryMode);
 
     
     load_(config, halfDuplexMode);
@@ -237,9 +231,6 @@ void FreeDVConfiguration::save(wxConfigBase* config)
     save_(config, playFileToMicInPath);
     save_(config, playFileFromRadioPath);
     
-    save_(config, enableSpaceBarForPTT);
-    save_(config, pttKeyCode);
-    save_(config, pttMomentaryMode);
 
     
     save_(config, halfDuplexMode);
