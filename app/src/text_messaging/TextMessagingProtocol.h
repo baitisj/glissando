@@ -110,6 +110,17 @@ public:
     // The reports on keyings given to transmitReliably() since the last call,
     // in the order they were settled.
     virtual std::vector<KeyingReport> takeKeyingReports() { return {}; }
+
+    // The operator has let go of this station. A transport that keeps
+    // something open for one station, as Data2G keeps a session, ends it
+    // at once, forgets every keying for the station it still holds without
+    // reporting it, and says true, so the protocol drops what it has
+    // outstanding for the station too. Nothing else does anything: false.
+    virtual bool releaseStation(const std::string& destination)
+    {
+        (void)destination;
+        return false;
+    }
 };
 
 // Implemented by the dialog. Callbacks arrive on whichever thread drove the
@@ -300,6 +311,13 @@ public:
     // onAirOut whether it was on the air: the caller stops that keying,
     // which this cannot do. Whatever else was queued carries on.
     Cancel cancelMessage(int64_t messageId, bool* onAirOut = nullptr);
+
+    // The operator has deselected the station. If the transport keeps a
+    // link to it (a Data2G session), the link is ended at once and every
+    // message and ping of ours for the station still outstanding is dropped
+    // as cancelMessage() would drop it. With any other transport, nothing
+    // changes. Returns how many were dropped.
+    int releaseStation(const std::string& destination);
 
     // The chat messages and pings still outstanding, by message store id.
     std::vector<int64_t> outstandingMessageIds() const;

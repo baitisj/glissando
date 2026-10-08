@@ -152,6 +152,14 @@ How the session itself runs:
   something for another station, or for the group, is waiting. Data2G
   sends no broadcasts during a session. A session the far end opened is
   left to it, unless something else has waited 45 s.
+- Deselecting the station in the call roster (clicking it again, picking
+  another station, or removing it) ends the session with it at once and
+  aborts every message and ping still outstanding for it, so the group is
+  free for broadcasts straight away. With nothing of ours unacknowledged
+  the app sends `DISCONNECT`, which tells the far end; otherwise `ABORT`,
+  since `DISCONNECT` would wait for the acknowledgements, and the far end
+  then finds the session gone when it stops hearing us. Over Glissando's
+  own modem deselecting changes nothing, as before.
 - With `LISTEN ON`, the host takes sessions other Glissando stations open
   to us, and frames arriving in them go to the chat protocol.
 - If the station doesn't answer (`DISCONNECTED` while connecting; Data2G
@@ -198,7 +206,8 @@ messages learn it only from a ping.
   directed message through a session settled by the modem with no chat
   acknowledgement, three messages each settled as its bytes are
   acknowledged, an older host settling them together, a lost session
-  failing a message, a ping through a session, a station without sessions
+  failing a message, a ping through a session, deselecting the station
+  ending its session (ABORT with messages outstanding, DISCONNECT without), a station without sessions
   getting the group instead, a lost command port, and a callsign change
   reopening the group. Clean under ThreadSanitizer.
   `TextMessagingProtocolTest` covers the protocol's side against a fake

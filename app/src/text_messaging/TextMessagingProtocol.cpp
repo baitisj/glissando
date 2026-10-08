@@ -1411,6 +1411,34 @@ TextMessagingProtocol::Cancel TextMessagingProtocol::cancelMessage(int64_t messa
     return done;
 }
 
+int TextMessagingProtocol::releaseStation(const std::string& destination)
+{
+    if (destination.empty()) return 0;
+
+    int dropped = 0;
+    std::vector<PendingEvent> events;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (transport_ == nullptr || !transport_->releaseStation(destination)) return 0;
+
+        for (auto it = outbox_.begin(); it != outbox_.end();)
+        {
+            Cancel cancel = it->destination == destination ? cancelForLocked(*it) : Cancel::None;
+            if (cancel == Cancel::None)
+            {
+                ++it;
+                continue;
+            }
+            updateStatusLocked(*it, cancel == Cancel::Remove ? MessageStatus::NotSent : MessageStatus::Aborted, events);
+            it = outbox_.erase(it);
+            dropped++;
+        }
+    }
+
+    deliver(events);
+    return dropped;
+}
+
 std::vector<int64_t> TextMessagingProtocol::outstandingMessageIds() const
 {
     std::lock_guard<std::mutex> lock(mutex_);

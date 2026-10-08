@@ -937,6 +937,66 @@ void testALostSessionFailsTheMessage()
     CHECK(b.observer.receivedTexts().empty());
 }
 
+// Deselecting the station ends the session at once and drops what is
+// outstanding for it; the group is free again straight after.
+void testDeselectingTheStationEndsTheSession()
+{
+    FakeHostPair hosts;
+    hosts.with([&]() {
+        hosts.sides[0].holdAcks = true;
+        return 0;
+    });
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(settled(hosts, a, b));
+    CHECK(waitFor([&]() { return hosts.heardCommand(1, "LISTEN ON"); }));
+
+    std::string error;
+    CHECK(a.protocol.sendMessage("never mind", "VK3ABC", error));
+    int64_t first = a.observer.lastAddedId();
+    CHECK(a.protocol.sendMessage("this neither", "VK3ABC", error));
+    int64_t second = a.observer.lastAddedId();
+    runBoth(a, b, [&]() { return hosts.unackedBytes(0) != 0; });
+    CHECK(hosts.unackedBytes(0) != 0);
+
+    // Something of ours unacknowledged: ABORT, as DISCONNECT would wait.
+    CHECK(a.protocol.releaseStation("VK3ABC") == 2);
+    CHECK(a.observer.statusOf(first) == MessageStatus::Aborted);
+    CHECK(a.observer.statusOf(second) == MessageStatus::Aborted);
+    runBoth(a, b, [&]() { return hosts.heardCommand(0, "ABORT"); });
+    CHECK(hosts.heardCommand(0, "ABORT"));
+
+    CHECK(a.protocol.sendMessage("back on the group", "", error));
+    runBoth(a, b, [&]() { return !b.observer.receivedTexts().empty(); });
+    std::vector<TextMessage> got = b.observer.receivedTexts();
+    CHECK(got.size() == 1 && got[0].text == "back on the group");
+    CHECK(!a.observer.sawStatus(MessageStatus::Failed));
+    CHECK(!a.observer.sawStatus(MessageStatus::Acknowledged));
+}
+
+// With nothing unacknowledged the session is closed with DISCONNECT, which
+// tells the far end, rather than left to time out.
+void testDeselectingAQuietSessionDisconnects()
+{
+    FakeHostPair hosts;
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(settled(hosts, a, b));
+    CHECK(waitFor([&]() { return hosts.heardCommand(1, "LISTEN ON"); }));
+
+    std::string error;
+    CHECK(a.protocol.sendMessage("all done", "VK3ABC", error));
+    runBoth(a, b, [&]() { return a.observer.sawStatus(MessageStatus::Acknowledged); });
+    CHECK(a.observer.sawStatus(MessageStatus::Acknowledged));
+    CHECK(!hosts.heardCommand(0, "DISCONNECT")); // it would stay open 45 s
+
+    CHECK(a.protocol.releaseStation("VK3ABC") == 0);
+    runBoth(a, b, [&]() { return hosts.heardCommand(0, "DISCONNECT"); });
+    CHECK(hosts.heardCommand(0, "DISCONNECT"));
+    CHECK(!hosts.heardCommand(0, "ABORT"));
+    CHECK(waitFor([&]() { return a.transport.status().sessionPeer.empty(); }));
+}
+
 // A ping through a session is answered by the modem: no pong of our own.
 void testAPingThroughASessionIsAnsweredByTheModem()
 {
@@ -1049,6 +1109,8 @@ int main()
     testAnOlderHostSettlesTheBatchTogether();
     testALostSessionFailsTheMessage();
     testAPingThroughASessionIsAnsweredByTheModem();
+    testDeselectingTheStationEndsTheSession();
+    testDeselectingAQuietSessionDisconnects();
     testAStationWithoutSessionsGetsTheGroup();
     testLosingTheCommandPortClearsBusyAndReopens();
     testACallsignChangeReopensTheGroup();

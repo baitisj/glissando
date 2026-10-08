@@ -113,6 +113,7 @@ public:
     bool deliversReliablyTo(const std::string& destination) const override;
     bool transmitReliably(const std::vector<OutgoingBurst>& bursts, uint64_t keyingId) override;
     std::vector<KeyingReport> takeKeyingReports() override;
+    bool releaseStation(const std::string& destination) override;
 
     // Test hook: the clock the keying and session timers read.
     void setClock(std::function<uint64_t()> monotonicMs);
@@ -204,6 +205,8 @@ private:
     std::map<std::string, uint64_t> noSessionUntil_;
     bool useSessions_;
     bool dataConnected_;
+    std::set<std::string> released_;    // stations whose session is to end at once
+    bool sessionAborted_;               // ABORT sent for the session now ending
 
     // Session keyings in the order given, and what has become of them.
     // data2g-host's BUFFER is the count of bytes the far end has not yet

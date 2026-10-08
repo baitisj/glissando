@@ -244,6 +244,7 @@ Data2GTransport::Data2GTransport()
     , connectStartedMs_(0)
     , useSessions_(false)
     , dataConnected_(false)
+    , sessionAborted_(false)
     , sessionWritten_(0)
     , batchBytes_(0)
     , batchCounted_(false)
@@ -318,12 +319,14 @@ void Data2GTransport::start(const Settings& settings)
         pttOn_ = false;
         busy_ = false;
         session_ = SessionState::None;
+        sessionAborted_ = false;
         noSessionUntil_.clear();
         callsignChanged_ = false;
         useSessions_ = settings.useSessions;
         dataConnected_ = false;
         sessionKeyings_.clear();
         reports_.clear();
+        released_.clear();
         batchBytes_ = 0;
         batchCounted_ = false;
         bufferExact_ = -1;
@@ -344,6 +347,7 @@ void Data2GTransport::stop()
     pttOn_ = false;
     busy_ = false;
     session_ = SessionState::None;
+    sessionAborted_ = false;
     dataConnected_ = false;
     sessionKeyings_.clear();
     reports_.clear();
@@ -451,6 +455,42 @@ std::vector<KeyingReport> Data2GTransport::takeKeyingReports()
     std::vector<KeyingReport> reports;
     reports.swap(reports_);
     return reports;
+}
+
+// The operator let go of the station: what is held for it goes without a
+// report (the protocol drops the messages itself), a group keying that is
+// only for it and has not been written yet goes too, and the thread ends
+// any session with it.
+bool Data2GTransport::releaseStation(const std::string& destination)
+{
+    std::string peer = Data2G::commandCallsign(destination);
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (peer.empty()) return true;
+
+    bool written = false;
+    for (auto it = sessionKeyings_.begin(); it != sessionKeyings_.end();)
+    {
+        if (it->peer != peer)
+        {
+            ++it;
+            continue;
+        }
+        written = written || it->written;
+        it = sessionKeyings_.erase(it);
+    }
+    if (written)
+    {
+        batchBytes_ = 0;
+        batchCounted_ = false;
+    }
+
+    if (hasKeying_ && keying_.stage == Keying::Stage::Waiting && soleDestination(keying_.bursts) == peer)
+    {
+        hasKeying_ = false;
+    }
+
+    released_.insert(peer);
+    return true;
 }
 
 // Reports every session keying for the station, those written into its
@@ -611,6 +651,7 @@ void Data2GTransport::run(Settings settings)
             busy_ = false;
             if (session_ == SessionState::Connected) reportLocked(sessionPeer_, true, KeyingReport::Result::Failed);
             session_ = SessionState::None;
+            sessionAborted_ = false;
             bufferExact_ = -1;
             if (hasKeying_ && keying_.stage == Keying::Stage::Sent) hasKeying_ = false;
             else if (hasKeying_) keying_.stage = Keying::Stage::Waiting;
@@ -787,6 +828,7 @@ void Data2GTransport::run(Settings settings)
                 bool wasConnecting = session_ == SessionState::Connecting;
                 std::string peer = sessionPeer_;
                 session_ = SessionState::None;
+                sessionAborted_ = false;
                 sessionPeer_.clear();
                 if (wasConnecting)
                 {
@@ -858,6 +900,28 @@ void Data2GTransport::run(Settings settings)
             return;
         }
 
+        // A station the operator let go of: its session ends now. A clean
+        // DISCONNECT tells the far end, and data2g-host sends it at once
+        // when nothing of ours is unacknowledged; otherwise it would wait
+        // for the acknowledgements, so ABORT, which drops the session here
+        // and leaves the far end to find it gone.
+        if (!released_.empty())
+        {
+            std::set<std::string> released;
+            released.swap(released_);
+            if (session_ != SessionState::None && released.count(sessionPeer_) != 0 && !sessionAborted_)
+            {
+                bool clean = session_ == SessionState::Connected && status_.sessionUnacked == 0;
+                if (session_ != SessionState::Disconnecting || !clean)
+                {
+                    session_ = SessionState::Disconnecting;
+                    sessionAborted_ = !clean;
+                    queueCommand(Command::Kind::Disconnect, clean ? "DISCONNECT" : "ABORT");
+                    if (log_) log_("Data2G: station deselected; ending the session with " + sessionPeer_);
+                }
+            }
+        }
+
         // A session keying that has waited too long for its session (the
         // channel held by sessions of other stations) goes to the group.
         for (auto it = sessionKeyings_.begin(); it != sessionKeyings_.end();)
@@ -926,6 +990,7 @@ void Data2GTransport::run(Settings settings)
             {
                 // ABORT answers DISCONNECTED at once.
                 session_ = SessionState::Disconnecting;
+                sessionAborted_ = true;
                 noSessionUntil_[sessionPeer_] = t + NO_SESSION_HOLD_MS;
                 reportLocked(sessionPeer_, false, KeyingReport::Result::NotTaken);
                 queueCommand(Command::Kind::Disconnect, "ABORT");

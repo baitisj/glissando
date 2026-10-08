@@ -119,6 +119,17 @@ public:
         return taken;
     }
 
+    // Lets go of stations only when releases is set, as Data2G does; our own
+    // modem keeps the default, which does nothing.
+    bool releaseStation(const std::string& destination) override
+    {
+        if (!releases) return ITextMessagingTransport::releaseStation(destination);
+        released.push_back(destination);
+        return true;
+    }
+    bool releases = false;
+    std::vector<std::string> released;
+
     std::vector<std::vector<std::vector<uint8_t>>> transmissions; // frames, per keying
     std::vector<std::vector<BurstMode>> modes;                    // and their modes
     std::vector<std::vector<int>> gears;                          // and tempos
@@ -3075,6 +3086,49 @@ void testMessageTheLinkDidNotTakeGoesTheOrdinaryWay()
     CHECK(a.observer.lastUpdateFor(id)->status == MessageStatus::Acknowledged);
 }
 
+// Deselecting a station with a link to it drops everything of ours still
+// outstanding for it, on the air, waiting or queued, and nothing for any
+// other station. Over our own modem deselecting changes nothing.
+void testReleasingAStationDropsWhatIsOutstanding()
+{
+    {
+        Station a("W1AW");
+        std::string error;
+        CHECK(a.protocol.sendMessage("hello", "K1ABC", error));
+        int64_t id = a.observer.added.back().id;
+        a.completeOneTransmission();
+        CHECK(a.protocol.releaseStation("K1ABC") == 0);
+        CHECK(a.observer.lastUpdateFor(id)->status == MessageStatus::AwaitingAck);
+    }
+
+    Station a("W1AW");
+    a.transport.releases = true;
+    a.transport.reliableTo.insert("K1ABC");
+
+    std::string error;
+    CHECK(a.protocol.sendMessage("first", "K1ABC", error));
+    int64_t delivering = a.observer.added.back().id;
+    a.protocol.tick();
+    CHECK(a.transport.reliable.size() == 1);
+    CHECK(a.protocol.sendPing("K1ABC", error));
+    int64_t ping = a.observer.added.back().id;
+    CHECK(a.protocol.sendMessage("for somebody else", "N0CALL", error));
+    int64_t other = a.observer.added.back().id;
+
+    CHECK(a.protocol.releaseStation("K1ABC") == 2);
+    CHECK(a.transport.released == std::vector<std::string>{"K1ABC"});
+    CHECK(a.observer.lastUpdateFor(delivering)->status == MessageStatus::Aborted);
+    CHECK(a.observer.lastUpdateFor(ping)->status != MessageStatus::Acknowledged);
+    CHECK(everUpdatedTo(a.observer, ping, MessageStatus::NotSent) ||
+          everUpdatedTo(a.observer, ping, MessageStatus::Aborted));
+    CHECK(a.protocol.cancelFor(other) != TextMessagingProtocol::Cancel::None);
+
+    // A late report on the dropped keying changes nothing.
+    a.transport.reports.push_back({a.transport.reliableKeyings[0], KeyingReport::Result::Delivered});
+    a.protocol.tick();
+    CHECK(a.observer.lastUpdateFor(delivering)->status == MessageStatus::Aborted);
+}
+
 // What arrives through such a link has been acknowledged by it: no
 // acknowledgement, pong or report of missing fragments of ours, whatever
 // the Auto acknowledge setting, and nothing held up on the channel.
@@ -3240,6 +3294,7 @@ int main()
     testReliableLinkFailureEndsTheMessage();
     testMessageTheLinkDidNotTakeGoesTheOrdinaryWay();
     testFramesThroughAReliableLinkAreNotAnswered();
+    testReleasingAStationDropsWhatIsOutstanding();
     testQueuedWaitsLeaveTheLinkOut();
     testChangingTransportRequeuesWhatTheLinkHeld();
     testOlderStationGetsNoLocator();

@@ -962,9 +962,21 @@ void TextMessagingDialog::updateSelectionControls()
 
     if (callsign != m_mapPick)
     {
+        std::string released = m_mapPick;
         m_mapPick = callsign;
         TextMessagingSession::instance().protocol().setMapSelection(callsign);
         if (uiLogEnabled()) log_info("UI: map follows \"%s\"", callsign.c_str());
+
+        // Letting go of a station ends a Data2G session with it, so the
+        // group is free again, and drops what is still outstanding for it.
+        // Over any other modem this changes nothing.
+        int dropped = released.empty() ? 0 : TextMessagingSession::instance().protocol().releaseStation(released);
+        if (dropped > 0)
+        {
+            setStatus(wxString::Format(wxPLURAL("%d message to %s aborted.", "%d messages to %s aborted.", dropped),
+                                       dropped, wxString::FromUTF8(released)));
+            if (uiLogEnabled()) log_info("UI: %s deselected, %d outstanding dropped", released.c_str(), dropped);
+        }
     }
 
     bool pingable = selected && m_inhibitReason.empty();
