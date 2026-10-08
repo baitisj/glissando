@@ -578,7 +578,7 @@ void GlissandoConsole::buildControls()
     chatButton_->SetToolTip(_("Open or close the COMMS window, where chat is sent and read. "
                               "Flashes red while it is closed and a message has come in."));
     preferencesButton_ = new Button(commandPlate, wxID_ANY, _("Preferences"), false, wxSize(COLUMN, ROW));
-    preferencesButton_->SetToolTip(_("Options, sound cards, rig control and audio filters."));
+    preferencesButton_->SetToolTip(_("Options, sound cards, CAT/PTT and easy setup."));
     switches->AddSpacer(engageTop);
     switches->Add(engageButton_, 0, wxBOTTOM, READOUT - engageTop - engageHeight + GAP);
     switches->Add(chatButton_, 0, wxBOTTOM, GAP);
@@ -733,8 +733,8 @@ void GlissandoConsole::showPreferences()
     const std::vector<Entry> entries = {
         {GlissandoSetup::Options, _("Options"), _("Callsign, frequency list, chat and other options.")},
         {GlissandoSetup::AudioDevices, _("Sound cards"), _("Which sound cards talk to the radio.")},
-        {GlissandoSetup::RigControl, _("Rig control"), _("CAT and PTT: how the radio is keyed and tuned.")},
-        {GlissandoSetup::EasySetup, _("Easy setup"), _("Sound cards, rig control and callsign on one page.")},
+        {GlissandoSetup::RigControl, _("CAT/PTT"), _("How the radio is keyed and tuned, and whether the app may tune it.")},
+        {GlissandoSetup::EasySetup, _("Easy setup"), _("Sound cards, CAT/PTT and callsign on one page.")},
     };
 
     std::vector<Choice> choices;
@@ -961,7 +961,7 @@ void GlissandoConsole::updateDrive(const GlissandoTelemetry& t)
                 "Click to pop it out.");
     else if (t.driveAuto)
         tip = _("Pushed in: while transmitting, the radio's ALC is read once a second and the level is turned "
-                "down whenever it reads over the target in Preferences, Rig control. It never turns up on its "
+                "down whenever it reads over the target in Preferences, CAT/PTT. It never turns up on its "
                 "own. Click to pop it out, or turn it to take over.");
     else
         tip = _("Transmit audio level. Drag up or down, or turn the mouse wheel (0.5 dB a click, 0.1 dB with "
