@@ -29,6 +29,8 @@ constexpr uint8_t TFESC = 0xDD;
 constexpr double DECODE_SECONDS = 3.0;
 
 constexpr uint8_t STREAM_MAGIC = 'G';
+constexpr uint8_t FILE_MAGIC = 'F';
+constexpr size_t FILE_HEADER_BYTES = 4;   // 'F', type, length
 
 std::string upper(std::string text)
 {
@@ -359,24 +361,69 @@ std::vector<uint8_t> streamEncode(const std::vector<uint8_t>& frame)
     return out;
 }
 
+std::vector<uint8_t> fileRecordEncode(FileRecordType type, const std::vector<uint8_t>& body)
+{
+    std::vector<uint8_t> out;
+    if (body.empty() || body.size() > 0xFFFF) return out;
+    out.reserve(body.size() + FILE_HEADER_BYTES);
+    out.push_back(FILE_MAGIC);
+    out.push_back((uint8_t)type);
+    out.push_back((uint8_t)(body.size() >> 8));
+    out.push_back((uint8_t)(body.size() & 0xFF));
+    out.insert(out.end(), body.begin(), body.end());
+    return out;
+}
+
 bool StreamDecoder::feed(const uint8_t* bytes, int length, std::vector<std::vector<uint8_t>>& framesOut)
+{
+    std::vector<FileRecord> records;
+    return feed(bytes, length, framesOut, records);
+}
+
+bool StreamDecoder::feed(const uint8_t* bytes, int length, std::vector<std::vector<uint8_t>>& framesOut,
+                         std::vector<FileRecord>& recordsOut)
 {
     if (foreign_) return false;
     pending_.insert(pending_.end(), bytes, bytes + length);
 
+    // Anything but a chat frame or a file record, an empty one, or a file
+    // record of type 0, is somebody else's stream.
+    auto foreign = [this]() {
+        foreign_ = true;
+        pending_.clear();
+        return false;
+    };
+
     size_t at = 0;
     while (pending_.size() - at >= 2)
     {
-        if (pending_[at] != STREAM_MAGIC || pending_[at + 1] == 0)
+        uint8_t magic = pending_[at];
+        if (magic == STREAM_MAGIC)
         {
-            foreign_ = true;
-            pending_.clear();
-            return false;
+            if (pending_[at + 1] == 0) return foreign();
+            size_t size = pending_[at + 1];
+            if (pending_.size() - at - 2 < size) break;
+            framesOut.emplace_back(pending_.begin() + (long)at + 2, pending_.begin() + (long)(at + 2 + size));
+            at += 2 + size;
         }
-        size_t size = pending_[at + 1];
-        if (pending_.size() - at - 2 < size) break;
-        framesOut.emplace_back(pending_.begin() + (long)at + 2, pending_.begin() + (long)(at + 2 + size));
-        at += 2 + size;
+        else if (magic == FILE_MAGIC)
+        {
+            if (pending_[at + 1] == 0) return foreign();
+            if (pending_.size() - at < FILE_HEADER_BYTES) break;
+            size_t size = ((size_t)pending_[at + 2] << 8) | pending_[at + 3];
+            if (size == 0) return foreign();
+            if (pending_.size() - at - FILE_HEADER_BYTES < size) break;
+            FileRecord record;
+            record.type = pending_[at + 1];
+            auto body = pending_.begin() + (long)(at + FILE_HEADER_BYTES);
+            record.body.assign(body, body + (long)size);
+            recordsOut.push_back(std::move(record));
+            at += FILE_HEADER_BYTES + size;
+        }
+        else
+        {
+            return foreign();
+        }
     }
     pending_.erase(pending_.begin(), pending_.begin() + (long)at);
     return true;

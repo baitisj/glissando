@@ -35,17 +35,22 @@
 #ifndef __FDV_TEXT_MESSAGING_DIALOG__
 #define __FDV_TEXT_MESSAGING_DIALOG__
 
+#include <ctime>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
 #include <wx/dialog.h>
 #include <wx/html/htmlwin.h>
 #include <wx/listctrl.h>
+#include <wx/panel.h>
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
 #include <wx/timer.h>
 
+#include "text_messaging/Data2GBroadcast.h"
+#include "text_messaging/Data2GFileTransfer.h"
 #include "text_messaging/TextMessagingTypes.h"
 #include "text_messaging/TextMessagingProtocol.h"
 
@@ -128,7 +133,7 @@ private:
     void appendMessage(const TextMessaging::TextMessage& message);
     void updateTransmitControls();
     void setColumnIfChanged(long item, int column, const wxString& text);
-    int messageAt(const wxPoint& point) const;
+    int rowAt(const wxPoint& point) const;
     static std::string stationOf(const TextMessaging::TextMessage& message);
     void selectStation(const std::string& callsign, bool addIfMissing);
 
@@ -155,6 +160,31 @@ private:
     void updatePhraseHighlight();
     void updateSendToolTip();
 
+    // Files through a Data2G session: each one a line of the chat, and an
+    // offer to us a box over it until the operator answers.
+    // A file to or from the whole GLISS group is a line too, with group
+    // set and groupFile, not transfer, telling its story.
+    struct FileLine
+    {
+        TextMessaging::Data2G::FileTransfer transfer;  // as last seen
+        std::time_t at = 0;                             // when it first appeared
+        bool group = false;
+        TextMessaging::Data2G::GroupFile groupFile;     // as last seen
+
+        bool live() const { return group ? groupFile.live() : transfer.live(); }
+    };
+    void updateFileTransfers();
+    void updateGroupFiles(bool& added, bool& changed, bool& incoming);
+    void updateOfferBox();
+    wxString fileLineHtml(const FileLine& line, const Palette& colors) const;
+    wxString groupLineHtml(const FileLine& line, const Palette& colors) const;
+    void sendFileTo(const std::string& callsign);
+    // Files going to or from the station, which letting go of it cancels.
+    int liveFilesWith(const std::string& callsign) const;
+    void sendFileToGroup();
+    void receiveGroupFile(uint64_t id);
+    void ignoreGroupFile(uint64_t id);
+
     void OnSend(wxCommandEvent& event);
     void OnPing(wxCommandEvent& event);
     void OnStationSelected(wxListEvent& event);
@@ -171,6 +201,16 @@ private:
     void OnMenuResend(wxCommandEvent& event);
     void OnMenuTempo(wxCommandEvent& event);
     void OnMenuClearMessages(wxCommandEvent& event);
+    void OnMenuSendFile(wxCommandEvent& event);
+    void OnMenuCancelTransfer(wxCommandEvent& event);
+    void OnMenuSendGroupFile(wxCommandEvent& event);
+    void OnMenuStopServing(wxCommandEvent& event);
+    void OnMenuCancelGroupFile(wxCommandEvent& event);
+    void OnMenuReceiveGroupFile(wxCommandEvent& event);
+    void OnMenuIgnoreGroupFile(wxCommandEvent& event);
+    void OnChatLink(wxHtmlLinkEvent& event);
+    void OnOfferSave(wxCommandEvent& event);
+    void OnOfferDecline(wxCommandEvent& event);
     void OnAddStationText(wxCommandEvent& event);
     void OnAddStation(wxCommandEvent& event);
     void OnAutoReplyToggled(wxCommandEvent& event);
@@ -248,6 +288,33 @@ private:
     TextMessaging::TextMessage m_menuResend; // the message Re-send would copy; id 0 for none
 
     std::vector<TextMessaging::TextMessage> m_messages;
+
+    // Files sent and received this run, oldest first.
+    std::vector<FileLine> m_fileLines;
+    uint64_t m_fileChanges = 0;     // the transport's count when they were last read
+    bool m_fileLinesRead = false;
+    std::set<uint64_t> m_clearedFiles; // finished ones Clear Messages took away, not to come back
+    uint64_t m_menuTransferId = 0;  // the file line the chat log's menu was opened on; 0 for none
+
+    // Files to and from the group, which the transport numbers apart.
+    uint64_t m_groupFileChanges = 0;
+    bool m_groupLinesRead = false;
+    std::set<uint64_t> m_clearedGroupFiles;
+    uint64_t m_menuGroupFileId = 0; // the group file line the chat log's menu was opened on; 0 for none
+
+    // The box over the chat asking whether to save a file offered to us.
+    wxPanel* m_offerBox = nullptr;
+    WrappingText* m_offerText = nullptr;
+    uint64_t m_offerId = 0;         // the offer it shows; 0 while hidden
+
+    // What each line of the chat is, top to bottom, for a click to find:
+    // a message (an index into m_messages) or a file (into m_fileLines).
+    struct ChatRow
+    {
+        bool file = false;
+        size_t index = 0;
+    };
+    std::vector<ChatRow> m_rows;
 };
 
 #endif // __FDV_TEXT_MESSAGING_DIALOG__

@@ -43,6 +43,8 @@
 #include <wx/datetime.h>
 #include <wx/dcbuffer.h>
 #include <wx/dcmemory.h>
+#include <wx/filedlg.h>
+#include <wx/filename.h>
 #include <wx/filesys.h>
 #include <wx/fs_mem.h>
 #include <wx/graphics.h>
@@ -80,6 +82,13 @@ constexpr int QUEUE_BAR_WIDTH = 112;
 // select text, not a click on a message.
 constexpr int CLICK_SLOP_PIXELS = 4;
 
+// Past this a file is sent only once the operator has agreed to the time
+// it will take on the air.
+constexpr uint64_t LARGE_FILE_BYTES = 100 * 1000;
+
+// File lines kept in the chat; past this the oldest finished ones go.
+constexpr size_t FILE_LINES_KEPT = 100;
+
 enum
 {
     ID_STATION_LIST = wxID_HIGHEST + 700,
@@ -95,6 +104,17 @@ enum
     ID_MENU_RESEND,
     ID_MENU_TEMPO,     // back to the tempo the console picks
     ID_MENU_TEMPO_LAST = ID_MENU_TEMPO + Glissando::MAX_GEAR, // ID_MENU_TEMPO + each gear
+    ID_MENU_SEND_FILE,
+    ID_MENU_SEND_FILE_WHY,
+    ID_MENU_CANCEL_TRANSFER,
+    ID_MENU_SEND_GROUP_FILE,
+    ID_MENU_SEND_GROUP_FILE_WHY,
+    ID_MENU_STOP_SERVING,
+    ID_MENU_CANCEL_GROUP_FILE,
+    ID_MENU_RECEIVE_GROUP_FILE,
+    ID_MENU_IGNORE_GROUP_FILE,
+    ID_OFFER_SAVE,
+    ID_OFFER_DECLINE,
     ID_PING,
     ID_SEND,
     ID_AUTO_REPLY,
@@ -123,6 +143,35 @@ wxString escapeHtml(const std::string& text)
     }
 
     return result;
+}
+
+// The same for text already decoded, such as a file's name in UTF-8.
+wxString escapeHtml(const wxString& text)
+{
+    wxString result;
+    result.reserve(text.length() + 16);
+    for (wxUniChar c : text)
+    {
+        if (c == '&') result += "&amp;";
+        else if (c == '<') result += "&lt;";
+        else if (c == '>') result += "&gt;";
+        else if (c == '"') result += "&quot;";
+        else result += c;
+    }
+    return result;
+}
+
+// 7,000: the way the chat counts the bytes of a file.
+wxString groupDigits(uint64_t value)
+{
+    std::string digits = std::to_string(value);
+    std::string grouped;
+    for (size_t i = 0; i < digits.size(); i++)
+    {
+        if (i > 0 && (digits.size() - i) % 3 == 0) grouped.push_back(',');
+        grouped.push_back(digits[i]);
+    }
+    return wxString(grouped);
 }
 
 wxString formatTime(std::time_t when)
@@ -327,6 +376,21 @@ TextMessagingDialog::TextMessagingDialog(wxWindow* parent, wxWindowID id, const 
     Connect(ID_MENU_RESEND, wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TextMessagingDialog::OnMenuResend));
     Connect(ID_MENU_TEMPO, ID_MENU_TEMPO_LAST, wxEVT_COMMAND_MENU_SELECTED,
             wxCommandEventHandler(TextMessagingDialog::OnMenuTempo));
+    Connect(ID_MENU_SEND_FILE, wxEVT_COMMAND_MENU_SELECTED, wxCommandEventHandler(TextMessagingDialog::OnMenuSendFile));
+    Connect(ID_MENU_SEND_GROUP_FILE, wxEVT_COMMAND_MENU_SELECTED,
+            wxCommandEventHandler(TextMessagingDialog::OnMenuSendGroupFile));
+    Connect(ID_MENU_STOP_SERVING, wxEVT_COMMAND_MENU_SELECTED,
+            wxCommandEventHandler(TextMessagingDialog::OnMenuStopServing));
+    Connect(ID_MENU_CANCEL_GROUP_FILE, wxEVT_COMMAND_MENU_SELECTED,
+            wxCommandEventHandler(TextMessagingDialog::OnMenuCancelGroupFile));
+    Connect(ID_MENU_RECEIVE_GROUP_FILE, wxEVT_COMMAND_MENU_SELECTED,
+            wxCommandEventHandler(TextMessagingDialog::OnMenuReceiveGroupFile));
+    Connect(ID_MENU_IGNORE_GROUP_FILE, wxEVT_COMMAND_MENU_SELECTED,
+            wxCommandEventHandler(TextMessagingDialog::OnMenuIgnoreGroupFile));
+    Connect(ID_MENU_CANCEL_TRANSFER, wxEVT_COMMAND_MENU_SELECTED,
+            wxCommandEventHandler(TextMessagingDialog::OnMenuCancelTransfer));
+    Connect(ID_OFFER_SAVE, wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TextMessagingDialog::OnOfferSave));
+    Connect(ID_OFFER_DECLINE, wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TextMessagingDialog::OnOfferDecline));
     Connect(ID_AUTO_REPLY, wxEVT_TOGGLEBUTTON,
             wxCommandEventHandler(TextMessagingDialog::OnAutoReplyToggled));
     Connect(ID_STATION_LIST, wxEVT_COMMAND_LIST_ITEM_SELECTED,
@@ -347,6 +411,8 @@ TextMessagingDialog::TextMessagingDialog(wxWindow* parent, wxWindowID id, const 
     m_chatWindow->Bind(wxEVT_LEFT_DOWN, &TextMessagingDialog::OnChatLeftDown, this);
     m_chatWindow->Bind(wxEVT_LEFT_UP, &TextMessagingDialog::OnChatLeftUp, this);
     m_chatWindow->Bind(wxEVT_CONTEXT_MENU, &TextMessagingDialog::OnChatContextMenu, this);
+    // The links on a group file's line: Receive... and Ignore.
+    m_chatWindow->Bind(wxEVT_HTML_LINK_CLICKED, &TextMessagingDialog::OnChatLink, this);
 
     // The countdown bars are pictures the chat page loads from memory.
     static bool memoryFiles = false;
@@ -376,6 +442,7 @@ TextMessagingDialog::~TextMessagingDialog()
     m_chatWindow->Unbind(wxEVT_LEFT_DOWN, &TextMessagingDialog::OnChatLeftDown, this);
     m_chatWindow->Unbind(wxEVT_LEFT_UP, &TextMessagingDialog::OnChatLeftUp, this);
     m_chatWindow->Unbind(wxEVT_CONTEXT_MENU, &TextMessagingDialog::OnChatContextMenu, this);
+    m_chatWindow->Unbind(wxEVT_HTML_LINK_CLICKED, &TextMessagingDialog::OnChatLink, this);
 }
 
 // Selection is decided here rather than by the list. A click on the selected
@@ -576,6 +643,24 @@ void TextMessagingDialog::buildControls()
     topSizer->Add(stationPlate, 0, wxEXPAND | wxRIGHT, 6);
 
     Panel* logPlate = new Panel(this, _("Comms"));
+
+    // A file offered to us: who offers what, and the two answers. Shown
+    // over the chat only while an offer waits.
+    m_offerBox = new wxPanel(logPlate);
+    m_offerBox->SetBackgroundColour(Colour::Plate);
+    wxBoxSizer* offerSizer = new wxBoxSizer(wxHORIZONTAL);
+    m_offerText = new WrappingText(m_offerBox);
+    m_offerText->SetForegroundColour(Colour::Bone);
+    offerSizer->Add(m_offerText, 1, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT, 8);
+    Button* offerSave = new Button(m_offerBox, ID_OFFER_SAVE, _("Save as..."), false, wxSize(110, 30));
+    offerSave->SetToolTip(_("Choose where to save the file; it is then sent. Nothing received is opened or run."));
+    offerSizer->Add(offerSave, 0, wxALIGN_CENTER_VERTICAL | wxTOP | wxBOTTOM | wxRIGHT, 6);
+    Button* offerDecline = new Button(m_offerBox, ID_OFFER_DECLINE, _("Decline"), false, wxSize(90, 30));
+    offerSizer->Add(offerDecline, 0, wxALIGN_CENTER_VERTICAL | wxTOP | wxBOTTOM | wxRIGHT, 6);
+    m_offerBox->SetSizer(offerSizer);
+    m_offerBox->Hide();
+    logPlate->GetContentSizer()->Add(m_offerBox, 0, wxEXPAND | wxBOTTOM, 6);
+
     m_chatWindow = new wxHtmlWindow(logPlate, wxID_ANY, wxDefaultPosition, wxDefaultSize,
                                     wxHW_SCROLLBAR_AUTO | wxBORDER_NONE);
     m_chatWindow->SetBackgroundColour(Colour::Void);
@@ -722,14 +807,28 @@ void TextMessagingDialog::renderChat(bool keepPlace)
     html.reserve(4096);
     html += "<html><body bgcolor=\"" + colors.page + "\" text=\"" + colors.text + "\">";
 
-    for (size_t index = 0; index < m_messages.size(); index++)
+    // Messages and file lines, each in the order it came, a file line ahead
+    // of the messages that came after it.
+    m_rows.clear();
+    for (size_t index = 0, file = 0; index < m_messages.size() || file < m_fileLines.size();)
     {
-        const TextMessage& message = m_messages[index];
+        bool fileFirst = file < m_fileLines.size() &&
+                         (index == m_messages.size() || m_fileLines[file].at < m_messages[index].timestamp);
+        m_rows.push_back({fileFirst, fileFirst ? file : index});
 
-        // Marks where each message starts, so a click can be traced back to
-        // it: see messageAt(). Ahead of the message's table rather than in
-        // it, where the page would place it at the message's foot.
-        html += wxString::Format("<a name=\"m%d\"></a>", (int)index);
+        // Marks where each line starts, so a click can be traced back to
+        // it: see rowAt(). Ahead of the line's table rather than in it,
+        // where the page would place it at the line's foot.
+        html += wxString::Format("<a name=\"m%d\"></a>", (int)m_rows.size() - 1);
+
+        if (fileFirst)
+        {
+            const FileLine& line = m_fileLines[file++];
+            html += line.group ? groupLineHtml(line, colors) : fileLineHtml(line, colors);
+            continue;
+        }
+
+        const TextMessage& message = m_messages[index++];
 
         if (message.kind == MessageKind::System)
         {
@@ -1149,6 +1248,24 @@ void TextMessagingDialog::OnStationRightDown(wxMouseEvent& event)
     menu.Append(ID_MENU_SELECT_STATION, selected ? _("Deselect Station") : _("Select Station"));
     menu.Append(ID_MENU_REMOVE_STATION, _("Remove"));
     menu.AppendSeparator();
+
+    // Files go only through a Data2G session; while one can't be had, the
+    // item stays dark and the line under it says why.
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    wxString why = _("Files go through a Data2G session.");
+    bool files = frame != nullptr && frame->chatCanSendFiles(why);
+    wxMenuItem* sendFile = menu.Append(ID_MENU_SEND_FILE, _("Send File..."));
+    sendFile->Enable(files && m_inhibitReason.empty());
+    if (!files)
+    {
+        sendFile->SetHelp(why);
+        menu.Append(ID_MENU_SEND_FILE_WHY, why)->Enable(false);
+    }
+    else if (!m_inhibitReason.empty())
+    {
+        menu.Append(ID_MENU_SEND_FILE_WHY, _("Receive only here."))->Enable(false);
+    }
+    menu.AppendSeparator();
     menu.Append(ID_MENU_LAST_HEARD, lastHeard)->Enable(false);
 
     // The press is not passed on: the list would move the selection to the
@@ -1177,16 +1294,16 @@ void TextMessagingDialog::OnMenuRemoveStation(wxCommandEvent&)
     if (uiLogEnabled()) log_info("UI: station %s removed", m_menuCallsign.c_str());
 }
 
-// The message under a point in the chat log's window, as an index into
-// m_messages. Each message starts with an anchor named for its index; they
-// run down the page in order, so the last one at or above the point is the
-// message it falls in. The first message runs from the top of the page:
-// the toolkit places an anchor that opens the page at the foot of what
+// The line under a point in the chat log's window, as an index into
+// m_rows. Each line starts with an anchor named for its index; they run
+// down the page in order, so the last one at or above the point is the
+// line it falls in. The first line runs from the top of the page: the
+// toolkit places an anchor that opens the page at the foot of what
 // follows it.
-int TextMessagingDialog::messageAt(const wxPoint& point) const
+int TextMessagingDialog::rowAt(const wxPoint& point) const
 {
     wxHtmlContainerCell* root = m_chatWindow->GetInternalRepresentation();
-    if (root == nullptr || m_messages.empty()) return -1;
+    if (root == nullptr || m_rows.empty()) return -1;
 
     int y = m_chatWindow->CalcUnscrolledPosition(point).y;
     auto anchorTop = [root](int index) -> int
@@ -1198,13 +1315,13 @@ int TextMessagingDialog::messageAt(const wxPoint& point) const
 
     // A binary search, so a long log costs a handful of lookups.
     int low = 1;
-    int high = (int)m_messages.size() - 1;
+    int high = (int)m_rows.size() - 1;
     int found = 0;
     while (low <= high)
     {
         int middle = (low + high) / 2;
         int top = anchorTop(middle);
-        if (top < 0) return -1; // the page is not the one m_messages describes
+        if (top < 0) return -1; // the page is not the one m_rows describes
 
         if (top <= y)
         {
@@ -1275,26 +1392,82 @@ void TextMessagingDialog::OnChatLeftUp(wxMouseEvent& event)
     wxPoint moved = event.GetPosition() - m_chatPressAt;
     if (std::abs(moved.x) > CLICK_SLOP_PIXELS || std::abs(moved.y) > CLICK_SLOP_PIXELS) return;
 
-    int index = messageAt(event.GetPosition());
-    if (index < 0) return;
+    int row = rowAt(event.GetPosition());
+    if (row < 0) return;
 
-    selectStation(stationOf(m_messages[(size_t)index]), true);
+    // A file line is with the station it goes to or comes from; one for
+    // the group is with nobody, and its links are clicked instead.
+    const ChatRow& line = m_rows[(size_t)row];
+    if (line.file && m_fileLines[line.index].group) return;
+    std::string callsign = line.file ? m_fileLines[line.index].transfer.peer : stationOf(m_messages[line.index]);
+    if (callsign.empty()) return;
+
+    // Choosing another station lets go of this one, cancelling the files
+    // going to or from it: not on a stray click without asking.
+    std::string before = selectedCallsign();
+    int live = before.empty() || before == callsign ? 0 : liveFilesWith(before);
+    if (live == 0)
+    {
+        selectStation(callsign, true);
+        return;
+    }
+    // Asked once the click is over.
+    CallAfter([this, callsign, before, live]() {
+        if (selectedCallsign() != before) return; // chosen otherwise meanwhile
+        wxMessageDialog confirm(
+            this,
+            wxString::Format(wxPLURAL("%d file is going to or from %s. Choosing %s lets go of %s, which "
+                                      "cancels it. Go ahead?",
+                                      "%d files are going to or from %s. Choosing %s lets go of %s, which "
+                                      "cancels them. Go ahead?",
+                                      live),
+                             live, wxString::FromUTF8(before), wxString::FromUTF8(callsign),
+                             wxString::FromUTF8(before)),
+            _("Choose Station"), wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
+        if (confirm.ShowModal() == wxID_YES) selectStation(callsign, true);
+    });
+}
+
+int TextMessagingDialog::liveFilesWith(const std::string& callsign) const
+{
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    if (frame == nullptr) return 0;
+    int live = 0;
+    for (const Data2G::FileTransfer& t : frame->chatFileTransfers())
+    {
+        if (t.peer == callsign && t.live()) live++;
+    }
+    return live;
 }
 
 void TextMessagingDialog::OnChatContextMenu(wxContextMenuEvent& event)
 {
-    // From the keyboard there is no position; the newest message is meant.
+    // From the keyboard there is no position; the newest line is meant.
     wxPoint screen = event.GetPosition();
-    int index = screen == wxDefaultPosition
-                    ? (int)m_messages.size() - 1
-                    : messageAt(m_chatWindow->ScreenToClient(screen));
+    int row = screen == wxDefaultPosition
+                  ? (int)m_rows.size() - 1
+                  : rowAt(m_chatWindow->ScreenToClient(screen));
 
     m_menuMessageId = 0;
     m_menuResend = TextMessage();
+    m_menuTransferId = 0;
+    m_menuGroupFileId = 0;
+    Data2G::GroupFile groupFile;
     TextMessagingProtocol::Cancel cancel = TextMessagingProtocol::Cancel::None;
-    if (index >= 0)
+    if (row >= 0 && m_rows[(size_t)row].file && m_fileLines[m_rows[(size_t)row].index].group)
     {
-        const TextMessage& message = m_messages[(size_t)index];
+        groupFile = m_fileLines[m_rows[(size_t)row].index].groupFile;
+        m_menuGroupFileId = groupFile.id;
+    }
+    else if (row >= 0 && m_rows[(size_t)row].file)
+    {
+        // A file still going can be stopped, either way.
+        const FileLine& line = m_fileLines[m_rows[(size_t)row].index];
+        if (line.transfer.live()) m_menuTransferId = line.transfer.id;
+    }
+    else if (row >= 0)
+    {
+        const TextMessage& message = m_messages[m_rows[(size_t)row].index];
         // Our own messages and pings; the protocol says which can be stopped.
         if (message.direction == MessageDirection::Sent)
         {
@@ -1313,6 +1486,41 @@ void TextMessagingDialog::OnChatContextMenu(wxContextMenuEvent& event)
     wxMenu menu;
     menu.Append(ID_MENU_WOAH, _("Woah!"));
     menu.AppendSeparator();
+    if (m_menuTransferId != 0)
+    {
+        menu.Append(ID_MENU_CANCEL_TRANSFER, _("Cancel Transfer"));
+        menu.AppendSeparator();
+    }
+
+    // A group file of ours still going can stop taking requests, or stop
+    // altogether; one coming in can be received or ignored.
+    using GroupState = Data2G::GroupFile::State;
+    if (m_menuGroupFileId != 0 && groupFile.outgoing && groupFile.live())
+    {
+        menu.Append(ID_MENU_STOP_SERVING, _("Stop Serving Repairs"));
+        menu.Append(ID_MENU_CANCEL_GROUP_FILE, _("Cancel Transfer"));
+        menu.AppendSeparator();
+    }
+    else if (m_menuGroupFileId != 0 && !groupFile.outgoing)
+    {
+        bool open = groupFile.state == GroupState::Heard || groupFile.state == GroupState::Incomplete;
+        if (open) menu.Append(ID_MENU_RECEIVE_GROUP_FILE, _("Receive..."));
+        if (open || groupFile.state == GroupState::Receiving) menu.Append(ID_MENU_IGNORE_GROUP_FILE, _("Ignore"));
+        if (open || groupFile.state == GroupState::Receiving) menu.AppendSeparator();
+    }
+
+    // A file for everybody on the GLISS group; dark, with the reason, when
+    // one can't go.
+    {
+        MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+        wxString why = _("Files for the group go through Data2G.");
+        bool files = frame != nullptr && frame->chatCanSendGroupFiles(why);
+        wxMenuItem* item = menu.Append(ID_MENU_SEND_GROUP_FILE, _("Send File to Group..."));
+        item->Enable(files && m_inhibitReason.empty());
+        if (!files) menu.Append(ID_MENU_SEND_GROUP_FILE_WHY, why)->Enable(false);
+        else if (!m_inhibitReason.empty()) menu.Append(ID_MENU_SEND_GROUP_FILE_WHY, _("Receive only here."))->Enable(false);
+        menu.AppendSeparator();
+    }
     if (cancel == TextMessagingProtocol::Cancel::Remove)
     {
         menu.Append(ID_MENU_REMOVE_MESSAGE, _("Remove from Queue"));
@@ -1344,7 +1552,7 @@ void TextMessagingDialog::OnChatContextMenu(wxContextMenuEvent& event)
     }
     if (m_menuResend.id != 0) menu.Append(ID_MENU_RESEND, _("Re-send"));
     if (cancel == TextMessagingProtocol::Cancel::Abort || m_menuResend.id != 0) menu.AppendSeparator();
-    menu.Append(ID_MENU_CLEAR_MESSAGES, _("Clear Messages"))->Enable(!m_messages.empty());
+    menu.Append(ID_MENU_CLEAR_MESSAGES, _("Clear Messages"))->Enable(!m_rows.empty());
 
     PopupMenu(&menu);
 }
@@ -1393,6 +1601,8 @@ void TextMessagingDialog::OnMenuCancelMessage(wxCommandEvent&)
 void TextMessagingDialog::OnMenuWoah(wxCommandEvent&)
 {
     uint64_t heldMs = TextMessagingSession::instance().protocol().holdTransmissions();
+    // File keyings on the GLISS group too.
+    if (MainFrame* frame = dynamic_cast<MainFrame*>(GetParent())) frame->chatHoldGroupFiles(heldMs);
     int seconds = (int)((heldMs + 999) / 1000);
     setStatus(wxString::Format(_("Woah! Holding the transmitter for %d s."), seconds), StatusKind::Queued);
     updateQueueBars();
@@ -1422,7 +1632,7 @@ void TextMessagingDialog::OnMenuTempo(wxCommandEvent& event)
 // being sent stay, so their chips can still say how they got on.
 void TextMessagingDialog::OnMenuClearMessages(wxCommandEvent&)
 {
-    if (m_messages.empty()) return;
+    if (m_messages.empty() && m_fileLines.empty()) return;
 
     wxMessageDialog confirm(this, _("Clear every message from COMMS? "
                                     "Messages still being sent are kept."),
@@ -1442,6 +1652,17 @@ void TextMessagingDialog::OnMenuClearMessages(wxCommandEvent&)
                                     [&keep](const TextMessage& message)
                                     { return std::find(keep.begin(), keep.end(), message.id) == keep.end(); }),
                      m_messages.end());
+    // Files still going stay too. The transport still lists the finished
+    // ones, so they are remembered as cleared.
+    for (const FileLine& line : m_fileLines)
+    {
+        if (line.live()) continue;
+        if (line.group) m_clearedGroupFiles.insert(line.groupFile.id);
+        else m_clearedFiles.insert(line.transfer.id);
+    }
+    m_fileLines.erase(std::remove_if(m_fileLines.begin(), m_fileLines.end(),
+                                     [](const FileLine& line) { return !line.live(); }),
+                      m_fileLines.end());
     renderChat();
     setStatus(_("Messages cleared."));
 
@@ -1463,6 +1684,8 @@ void TextMessagingDialog::OnAddStation(wxCommandEvent&)
 void TextMessagingDialog::OnAutoReplyToggled(wxCommandEvent& event)
 {
     TextMessagingSession::instance().protocol().setAutoReplyEnabled(m_chkAutoReply->IsChecked());
+    // Group files are received without asking only while it is lit.
+    if (MainFrame* frame = dynamic_cast<MainFrame*>(GetParent())) frame->chatApplyGroupFileAutoReceive();
 
     if (!m_chkAutoReply->IsChecked())
     {
@@ -1569,6 +1792,7 @@ void TextMessagingDialog::OnBlinkTimer(wxTimerEvent&)
 {
     updateEngageChips();
     updateQueueBars();
+    updateFileTransfers();
 }
 
 // Each message waiting for its first turn on the air counts down to it. The
@@ -1828,6 +2052,727 @@ void TextMessagingDialog::updateTransmitControls()
     {
         log_info("UI: send button %s", disabled ? "disabled, receive only" : "enabled");
     }
+}
+
+// A file's line in the chat: ours on the right, theirs on the left, like
+// messages, saying how far it has got.
+wxString TextMessagingDialog::fileLineHtml(const FileLine& line, const Palette& colors) const
+{
+    using State = Data2G::FileTransfer::State;
+    const Data2G::FileTransfer& t = line.transfer;
+    wxString peer = wxString::FromUTF8(t.peer);
+    wxString of = groupDigits(t.done) + " " + _("of") + " " + groupDigits(t.size);
+
+    wxString state;
+    switch (t.state)
+    {
+        case State::Waiting: state = wxString::Format(_("waiting for a session with %s"), peer); break;
+        case State::Offered: state = _("offered"); break;
+        case State::Sending: state = _("sending") + " " + of; break;
+        case State::Delivered: state = _("delivered"); break;
+        case State::Declined: state = _("declined"); break;
+        case State::Asking: state = _("offered"); break;
+        case State::Receiving: state = _("receiving") + " " + of; break;
+        case State::Saved:
+            state = wxString::Format(t.autoAccepted ? _("saved to %s without asking") : _("saved to %s"),
+                                     wxString::FromUTF8(t.path));
+            break;
+        case State::Cancelled: state = _("cancelled"); break;
+        case State::CancelledThere: state = wxString::Format(_("cancelled by %s"), peer); break;
+        case State::Expired: state = _("expired"); break;
+        case State::Failed: state = _("failed"); break;
+        case State::FailedThere: state = wxString::Format(_("failed on %s's side"), peer); break;
+        case State::NotSupported: state = _("failed: their Glissando can't take files"); break;
+    }
+
+    wxString text = wxString::FromUTF8(t.name) + ", " + groupDigits(t.size) + " " + _("bytes") + ": " + state;
+    wxString body;
+    if (!t.outgoing) body += "<b>" + escapeHtml(t.peer) + ":</b> ";
+    body += escapeHtml(text);
+    wxString tag = " <font size=\"-2\" color=\"" + colors.subdued + "\">[" +
+                   (t.outgoing ? wxString::Format(_("FILE TO %s"), peer) : wxString(_("FILE"))) + "]</font>";
+
+    wxString align = t.outgoing ? "right" : "left";
+    wxString bubble = t.outgoing ? colors.sentBubble : colors.receivedBubble;
+    wxString html = "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"" + align + "\">";
+    html += "<table cellpadding=\"6\" cellspacing=\"0\" bgcolor=\"" + bubble + "\"><tr><td>";
+    html += "<font color=\"" + colors.text + "\">" + body + tag + "</font>";
+    html += "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"left\">"
+            "<font size=\"-2\" color=\"" + colors.subdued + "\">" + formatTime(line.at) + "</font></td></tr></table>";
+    html += "</td></tr></table></td></tr><tr><td height=\"10\"></td></tr></table>";
+    return html;
+}
+
+// Follows the transfers the transport has, on the blink timer: a new one
+// gets its line, a changed one its line redrawn, and an offer to us the
+// box over the chat. A file coming in while the window is closed flashes
+// the console's COMMS button, as a message does.
+void TextMessagingDialog::updateFileTransfers()
+{
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    if (frame == nullptr) return;
+
+    bool added = false;
+    bool changed = false;
+    bool incoming = false;
+    updateGroupFiles(added, changed, incoming);
+
+    uint64_t changes = frame->chatFileTransferChanges();
+    bool fresh = !m_fileLinesRead || changes != m_fileChanges;
+    m_fileLinesRead = true;
+    m_fileChanges = changes;
+
+    for (const Data2G::FileTransfer& t : fresh ? frame->chatFileTransfers() : std::vector<Data2G::FileTransfer>())
+    {
+        if (m_clearedFiles.count(t.id) != 0) continue;
+        auto line = std::find_if(m_fileLines.begin(), m_fileLines.end(),
+                                 [&](const FileLine& l) { return !l.group && l.transfer.id == t.id; });
+        if (line == m_fileLines.end())
+        {
+            FileLine newLine;
+            newLine.transfer = t;
+            newLine.at = std::time(nullptr);
+            m_fileLines.push_back(newLine);
+            added = true;
+            incoming = incoming || !t.outgoing;
+            if (uiLogEnabled()) log_info("UI: file line id=%d %s", (int)t.id, t.name.c_str());
+            continue;
+        }
+        if (line->transfer.state != t.state || line->transfer.done != t.done || line->transfer.path != t.path)
+        {
+            // The line says only "failed"; why goes to the status bar.
+            if (t.state == Data2G::FileTransfer::State::Failed && line->transfer.state != t.state && !t.error.empty())
+            {
+                setStatus(wxString::Format(_("%s failed: %s"), wxString::FromUTF8(t.name),
+                                           wxString::FromUTF8(t.error)));
+            }
+            line->transfer = t;
+            changed = true;
+        }
+    }
+
+    // The oldest finished lines go once there are many.
+    while (m_fileLines.size() > FILE_LINES_KEPT)
+    {
+        auto finished = std::find_if(m_fileLines.begin(), m_fileLines.end(),
+                                     [](const FileLine& l) { return !l.live(); });
+        if (finished == m_fileLines.end()) break;
+        // Not to come back from the engines, which keep more than this.
+        if (finished->group) m_clearedGroupFiles.insert(finished->groupFile.id);
+        else m_clearedFiles.insert(finished->transfer.id);
+        m_fileLines.erase(finished);
+        added = true;
+    }
+
+    if (incoming && !IsShown()) frame->noteChatUnread();
+    updateOfferBox();
+
+    // A new line scrolls to it; progress leaves the view where it is.
+    if (added) renderChat();
+    else if (changed && IsShown()) renderChat(true);
+}
+
+// The oldest offer still waiting for the operator, in the box over the
+// chat; the box goes once none is.
+void TextMessagingDialog::updateOfferBox()
+{
+    const FileLine* offer = nullptr;
+    for (const FileLine& line : m_fileLines)
+    {
+        if (!line.group && !line.transfer.outgoing && line.transfer.state == Data2G::FileTransfer::State::Asking)
+        {
+            offer = &line;
+            break;
+        }
+    }
+
+    uint64_t id = offer != nullptr ? offer->transfer.id : 0;
+    if (id == m_offerId && m_offerBox->IsShown() == (offer != nullptr)) return;
+    m_offerId = id;
+    if (offer != nullptr)
+    {
+        m_offerText->setText(wxString::Format(_("%s offers %s (%s bytes). Save it?"),
+                                              wxString::FromUTF8(offer->transfer.peer),
+                                              wxString::FromUTF8(offer->transfer.name),
+                                              groupDigits(offer->transfer.size)));
+    }
+    m_offerBox->Show(offer != nullptr);
+    Layout();
+    // The plate stretches, so showing the box doesn't resize it, and its
+    // own sizer has to be run to make room for the box.
+    m_offerBox->GetParent()->Layout();
+    m_offerBox->Layout();
+}
+
+// Save as...: the system's save dialog, in the received files folder with
+// the offered name filled in. Choosing a place accepts the file; backing
+// out of the dialog declines it.
+void TextMessagingDialog::OnOfferSave(wxCommandEvent&)
+{
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    uint64_t id = m_offerId;
+    auto line = std::find_if(m_fileLines.begin(), m_fileLines.end(),
+                             [id](const FileLine& l) { return !l.group && l.transfer.id == id; });
+    if (frame == nullptr || id == 0 || line == m_fileLines.end()) return;
+    Data2G::FileTransfer offer = line->transfer;
+
+    wxString folder = frame->chatReceivedFilesFolder();
+    if (!wxDirExists(folder)) wxFileName::Mkdir(folder, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+
+    wxFileDialog dialog(this, wxString::Format(_("Save %s from %s"), wxString::FromUTF8(offer.name),
+                                               wxString::FromUTF8(offer.peer)),
+                        folder, wxString::FromUTF8(offer.name), wxFileSelectorDefaultWildcardStr,
+                        wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+    if (dialog.ShowModal() != wxID_OK)
+    {
+        frame->chatDeclineFile(id);
+        setStatus(wxString::Format(_("%s from %s declined."), wxString::FromUTF8(offer.name),
+                                   wxString::FromUTF8(offer.peer)));
+        updateFileTransfers();
+        return;
+    }
+
+    wxString path = dialog.GetPath();
+    frame->chatSetReceivedFilesFolder(wxFileName(path).GetPath());
+    wxString error;
+    if (frame->chatAcceptFile(id, path, error))
+    {
+        setStatus(wxString::Format(_("Receiving %s from %s."), wxString::FromUTF8(offer.name),
+                                   wxString::FromUTF8(offer.peer)));
+    }
+    else
+    {
+        setStatus(error);
+    }
+    if (uiLogEnabled()) log_info("UI: file id=%d to be saved as %s", (int)id, (const char*)path.utf8_str());
+    updateFileTransfers();
+}
+
+void TextMessagingDialog::OnOfferDecline(wxCommandEvent&)
+{
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    if (frame == nullptr || m_offerId == 0) return;
+    frame->chatDeclineFile(m_offerId);
+    setStatus(_("File declined."));
+    updateFileTransfers();
+}
+
+void TextMessagingDialog::OnMenuSendFile(wxCommandEvent&)
+{
+    sendFileTo(m_menuCallsign);
+}
+
+// The file picked is queued for the station, which is then selected, as
+// for a message: it is offered once the session with the station is open.
+// Selecting it lets go of the station selected before, which cancels any
+// file going to or from that one, so the operator is asked first.
+void TextMessagingDialog::sendFileTo(const std::string& callsign)
+{
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    if (frame == nullptr || callsign.empty()) return;
+
+    wxString why;
+    if (!frame->chatCanSendFiles(why))
+    {
+        setStatus(why);
+        return;
+    }
+    if (!m_inhibitReason.empty())
+    {
+        setStatus(wxString::Format(_("Receive only. %s"), wxString::FromUTF8(m_inhibitReason)));
+        return;
+    }
+
+    if (stationItem(callsign) < 0) return; // aged out while the menu was open
+
+    wxString call = wxString::FromUTF8(callsign);
+    wxFileDialog dialog(this, wxString::Format(_("Send a file to %s"), call), wxEmptyString, wxEmptyString,
+                        wxFileSelectorDefaultWildcardStr, wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+    if (dialog.ShowModal() != wxID_OK) return;
+    wxString path = dialog.GetPath();
+
+    wxULongLong size = wxFileName::GetSize(path);
+    if (size != wxInvalidSize && size.GetValue() > LARGE_FILE_BYTES)
+    {
+        wxMessageDialog confirm(
+            this,
+            wxString::Format(_("%s is %s bytes. Over the air a file this large can take a long time, and "
+                               "holds the channel while it goes. Send it to %s anyway?"),
+                             wxFileName(path).GetFullName(), groupDigits(size.GetValue()), call),
+            _("Send File"), wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
+        if (confirm.ShowModal() != wxID_YES) return;
+    }
+
+    std::string before = selectedCallsign();
+    if (!before.empty() && before != callsign)
+    {
+        int live = liveFilesWith(before);
+        if (live > 0)
+        {
+            wxMessageDialog confirm(
+                this,
+                wxString::Format(wxPLURAL("%d file is going to or from %s. Sending to %s lets go of %s, which "
+                                          "cancels it. Go ahead?",
+                                          "%d files are going to or from %s. Sending to %s lets go of %s, which "
+                                          "cancels them. Go ahead?",
+                                          live),
+                                 live, wxString::FromUTF8(before), call, wxString::FromUTF8(before)),
+                _("Send File"), wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
+            if (confirm.ShowModal() != wxID_YES) return;
+        }
+    }
+    long item = stationItem(callsign);
+    if (item < 0) return; // aged out while the dialogs were open
+    if (m_stationList->GetItemState(item, wxLIST_STATE_SELECTED) == 0) setStationSelected(item, true);
+
+    wxString error;
+    if (frame->chatSendFile(callsign, path, error) == 0)
+    {
+        setStatus(error);
+        return;
+    }
+    setStatus(wxString::Format(_("%s queued for %s."), wxFileName(path).GetFullName(), call), StatusKind::Queued);
+    if (uiLogEnabled()) log_info("UI: file %s queued for %s", (const char*)path.utf8_str(), callsign.c_str());
+    updateFileTransfers();
+}
+
+void TextMessagingDialog::OnMenuCancelTransfer(wxCommandEvent&)
+{
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    if (frame == nullptr || m_menuTransferId == 0) return;
+    setStatus(frame->chatCancelFile(m_menuTransferId) ? _("Transfer cancelled.")
+                                                       : _("That file is no longer going."));
+    updateFileTransfers();
+}
+
+//-------------------------------------------------------------------------
+// Files for everybody on the GLISS group
+//-------------------------------------------------------------------------
+
+namespace
+{
+
+// "45 s" or "12 min", for how long something takes.
+wxString duration(double seconds)
+{
+    if (seconds < 90) return wxString::Format(_("%d s"), (int)std::ceil(seconds));
+    return wxString::Format(_("%d min"), (int)std::ceil(seconds / 60.0));
+}
+
+// The time of day so many seconds from now.
+wxString clockIn(double seconds)
+{
+    return (wxDateTime::Now() + wxTimeSpan::Seconds((wxLongLong)std::llround(seconds))).Format("%H:%M");
+}
+
+wxString groupFileName(const Data2G::GroupFile& f)
+{
+    if (!f.name.empty()) return wxString::FromUTF8(f.name);
+    return wxString::Format(_("file %06X"), (unsigned)f.fileId);
+}
+
+} // namespace
+
+// A group file's line: ours on the right, saying what the transfer is
+// doing; one heard on the left, saying how much of it has come, with
+// Receive... and Ignore while that is still for the operator to say.
+wxString TextMessagingDialog::groupLineHtml(const FileLine& line, const Palette& colors) const
+{
+    using State = Data2G::GroupFile::State;
+    using Phase = Data2G::GroupFile::Phase;
+    const Data2G::GroupFile& f = line.groupFile;
+    wxString size = f.size != 0 ? ", " + groupDigits(f.size) + " " + _("bytes") : wxString();
+
+    wxString text;
+    wxString note;
+    bool receive = false;
+    bool ignore = false;
+    if (f.outgoing)
+    {
+        wxString state;
+        switch (f.state)
+        {
+            case State::Sending:
+                state = f.have == 0 ? wxString(_("announced"))
+                                    : wxString::Format(_("sending %d of %d"), f.have, f.pieces);
+                break;
+            case State::Repairing:
+                switch (f.phase)
+                {
+                    case Phase::WindowOpen:
+                        state = wxString::Format(_("repairs open, round %d (%d s left)"), f.round + 1,
+                                                 f.secondsLeftInPhase);
+                        break;
+                    case Phase::Resending:
+                        state = wxString::Format(_("round %d: resending %d pieces, %s first in line"), f.round + 1,
+                                                 f.resending, wxString::FromUTF8(f.firstInLine));
+                        if (f.othersAsking > 0) state += wxString::Format(_(" (+%d others)"), f.othersAsking);
+                        break;
+                    case Phase::Waiting:
+                        state = wxString::Format(_("idle; the next window in %d s"), f.secondsLeftInPhase);
+                        break;
+                    case Phase::Ending: state = _("ending"); break;
+                    default: state = _("repairs open"); break;
+                }
+                if (f.serviceSecondsLeft >= 0 && f.phase != Phase::Ending)
+                {
+                    state += wxString::Format(_("; repairs until %s at the latest"), clockIn(f.serviceSecondsLeft));
+                }
+                break;
+            default:
+                switch (f.endReason)
+                {
+                    case Data2G::GroupFileEnd::Quiet: state = _("ended: no more requests"); break;
+                    case Data2G::GroupFileEnd::Deadline: state = _("ended: repair time over"); break;
+                    case Data2G::GroupFileEnd::Stopped: state = _("ended: stopped serving repairs"); break;
+                    case Data2G::GroupFileEnd::Cancelled: state = _("cancelled"); break;
+                    case Data2G::GroupFileEnd::Failed: state = _("failed"); break;
+                }
+                break;
+        }
+        text = groupFileName(f) + size + " " + _("to the group") + ": " + state;
+
+        // Who asked, and when; and that nobody says they have it.
+        for (const Data2G::GroupFile::Asker& asker : f.askers)
+        {
+            note += note.empty() ? wxString(_("Asked: ")) : wxString(", ");
+            note += wxString::Format(_("%s (%d missing, %s ago)"), wxString::FromUTF8(asker.call), asker.missing,
+                                     duration((double)asker.secondsAgo));
+        }
+        if (!note.empty()) note += ". ";
+        note += _("Stations don't confirm receipt, so silence says nothing.");
+    }
+    else
+    {
+        wxString from = wxString::FromUTF8(f.sender);
+        wxString have = f.pieces > 0 ? wxString::Format(_("have %d of %d"), f.have, f.pieces)
+                                     : wxString::Format(_("have %d"), f.have);
+        wxString state;
+        switch (f.state)
+        {
+            case State::Heard:
+                if (f.verified) state = _("complete, verified");
+                else if (f.serviceSecondsLeft > 0)
+                {
+                    state = have + wxString::Format(_("; Receive to ask for the rest before %s"),
+                                                    clockIn(f.serviceSecondsLeft));
+                }
+                else state = have;
+                receive = ignore = true;
+                break;
+            case State::Receiving:
+                state = have;
+                if (f.verified) state = _("complete, verified; waiting for its name");
+                else if (f.slot >= 0)
+                {
+                    state += wxString::Format(_("; asking in slot %d (in %d s)"), f.slot + 1, f.slotInSeconds);
+                }
+                else if (!f.firstInLine.empty())
+                {
+                    state += "; " + wxString::Format(_("%s first in line; %d of your pieces coming"),
+                                                     wxString::FromUTF8(f.firstInLine), f.comingForUs);
+                }
+                ignore = true;
+                break;
+            case State::Incomplete:
+                state = wxString::Format(_("incomplete: %d missing (pieces kept 24 h)"), std::max(0, f.pieces - f.have));
+                if (!f.path.empty())
+                {
+                    state += "; " + wxString::Format(_("saved to %s if it is sent again"), wxString::FromUTF8(f.path));
+                }
+                receive = ignore = true;
+                break;
+            case State::Saved:
+                state = wxString::Format(f.autoReceived ? _("saved to %s without asking") : _("saved to %s"),
+                                         wxString::FromUTF8(f.path));
+                break;
+            case State::Ignored: state = _("ignored"); break;
+            case State::FailedVerification: state = _("failed verification: nothing saved"); break;
+            case State::CancelledThere: state = wxString::Format(_("cancelled by %s"), from); break;
+            default: state = _("failed"); break;
+        }
+        if (f.name.empty() && f.state != State::Saved)
+        {
+            text = wxString::Format(_("incoming file %06X from %s, waiting for details"), (unsigned)f.fileId, from) +
+                   ": " + state;
+        }
+        else
+        {
+            text = wxString::Format(_("%s is sending %s"), from, groupFileName(f)) + size + ": " + state;
+        }
+    }
+
+    wxString body = escapeHtml(text);
+    wxString tag = " <font size=\"-2\" color=\"" + colors.subdued + "\">[" +
+                   (f.outgoing ? wxString(_("FILE TO GROUP")) : wxString(_("GROUP FILE"))) + "]</font>";
+    wxString links;
+    if (receive) links += wxString::Format("<a href=\"gfile:receive:%llu\">%s</a>", (unsigned long long)f.id, _("Receive..."));
+    if (ignore)
+    {
+        if (!links.empty()) links += " &nbsp; ";
+        links += wxString::Format("<a href=\"gfile:ignore:%llu\">%s</a>", (unsigned long long)f.id, _("Ignore"));
+    }
+
+    wxString align = f.outgoing ? "right" : "left";
+    wxString bubble = f.outgoing ? colors.sentBubble : colors.receivedBubble;
+    wxString html = "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"" + align + "\">";
+    html += "<table cellpadding=\"6\" cellspacing=\"0\" bgcolor=\"" + bubble + "\"><tr><td>";
+    html += "<font color=\"" + colors.text + "\">" + body + tag + "</font>";
+    if (!links.empty()) html += "<br>" + links;
+    if (!note.empty()) html += "<br><font size=\"-2\" color=\"" + colors.subdued + "\">" + escapeHtml(note) + "</font>";
+    html += "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"left\">"
+            "<font size=\"-2\" color=\"" + colors.subdued + "\">" + formatTime(line.at) + "</font></td></tr></table>";
+    html += "</td></tr></table></td></tr><tr><td height=\"10\"></td></tr></table>";
+    return html;
+}
+
+// Follows the group files the transport has: a new one gets its line, a
+// changed one its line redrawn. Lines still going are looked at every
+// time, since their countdowns move by themselves.
+void TextMessagingDialog::updateGroupFiles(bool& added, bool& changed, bool& incoming)
+{
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    if (frame == nullptr) return;
+
+    uint64_t changes = frame->chatGroupFileChanges();
+    bool anyLive = std::any_of(m_fileLines.begin(), m_fileLines.end(),
+                               [](const FileLine& l) { return l.group && l.live(); });
+    if (m_groupLinesRead && changes == m_groupFileChanges && !anyLive) return;
+    m_groupLinesRead = true;
+    m_groupFileChanges = changes;
+
+    for (const Data2G::GroupFile& f : frame->chatGroupFiles())
+    {
+        // A cleared line stays gone, unless the engine brings the file back
+        // to life (sent again, it carries on where it was left): then it
+        // has a line again.
+        if (m_clearedGroupFiles.count(f.id) != 0)
+        {
+            if (!f.live()) continue;
+            m_clearedGroupFiles.erase(f.id);
+        }
+        auto line = std::find_if(m_fileLines.begin(), m_fileLines.end(),
+                                 [&](const FileLine& l) { return l.group && l.groupFile.id == f.id; });
+        if (line == m_fileLines.end())
+        {
+            FileLine fresh;
+            fresh.at = std::time(nullptr);
+            fresh.group = true;
+            fresh.groupFile = f;
+            m_fileLines.push_back(fresh);
+            added = true;
+            incoming = incoming || !f.outgoing;
+            if (uiLogEnabled()) log_info("UI: group file line id=%d %s", (int)f.id, f.name.c_str());
+            continue;
+        }
+
+        const Data2G::GroupFile& was = line->groupFile;
+        // Everything the line shows: the service time only by whether it is
+        // known, its clock not moving, and how long ago a station asked as
+        // the line words it.
+        bool askersDiffer = was.askers.size() != f.askers.size() ||
+                            !std::equal(was.askers.begin(), was.askers.end(), f.askers.begin(),
+                                        [](const Data2G::GroupFile::Asker& a, const Data2G::GroupFile::Asker& b) {
+                                            return a.call == b.call && a.missing == b.missing &&
+                                                   duration((double)a.secondsAgo) == duration((double)b.secondsAgo);
+                                        });
+        bool differs = was.state != f.state || was.phase != f.phase || was.have != f.have || was.round != f.round ||
+                       was.pieces != f.pieces || was.secondsLeftInPhase != f.secondsLeftInPhase ||
+                       was.slot != f.slot || was.slotInSeconds != f.slotInSeconds || was.firstInLine != f.firstInLine ||
+                       was.comingForUs != f.comingForUs || was.resending != f.resending || askersDiffer ||
+                       was.path != f.path || was.name != f.name || was.sender != f.sender ||
+                       was.verified != f.verified || was.size != f.size || was.othersAsking != f.othersAsking ||
+                       (was.serviceSecondsLeft >= 0) != (f.serviceSecondsLeft >= 0) ||
+                       (was.serviceSecondsLeft > 0) != (f.serviceSecondsLeft > 0) ||
+                       was.endReason != f.endReason || was.autoReceived != f.autoReceived || was.error != f.error;
+        if (!differs) continue;
+        if (f.state == Data2G::GroupFile::State::Failed && was.state != f.state && !f.error.empty())
+        {
+            setStatus(wxString::Format(_("%s failed: %s"), groupFileName(f), wxString::FromUTF8(f.error)));
+        }
+        else if (f.outgoing && f.state == Data2G::GroupFile::State::Ended && was.state != f.state && !f.error.empty())
+        {
+            setStatus(wxString::Format(_("%s: %s"), groupFileName(f), wxString::FromUTF8(f.error)));
+        }
+        line->groupFile = f;
+        changed = true;
+    }
+}
+
+void TextMessagingDialog::OnMenuSendGroupFile(wxCommandEvent&)
+{
+    sendFileToGroup();
+}
+
+// The file picked goes to everybody on the GLISS group once the operator
+// has agreed to how long it will hold the channel: above 15 minutes of air
+// the box says so and names the faster tempos; above an hour, or 64 KiB,
+// it does not go.
+void TextMessagingDialog::sendFileToGroup()
+{
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    if (frame == nullptr) return;
+
+    wxString why;
+    if (!frame->chatCanSendGroupFiles(why))
+    {
+        setStatus(why);
+        return;
+    }
+    if (!m_inhibitReason.empty())
+    {
+        setStatus(wxString::Format(_("Receive only. %s"), wxString::FromUTF8(m_inhibitReason)));
+        return;
+    }
+
+    wxFileDialog dialog(this, _("Send a file to the GLISS group"), wxEmptyString, wxEmptyString,
+                        wxFileSelectorDefaultWildcardStr, wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+    if (dialog.ShowModal() != wxID_OK) return;
+    wxString path = dialog.GetPath();
+    wxString name = wxFileName(path).GetFullName();
+
+    wxULongLong size = wxFileName::GetSize(path);
+    if (size == wxInvalidSize || size.GetValue() == 0)
+    {
+        setStatus(wxString::Format(_("%s can't be sent: it is empty or can't be read."), name));
+        return;
+    }
+    if (size.GetValue() > Data2G::GROUP_FILE_MAX_BYTES)
+    {
+        wxMessageBox(wxString::Format(_("%s is %s bytes. A file for the whole group can be 64 KiB at most."), name,
+                                      groupDigits(size.GetValue())),
+                     _("Send File to Group"), wxOK | wxICON_INFORMATION, this);
+        return;
+    }
+
+    int gear = frame->chatTransmitGear();
+    if (gear < Glissando::MIN_GEAR) gear = Glissando::MIN_GEAR;
+    Data2G::GroupFileEstimate estimate = frame->chatGroupFileEstimate(size.GetValue(), gear);
+
+    // The faster tempos, for a file that would take long.
+    wxString faster;
+    for (int g = gear + 1; g <= Glissando::MAX_GEAR; g++)
+    {
+        Data2G::GroupFileEstimate at = frame->chatGroupFileEstimate(size.GetValue(), g);
+        if (!faster.empty()) faster += ", ";
+        faster += GlissandoConsole::gearLabel(g) + ": " + duration(at.airSeconds);
+    }
+
+    if (estimate.airSeconds > Data2G::GroupFileEngine::REFUSE_AIR_SECONDS)
+    {
+        wxString text = wxString::Format(_("At %s, %s would take about %s on the air. A file for the group may take "
+                                           "an hour at most."),
+                                         GlissandoConsole::gearLabel(gear), name, duration(estimate.airSeconds));
+        if (!faster.empty()) text += "\n\n" + wxString::Format(_("Faster tempos: %s."), faster);
+        wxMessageBox(text, _("Send File to Group"), wxOK | wxICON_INFORMATION, this);
+        return;
+    }
+
+    wxString text = wxString::Format(
+        _("%s, %s bytes, %d pieces at %s: about %s on the air (%s with the pauses between keyings), then "
+          "repairs until %s at the latest. Stations will not confirm receipt."),
+        name, groupDigits(size.GetValue()), estimate.pieces, GlissandoConsole::gearLabel(gear),
+        duration(estimate.airSeconds), duration(estimate.wallSeconds),
+        clockIn(estimate.wallSeconds + estimate.serviceSeconds));
+    bool long_ = estimate.airSeconds > Data2G::GroupFileEngine::WARN_AIR_SECONDS;
+    if (long_)
+    {
+        text += "\n\n" + _("That holds the GLISS group for a long time.");
+        if (!faster.empty()) text += " " + wxString::Format(_("Faster tempos: %s."), faster);
+    }
+    text += "\n\n" + _("Send it to the group?");
+    wxMessageDialog confirm(this, text, _("Send File to Group"),
+                            wxYES_NO | (long_ ? wxNO_DEFAULT | wxICON_WARNING : wxICON_QUESTION));
+    if (confirm.ShowModal() != wxID_YES) return;
+
+    wxString error;
+    if (frame->chatSendGroupFile(path, error) == 0)
+    {
+        setStatus(error);
+        return;
+    }
+    setStatus(wxString::Format(_("%s is going to the group."), name), StatusKind::Queued);
+    if (uiLogEnabled()) log_info("UI: file %s going to the group", (const char*)path.utf8_str());
+    updateFileTransfers();
+}
+
+// Receive...: the system's save dialog, in the received files folder with
+// the name the sender gave. The file is saved there once all of it is here,
+// and the pieces missing are asked for until then.
+void TextMessagingDialog::receiveGroupFile(uint64_t id)
+{
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    auto line = std::find_if(m_fileLines.begin(), m_fileLines.end(),
+                             [id](const FileLine& l) { return l.group && l.groupFile.id == id; });
+    if (frame == nullptr || id == 0 || line == m_fileLines.end()) return;
+    Data2G::GroupFile file = line->groupFile;
+
+    wxString folder = frame->chatReceivedFilesFolder();
+    if (!wxDirExists(folder)) wxFileName::Mkdir(folder, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+    wxString name = file.name.empty() ? wxString("received-file") : wxString::FromUTF8(file.name);
+    wxFileDialog dialog(this, wxString::Format(_("Save %s from %s"), name, wxString::FromUTF8(file.sender)), folder,
+                        name, wxFileSelectorDefaultWildcardStr, wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+    if (dialog.ShowModal() != wxID_OK) return;
+
+    wxString path = dialog.GetPath();
+    frame->chatSetReceivedFilesFolder(wxFileName(path).GetPath());
+    wxString error;
+    if (frame->chatReceiveGroupFile(id, path, error))
+    {
+        setStatus(wxString::Format(_("Receiving %s from %s."), name, wxString::FromUTF8(file.sender)));
+    }
+    else
+    {
+        setStatus(error);
+    }
+    if (uiLogEnabled()) log_info("UI: group file id=%d to be saved as %s", (int)id, (const char*)path.utf8_str());
+    updateFileTransfers();
+}
+
+void TextMessagingDialog::ignoreGroupFile(uint64_t id)
+{
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    if (frame == nullptr || id == 0) return;
+    setStatus(frame->chatIgnoreGroupFile(id) ? _("File ignored.") : _("That file is no longer coming."));
+    updateFileTransfers();
+}
+
+void TextMessagingDialog::OnMenuStopServing(wxCommandEvent&)
+{
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    if (frame == nullptr || m_menuGroupFileId == 0) return;
+    setStatus(frame->chatStopServingGroupFile(m_menuGroupFileId) ? _("No more repairs for that file.")
+                                                                 : _("That file is no longer going."));
+    updateFileTransfers();
+}
+
+void TextMessagingDialog::OnMenuCancelGroupFile(wxCommandEvent&)
+{
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    if (frame == nullptr || m_menuGroupFileId == 0) return;
+    setStatus(frame->chatCancelGroupFile(m_menuGroupFileId) ? _("Transfer cancelled.")
+                                                            : _("That file is no longer going."));
+    updateFileTransfers();
+}
+
+void TextMessagingDialog::OnMenuReceiveGroupFile(wxCommandEvent&)
+{
+    receiveGroupFile(m_menuGroupFileId);
+}
+
+void TextMessagingDialog::OnMenuIgnoreGroupFile(wxCommandEvent&)
+{
+    ignoreGroupFile(m_menuGroupFileId);
+}
+
+// The links on a group file's line. Nothing else in the chat is a link,
+// and nothing is ever loaded from one.
+void TextMessagingDialog::OnChatLink(wxHtmlLinkEvent& event)
+{
+    wxString href = event.GetLinkInfo().GetHref();
+    unsigned long long id = 0;
+    if (href.StartsWith("gfile:receive:") && href.Mid(14).ToULongLong(&id)) receiveGroupFile(id);
+    else if (href.StartsWith("gfile:ignore:") && href.Mid(13).ToULongLong(&id)) ignoreGroupFile(id);
 }
 
 void TextMessagingDialog::OnClose(wxCloseEvent&)

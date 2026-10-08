@@ -83,6 +83,17 @@ public:
     ConfigurationDataElement<int> data2gCommandPort;
     ConfigurationDataElement<bool> data2gSessions;
 
+    // Files through a Data2G session: where received ones are saved (empty
+    // for the default under Documents), kept as the folder last saved to;
+    // and the stations whose files are taken without asking (callsigns,
+    // separated by spaces or commas).
+    ConfigurationDataElement<wxString> data2gReceivedFilesFolder;
+    ConfigurationDataElement<wxString> data2gAutoAcceptFilesFrom;
+
+    // Files broadcast to the GLISS group are received into that folder
+    // without asking (only while Auto acknowledge is lit too).
+    ConfigurationDataElement<bool> data2gReceiveGroupFiles;
+
     // The Glissando console and the melodic chirp mode it drives. Tuning
     // offset and scan rate are stored in tenths (Hz, rows per second) so
     // they fit the integer config type.

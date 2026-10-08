@@ -7,6 +7,8 @@
 //                  single station go through a connected (ARQ) session with
 //                  it, which data2g-host negotiates, rate-shifts and
 //                  acknowledges; its acknowledgements settle each message.
+//                  Files go through such a session too, beside the chat,
+//                  and files for everybody go to the GLISS group.
 //
 // data2g-host owns the sound card and the PTT; this only talks TCP to it.
 // The operator starts it. Nothing of Data2G is built into this program.
@@ -26,6 +28,8 @@
 #include <thread>
 #include <vector>
 
+#include "Data2GBroadcast.h"
+#include "Data2GFileTransfer.h"
 #include "Data2GLink.h"
 #include "FrameCodec.h"
 #include "TextMessagingProtocol.h"
@@ -121,6 +125,49 @@ public:
     bool withdrawReliably(uint64_t keyingId) override;
     bool releaseStation(const std::string& destination) override;
 
+    // Files for one station, through a session with it (docs/DATA2G.md):
+    // possible with sessions on and data2g-host's command and data ports
+    // up. A file is offered once a session with the station is open and
+    // the file before it is done; the session stays open while anything
+    // is under way in it. The rest is the engine's (Data2GFileTransfer.h).
+    bool sendsFiles() const;
+    uint64_t sendFile(const std::string& destination, const std::string& path, std::string& error);
+    bool acceptFile(uint64_t id, const std::string& path, std::string& error);
+    bool declineFile(uint64_t id);
+    bool cancelFile(uint64_t id);
+    void setFileAutoAccept(const std::string& folder, const std::vector<std::string>& calls);
+    std::vector<Data2G::FileTransfer> fileTransfers() const;
+    uint64_t fileTransferChanges() const;
+
+    // Files for everybody on the GLISS group (docs/DATA2G.md): possible
+    // once the group is open, with a callsign. One of ours goes at a time,
+    // in keyings of its own that wait behind any chat keying and pause 4 s
+    // after each, at the console's tempo. Every file heard on the group is
+    // kept as it comes. The rest is the engine's (Data2GBroadcast.h).
+    bool sendsGroupFiles(std::string& why) const;
+    uint64_t sendGroupFile(const std::string& path, std::string& error);
+    Data2G::GroupFileEstimate groupFileEstimate(uint64_t size, int gear) const;
+    bool stopServingGroupFile(uint64_t id);
+    bool cancelGroupFile(uint64_t id);
+    bool receiveGroupFile(uint64_t id, const std::string& path, std::string& error);
+    bool ignoreGroupFile(uint64_t id);
+    // Received without asking into folder; empty: not.
+    void setGroupFileAutoReceive(const std::string& folder);
+    // Sending not allowed here: no file keyings on the group, and every
+    // file through a session ends, the far end told in it; nothing new
+    // is offered or accepted, and no session is called for a file.
+    void setFilesInhibited(bool inhibited);
+    // "Woah!": no file keying for this long.
+    void holdGroupFiles(uint64_t holdMs);
+    std::vector<Data2G::GroupFile> groupFiles() const;
+    uint64_t groupFileChanges() const;
+
+    // The next piece of a file is written once no more than this much of
+    // what went before is unacknowledged, so the modem always has the
+    // rest of a piece to send while chat typed meanwhile, or a Cancel,
+    // waits at most that long behind it.
+    static constexpr uint64_t FILE_PIECE_LOW_WATER = Data2G::FILE_PIECE_BYTES / 4;
+
     // Test hook: the clock the keying and session timers read.
     void setClock(std::function<uint64_t()> monotonicMs);
 
@@ -133,6 +180,9 @@ public:
     // long and nothing of ours is waiting on it, so the group can be heard
     // again: long enough for the far end to answer in the same session.
     static constexpr uint64_t SESSION_IDLE_MS = 45000;
+    // How long a session let go of waits for data2g-host to read its last
+    // records before it is aborted instead.
+    static constexpr uint64_t FAREWELL_WAIT_MS = 10000;
 
     // A station that would not take a session is sent to through the group
     // for this long before a session is tried again.
@@ -187,8 +237,12 @@ private:
     void run(Settings settings);
     void deliver(const std::vector<uint8_t>& bytes, bool viaSession);
     bool sessionPossibleLocked(const std::string& call) const;
+    bool filesPossibleLocked(const std::string& call) const;
     void reportLocked(const std::string& peer, bool writtenOnly, KeyingReport::Result result);
+    void bufferLocked(int64_t count);
     void settleSessionLocked();
+    bool sessionWritableLocked() const;
+    void wroteLocked(uint64_t bytes);
     void log(const std::string& line);
     uint64_t now() const;
 
@@ -214,19 +268,46 @@ private:
     bool dataConnected_;
     std::set<std::string> released_;    // stations whose session is to end at once
     bool sessionAborted_;               // ABORT sent for the session now ending
+    // A station let go of whose files were cancelled in its session: the
+    // session ends once data2g-host has read the records saying so.
+    std::string farewellPeer_;
+    uint64_t farewellAtMs_ = 0;
 
     // Session keyings in the order given, and what has become of them.
-    // data2g-host's BUFFER is the count of bytes the far end has not yet
-    // acknowledged (exactly, for a client that sent CHAT ON, from Data2G's
-    // PR #51; before that, 1 for "some"), so a batch written together is
-    // settled keying by keying as the count falls past each one's end.
     std::deque<SessionKeying> sessionKeyings_;
     std::vector<KeyingReport> reports_;
+
+    // What the far end's modem has acknowledged of what we wrote into the
+    // session. data2g-host's BUFFER is the count of bytes it has read from
+    // us that the far end has not yet acknowledged (exactly, for a client
+    // that sent CHAT ON, from Data2G's PR #51; before that, 1 for "some").
+    // It can't say how much it has read, so both are kept as the least
+    // they can be: a BUFFER that rose by n means at least n more were read
+    // (acknowledgements only lower it), and one of b means at least b more
+    // were read than acknowledged. A message is settled once the bytes
+    // acknowledged pass its end.
     uint64_t sessionWritten_;       // bytes written into this session
-    uint64_t batchBytes_;           // the batch written last, while it is unsettled
-    bool batchSeen_;                // a nonzero BUFFER since that write
-    bool batchCounted_;             // a BUFFER since that write has counted all of it
+    uint64_t sessionRead_;          // at least this many read by data2g-host
+    uint64_t sessionAcked_;         // at least this many acknowledged by the far end
+    uint64_t lastWriteBytes_;       // the size of the last write
+    bool bufferSeen_;               // a BUFFER since the last write showing data2g-host read it
     int bufferExact_;               // -1 not known yet; 1 BUFFER counts bytes; 0 it does not
+
+    // Files through the session, under mutex_ like the rest.
+    Data2G::FileTransferEngine files_;
+
+    // Files on the group, and the keying of theirs with data2g-host, which
+    // goes only while no chat keying is there, and the other way round.
+    Data2G::GroupFileEngine groupFiles_;
+    struct FileKeying
+    {
+        bool active = false;
+        uint64_t heldSinceMs = 0;   // NOT_SENT_TIMEOUT runs from here
+        std::set<uint16_t> tags;
+    } fileKeying_;
+    // A chat keying's ACKMODE tags given up on while data2g-host may still
+    // hold them: a drop it reports is theirs before it is a file keying's.
+    std::set<uint16_t> staleChatTags_;
 
     FrameCallback frameCallback_;
     LogFunction log_;
