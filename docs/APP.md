@@ -410,9 +410,16 @@ Chat can also go out through [Data2G](https://github.com/arodland/Data2G), a
 separate HF data modem program. The app does not start it or include any of
 it: run `data2g-host` yourself (with its own sound card and rigctld PTT
 settings), then tick **Send chat through Data2G** under Preferences, Modem,
-Text Chat, and give its host and ports (KISS 8100, command 8300). The chat
-window shows whether data2g-host is reachable. Turn the command port off if
-VarAC or Pat also use the same data2g-host. docs/DATA2G.md has the details.
+Text Chat, and give its host and ports (KISS 8100, command 8300; sessions
+use the command port + 1). Chat opens Data2G's GLISS broadcast group and
+sends its frames there as they are. The tempo buttons pick the Data2G mode:
+Adagio its most sensitive (`fsk16r25-r1/3`), Duet a fast 2.4 kHz one
+(`w48-16qam-r1/2`). With **Connect a session for messages to one station**
+ticked, a message to a station picked in the call roster goes through a
+connected Data2G session, and to the group if that station doesn't answer.
+The chat window shows whether data2g-host is reachable, the group's mode, and
+any session. data2g-host serves one command client at a time, so VarAC or Pat
+can't share it. docs/DATA2G.md has the details.
 
 ## Modem
 

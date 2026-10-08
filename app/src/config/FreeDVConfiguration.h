@@ -76,13 +76,15 @@ public:
     ConfigurationDataElement<bool> textChatUsDataSegmentsOnly;
 
     // Text chat through a separately running data2g-host instead of our own
-    // modem (docs/DATA2G.md): KISS for the frames, and the command port for
-    // PTT and BUSY unless another client needs it.
+    // modem (docs/DATA2G.md): the GLISS broadcast group on the KISS port, the
+    // command port to open it and pick its mode, and, with sessions on,
+    // connected sessions (data on the command port + 1) for messages to one
+    // station.
     ConfigurationDataElement<bool> data2gEnabled;
     ConfigurationDataElement<wxString> data2gHost;
     ConfigurationDataElement<int> data2gKissPort;
-    ConfigurationDataElement<bool> data2gUseCommandPort;
     ConfigurationDataElement<int> data2gCommandPort;
+    ConfigurationDataElement<bool> data2gSessions;
 
     // The Glissando console and the melodic chirp mode it drives. Tuning
     // offset and scan rate are stored in tenths (Hz, rows per second) so

@@ -1,12 +1,15 @@
 //=========================================================================
 // Name:            Data2GLink.h
 // Purpose:         The byte formats chat uses to talk to an external
-//                  data2g-host: KISS framing, AX.25 UI frames, and the
-//                  VARA-style command port's notifications. No sockets
+//                  data2g-host: KISS framing (with ACKMODE), the command
+//                  port's lines, the modes it offers and which one each
+//                  Glissando tempo maps to, and the framing of chat frames
+//                  inside a connected session's byte stream. No sockets
 //                  here, so all of it can be tested on its own.
 //
-// Written for Glissando from the public KISS, AX.25 2.2 and VARA protocol
-// descriptions; no Data2G code is used (see docs/DATA2G.md).
+// Written for Glissando from the public KISS and VARA protocol descriptions
+// and Data2G's docs/broadcast.md; no Data2G code is used (see
+// docs/DATA2G.md).
 //=========================================================================
 
 #ifndef TEXT_MESSAGING__DATA2G_LINK_H
@@ -24,29 +27,39 @@ namespace Data2G
 {
 
 constexpr int DEFAULT_KISS_PORT = 8100;
-constexpr int DEFAULT_COMMAND_PORT = 8300;
+constexpr int DEFAULT_COMMAND_PORT = 8300; // the session data port is the next one
 
-// Every chat frame goes to the same AX.25 destination: our frames address
-// stations by a callsign CRC inside the frame, and Data2G sends UI frames in
-// its robust broadcast mode whoever they are for.
-constexpr const char* AX25_DESTINATION = "GLISS";
+// The broadcast group chat opens. Its bursts carry the name, and every
+// codeword a CRC mask hashed from it, so only stations that opened GLISS
+// take them in.
+constexpr const char* GROUP = "GLISS";
 
-// The info field of our UI frames starts with this, so frames from other
-// programs sharing the host (APRS, Winlink) are told apart and dropped.
-constexpr uint8_t INFO_TAG[] = {'G', 'L', 'S', 1};
-constexpr int INFO_TAG_BYTES = (int)sizeof(INFO_TAG);
+//-------------------------------------------------------------------------
+// KISS
+//-------------------------------------------------------------------------
 
-// KISS (TCP, as KA9Q/K3MC): FEND frame FEND, with FEND and FESC in the data
-// escaped. Only data frames on port 0 are sent.
-std::vector<uint8_t> kissEncode(const std::vector<uint8_t>& data);
+constexpr uint8_t KISS_DATA = 0x00;
+constexpr uint8_t KISS_ACKMODE = 0x0C;
 
-// Splits a KISS byte stream into data frames, however it arrives in pieces.
+// A data frame for a KISS port (0 to 15).
+std::vector<uint8_t> kissEncode(int port, const std::vector<uint8_t>& data);
+
+// An ACKMODE frame: data2g-host answers with the same tag once the burst
+// carrying it has been transmitted.
+std::vector<uint8_t> kissEncodeAckMode(int port, uint16_t tag, const std::vector<uint8_t>& data);
+
+struct KissFrame
+{
+    int port = 0;
+    uint8_t command = KISS_DATA;    // low nibble of the command byte
+    std::vector<uint8_t> payload;   // data, or for an ACKMODE ack the 2-byte tag
+};
+
+// Splits a KISS byte stream into frames, however it arrives in pieces.
 class KissDecoder
 {
 public:
-    // Appends every complete data frame in bytes (on any port) to framesOut.
-    // Frames of other KISS commands are dropped.
-    void feed(const uint8_t* bytes, int length, std::vector<std::vector<uint8_t>>& framesOut);
+    void feed(const uint8_t* bytes, int length, std::vector<KissFrame>& framesOut);
     void reset();
 
 private:
@@ -55,49 +68,75 @@ private:
     bool inFrame_ = false;
 };
 
-// An AX.25 address as far as AX.25 can carry it: up to six letters and
-// digits and an SSID of 0 to 15, from a callsign such as "VK2ABC-7".
-// Portable and other suffixes ("/P") are dropped; the frame inside carries
-// the full callsign. Nothing usable left gives "NOCALL".
-struct Ax25Address
+//-------------------------------------------------------------------------
+// Modes
+//-------------------------------------------------------------------------
+
+// One line of the MODES list: "MODE name bandwidth-Hz bytes-per-codeword
+// max-codewords seconds-at-1 seconds-at-max".
+struct ModeInfo
 {
-    std::string call;
-    int ssid = 0;
+    std::string name;
+    int bandwidthHz = 0;
+    int bytesPerCodeword = 0;
+    int maxCodewords = 0;
+    double secondsAtOne = 0.0;
+    double secondsAtMax = 0.0;
+
+    bool valid() const { return !name.empty() && bytesPerCodeword > 0 && maxCodewords > 0; }
+
+    // How long a burst carrying these frames takes: one control codeword,
+    // then the frames back to back behind a 2-byte length each.
+    double burstSeconds(const std::vector<int>& frameBytes) const;
 };
 
-Ax25Address ax25Address(const std::string& callsign);
+// The modes a 2400 Hz data2g-host offered when this was written, for the
+// ones the tempos use; what the host's own MODES list says wins.
+const std::vector<ModeInfo>& knownModes();
 
-// A UI command frame (control 0x03, PID 0xF0: no layer 3) from source to
-// destination carrying info.
-std::vector<uint8_t> ax25UiFrame(const std::string& source, const std::string& destination,
-                                 const std::vector<uint8_t>& info);
+// The mode a Glissando tempo (1 Adagio .. 5 Duet) goes out in: the first of
+// its choices the host offers. Adagio is Data2G's most sensitive mode, Duet
+// a fast 2.3 kHz one; a host capped at 500 Hz gets narrow modes throughout.
+ModeInfo modeForGear(int gear, const std::vector<ModeInfo>& offered);
 
-// Parses a UI frame without digipeaters or with up to eight of them. Returns
-// false for anything else: a connected-mode frame, a PID other than 0xF0, a
-// malformed address field.
-struct Ax25Ui
-{
-    Ax25Address source;
-    Ax25Address destination;
-    std::vector<uint8_t> info;
-};
+// Protocol timers for chat sent in a mode: a whole keying is one Data2G
+// burst, decoded once all of it has arrived. The command port's PTT, BUSY
+// and transmitted reports keep the protocol from waiting on these in the
+// usual case.
+AirTiming airTiming(const ModeInfo& mode);
 
-bool parseAx25Ui(const std::vector<uint8_t>& frame, Ax25Ui& out);
+//-------------------------------------------------------------------------
+// The command port
+//-------------------------------------------------------------------------
 
-// One chat frame (as FrameCodec::encode made it) as the KISS payload that
-// carries it, and back. chatFrameFromPayload() returns false for a payload
-// that is not one of ours.
-std::vector<uint8_t> payloadForChatFrame(const std::string& myCallsign,
-                                         const std::vector<uint8_t>& chatFrame);
-bool chatFrameFromPayload(const std::vector<uint8_t>& payload, std::vector<uint8_t>& chatFrameOut);
-
-// What a line from the command port means to us. Everything the host says
-// that chat has no use for (CONNECTED, BUFFER, IAMALIVE, OK, ...) is Other.
+// What a line from the command port means to us.
 struct CommandEvent
 {
-    enum class Type { Other, Ptt, Busy, Mode } type = Type::Other;
-    bool on = false;         // Ptt, Busy
-    std::string mode;        // Mode: the submode name
+    enum class Type
+    {
+        Other,          // IAMALIVE, VERSION and anything chat has no use for
+        Ok,
+        Wrong,
+        Ptt,            // on
+        Busy,           // on
+        Mode,           // text: the submode a burst went out in
+        ModeLine,       // modeInfo: one line of the MODES list
+        BcastPort,      // number: the port BCAST OPEN gave
+        BcastHeard,     // number, text: the sender's call when sent with FROM
+        BcastLost,      // number, count
+        BcastDropped,   // number, count
+        Connected,      // text: caller, peer: called station
+        Disconnected,
+        Buffer,         // count: bytes still to send in the session
+        Cqframe,
+    } type = Type::Other;
+
+    bool on = false;
+    int number = 0;
+    int count = 0;
+    std::string text;
+    std::string peer;
+    ModeInfo modeInfo;
 };
 
 CommandEvent parseCommandLine(const std::string& line);
@@ -113,16 +152,30 @@ private:
     std::string current_;
 };
 
-// Protocol timers for chat over Data2G. A keying of ours goes out as one
-// Data2G burst, which the far end decodes only once all of it has arrived.
-// Sized for the longest burst Data2G plans for broadcasts (12 s) and a
-// decode of a few seconds; the command port's PTT and BUSY reports keep the
-// protocol from waiting on these in the usual case.
-AirTiming airTiming();
+// The callsign as the command port and a BCAST FROM can carry it: letters,
+// digits, '/' and '-', at most 10 characters, upper case.
+std::string commandCallsign(const std::string& callsign);
 
-// How long a keying is assumed to hold the channel when the command port is
-// off and Data2G cannot tell us.
-constexpr int ESTIMATED_BURST_MILLISECONDS = 14000;
+//-------------------------------------------------------------------------
+// Connected sessions
+//-------------------------------------------------------------------------
+
+// Chat frames inside a session's byte stream: 'G', a length byte, then the
+// frame, so a stream from a program that is not Glissando is told apart.
+std::vector<uint8_t> streamEncode(const std::vector<uint8_t>& frame);
+
+class StreamDecoder
+{
+public:
+    // Appends every complete frame; returns false once the stream has
+    // shown it is not ours, after which it takes nothing more.
+    bool feed(const uint8_t* bytes, int length, std::vector<std::vector<uint8_t>>& framesOut);
+    void reset();
+
+private:
+    std::vector<uint8_t> pending_;
+    bool foreign_ = false;
+};
 
 } // namespace Data2G
 } // namespace TextMessaging

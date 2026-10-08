@@ -356,7 +356,8 @@ public:
     void createChatWindow();
 
     // The Glissando tempo a chat keying would go out at now, from the
-    // console or Auto; 0 when chat goes over codec2 or Data2G.
+    // console or Auto (with Data2G, the tempo that picks its mode); 0 when
+    // chat goes over codec2.
     int chatTransmitGear();
 
     // How much of the chat transmission on the air has been sent, 0 to 1;
@@ -416,6 +417,9 @@ private:
     void applyGlissandoToModem_(bool enabled);
     void closeGlissandoConsole_();
     GlissandoConsoleSettings loadGlissandoSettings_() const;
+    // The Glissando tempo chat sends at now: the console's, or Auto's pick.
+    // With Data2G carrying chat it picks the Data2G mode.
+    int chatTempo_();
     TextMessaging::AirTiming appliedAirTiming_;
 
     // Set while text chat goes through data2g-host (applyChatModem_()).
