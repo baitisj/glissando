@@ -85,6 +85,31 @@ public:
         (void)gear;
         return 1.0;
     }
+
+    // A link that acknowledges, retries and paces what it carries by itself,
+    // such as a Data2G connected session. Nothing else has one: the defaults
+    // say no, and the protocol then works exactly as it does without them.
+    //
+    // Whether a keying for this one station would go through such a link now.
+    virtual bool deliversReliablyTo(const std::string& destination) const
+    {
+        (void)destination;
+        return false;
+    }
+
+    // Hands a keying for one station to that link, without holding the
+    // transmitter: the link sends it when it can, and says what became of it
+    // in a report carrying keyingId. False if it cannot take it now.
+    virtual bool transmitReliably(const std::vector<OutgoingBurst>& bursts, uint64_t keyingId)
+    {
+        (void)bursts;
+        (void)keyingId;
+        return false;
+    }
+
+    // The reports on keyings given to transmitReliably() since the last call,
+    // in the order they were settled.
+    virtual std::vector<KeyingReport> takeKeyingReports() { return {}; }
 };
 
 // Implemented by the dialog. Callbacks arrive on whichever thread drove the
@@ -207,7 +232,10 @@ public:
     bool sendPing(const std::string& destination, std::string& errorOut);
 
     // Called by the receive step for every frame the modem decodes.
-    void onFrameReceived(const Frame& frame, float snr);
+    // viaReliableLink: it came through a link that acknowledges by itself
+    // (see ITextMessagingTransport::transmitReliably), so it is answered by
+    // that link, and says nothing about who has the channel.
+    void onFrameReceived(const Frame& frame, float snr, bool viaReliableLink = false);
 
     // Drives transmission, retries and timeouts. Call it a few times a second
     // from the GUI timer; it does no work of its own when nothing is pending.
@@ -282,6 +310,7 @@ private:
         Queued,        // waiting for a clear transmitter
         Transmitting,  // handed to the transport, burst in progress
         AwaitingAck,   // burst finished, acknowledgement timer running
+        Delivering,    // with a link that acknowledges by itself, waiting on its report
     };
 
     struct PendingTransmission
@@ -307,6 +336,8 @@ private:
         uint64_t sentAtMs = 0;   // end of our burst, for the reply window
         uint64_t notBeforeMs = 0; // retry backoff; nothing to do with the far end
         int gear = 0;            // the tempo the operator chose; 0 for the one set now
+        uint64_t keyingId = 0;   // while Delivering: the keying the link reports on
+        bool locatorRode = false; // while Delivering: our locator went in the same keying
         TransmissionState state = TransmissionState::Queued;
     };
 
@@ -367,7 +398,7 @@ private:
     void queuePongLocked(const std::string& destination, float snr);
     void reserveChannelForKeyingLocked(const Frame& frame, uint64_t nowMs);
     void handleIncomingFragmentLocked(const Frame& frame, float snr,
-                                      std::vector<PendingEvent>& events);
+                                      std::vector<PendingEvent>& events, bool viaReliableLink);
     void handleAckLocked(const Frame& frame, std::vector<PendingEvent>& events);
     void handlePartialAckLocked(const Frame& frame, std::vector<PendingEvent>& events);
     bool retryOrFailLocked(size_t index, uint64_t nowMs, std::vector<PendingEvent>& events);
@@ -375,7 +406,8 @@ private:
     std::vector<OutgoingBurst> keyingBurstsLocked(
         const std::vector<const PendingTransmission*>& entries, uint64_t nowMs,
         std::string* locatorToOut);
-    void handlePingLocked(const Frame& frame, float snr, std::vector<PendingEvent>& events);
+    void handlePingLocked(const Frame& frame, float snr, std::vector<PendingEvent>& events,
+                          bool viaReliableLink);
     void handlePongLocked(const Frame& frame, float snr, std::vector<PendingEvent>& events);
     void addSystemMessageLocked(const std::string& text, const std::string& destination,
                                 std::vector<PendingEvent>& events);
@@ -395,6 +427,9 @@ private:
     void holdTimersLocked(uint64_t pausedMs);
     uint32_t randomDelayLocked(int maxMs);
     void serviceOutboxLocked(uint64_t nowMs, bool frozen, std::vector<PendingEvent>& events);
+    bool goesReliablyLocked(const PendingTransmission& pending) const;
+    void sendReliablyLocked(uint64_t nowMs, std::vector<PendingEvent>& events);
+    void settleReliableKeyingsLocked(std::vector<PendingEvent>& events);
     uint16_t nextAirIdLocked();
     Frame makeFrameLocked(FrameType type, const std::string& destination, uint16_t airId,
                           uint8_t fragmentIndex, uint8_t fragmentCount,
@@ -465,6 +500,7 @@ private:
     // is queued, so a busy spell is measured from when it really began.
     bool channelBusy_;
     bool channelHeld_ = false;        // channelFrozenLocked() at the last tick
+    uint64_t nextKeyingId_ = 0;       // for keyings given to a link that acknowledges by itself
     uint64_t channelBusySinceMs_;
     uint64_t channelReservedUntilMs_; // a fragmented message still on the air
     std::string channelReservedBy_;   // whose, when it was a text frame's count

@@ -417,6 +417,9 @@ Adagio its most sensitive (`fsk16r25-r1/3`), Duet a fast 2.4 kHz one
 (`w48-16qam-r1/2`). With **Connect a session for messages to one station**
 ticked, a message to a station picked in the call roster goes through a
 connected Data2G session, and to the group if that station doesn't answer.
+In a session the modem's own acknowledgements turn each message OK (or NO
+ACK if the session is lost), with no pauses, no tempo and no chat
+acknowledgements of ours, so Auto acknowledge makes no difference there.
 The chat window shows whether data2g-host is reachable, the group's mode, and
 any session. data2g-host serves one command client at a time, so VarAC or Pat
 can't share it. docs/DATA2G.md has the details.

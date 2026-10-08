@@ -100,33 +100,72 @@ tempo's choices is offered, Adagio and Andante take the host's first
 
 ## Messages to one station: sessions
 
-A message to a station picked in the call roster, and its pings and
-acknowledgements, can go through a connected Data2G session instead of
-the group. Data2G then negotiates the session, rate-shifts it to the path,
-and resends what is lost. **Connect a session for messages to one
+A message or ping to a station picked in the call roster goes through a
+connected Data2G session instead of the group. Data2G negotiates the
+session, picks its own speed for the path, resends what is lost and
+acknowledges what arrives. **Connect a session for messages to one
 station** in Preferences turns this on (on by default).
 
-- The keying goes through a session only when every frame in it is for
-  that one station. Broadcasts, and anything for more than one station, go
-  to the group.
-- The app sends `CONNECT <mycall> <theircall>`. Once `CONNECTED`, the
-  chat frames are written to the session data port, each as `G`, a length
-  byte and the frame, so a stream from a program that is not Glissando is
-  told apart and the session dropped.
-- The keying is over when PTT has gone on and off and `BUFFER 0` says the
-  host has nothing left to send.
-- The chat protocol still sends its own acknowledgement inside the
-  session, so the chat window's delivery states work as they do on the
-  group.
-- The station that called closes the session once nothing has gone
-  either way for 45 s, or straight away when a keying for someone else is
-  waiting. Data2G sends no broadcasts during a session.
-- With `LISTEN ON`, the host takes sessions other Glissando stations
-  open to us, and frames arriving in them go to the chat protocol.
-- If the station doesn't answer (`DISCONNECTED` while connecting, or no
-  `CONNECTED` within 90 s, after which the app sends `ABORT`), the keying
-  goes to the GLISS group instead, and that station gets group messages
-  for the next ten minutes before a session is tried again.
+In a session the modem does the work our own chat protocol does on the
+group, so the protocol stands aside (Jeff, 2026-10-08):
+
+- **The modem's acknowledgements settle each message.** `BUFFER n` is the
+  count of our bytes the far end's modem has not yet acknowledged. Since
+  Data2G's PR #51 it is exact for a client that sent `CHAT ON` (which the
+  app does). The app writes everything waiting for the station in one go
+  and notes where each message ends in the byte stream. As the count falls
+  past a message's end, that message shows OK. A ping shows "PING
+  delivered" instead of a pong.
+- **The modem's timeouts end them.** The app adds no acknowledgement timer
+  and no retries of its own. If the session is lost (`DISCONNECTED`)
+  before a message is acknowledged, it shows NO ACK; Data2G has already
+  retried for longer than we would. A `BUFFER 0` that comes after
+  `DISCONNECTED` is the host listening again, not a delivery.
+- **No acknowledgements of our own.** Frames that arrive through a session
+  are not answered with a chat ACK, pong or report of missing fragments,
+  so the Auto acknowledge button makes no difference there. It still
+  matters for the group.
+- **No pauses.** A message for a session goes to the transport as soon as
+  it is queued. The app's turnarounds, reply windows, channel-busy holds
+  and retry backoffs don't apply. Frames arriving through a session hold
+  nothing up either. Only "Woah!" holds them, as it holds everything.
+- **No tempo.** The session picks its own speed, so the chat window shows
+  no tempo on such a message and offers no "Change Tempo to...". The
+  console's tempo still picks the GLISS group's mode.
+
+An older data2g-host (before PR #51) reports only 1 for "something is
+unacknowledged". The app tells the two apart from the first `BUFFER` after
+it writes, which on a new host counts at least what was written. With an
+older host, messages written together are settled together, at
+`BUFFER 0`.
+
+How the session itself runs:
+
+- Only messages and pings go through a session. Broadcasts, and the
+  protocol's own replies to traffic heard on the group, go to the group.
+- The app sends `CONNECT <mycall> <theircall>`. Once `CONNECTED`, chat
+  frames are written to the session data port, each as `G`, a length byte
+  and the frame, so a stream from a program that is not Glissando is told
+  apart and the session dropped.
+- A session the app opened is closed once nothing of ours is waiting on
+  it and nothing has gone either way for 45 s, or straight away when
+  something for another station, or for the group, is waiting. Data2G
+  sends no broadcasts during a session. A session the far end opened is
+  left to it, unless something else has waited 45 s.
+- With `LISTEN ON`, the host takes sessions other Glissando stations open
+  to us, and frames arriving in them go to the chat protocol.
+- If the station doesn't answer (`DISCONNECTED` while connecting; Data2G
+  calls five times), the message goes back to the queue and on to the
+  GLISS group, with our own acknowledgement and retries. That station
+  then gets group messages for the next ten minutes before a session is
+  tried again. The app gives up on a host that never answers a `CONNECT`
+  after 180 s, and on a message that has waited ten minutes for its
+  session (the channel busy with sessions of other stations).
+
+Known limit: locators. A station learns that another takes locator
+frames from its pings and acknowledgements. In a session there are no
+chat acknowledgements, so two stations that only exchange session
+messages learn it only from a ping.
 
 ## What was built
 
@@ -156,9 +195,15 @@ station** in Preferences turns this on (on by default).
   `MODES` list, the tempo-to-mode table for wide and 500 Hz hosts, the
   session stream, and chat protocols on two fake data2g-hosts on
   localhost: a broadcast on the group at Adagio's mode, Duet's mode, a
-  directed message through a session with its acknowledgement, a station
-  without sessions getting the group instead, a lost command port, and a
-  callsign change reopening the group. Clean under ThreadSanitizer.
+  directed message through a session settled by the modem with no chat
+  acknowledgement, three messages each settled as its bytes are
+  acknowledged, an older host settling them together, a lost session
+  failing a message, a ping through a session, a station without sessions
+  getting the group instead, a lost command port, and a callsign change
+  reopening the group. Clean under ThreadSanitizer.
+  `TextMessagingProtocolTest` covers the protocol's side against a fake
+  link, and its older tests, unchanged, show nothing changes for our own
+  modem.
 - **Bench** (manual, not yet run): two `data2g-host` instances on
   PulseAudio null sinks, each with a Glissando app attached; chat both
   ways at Adagio and Duet, a broadcast, a directed message through a

@@ -3,9 +3,10 @@
 // Purpose:         Carries chat through a separately running data2g-host.
 //                  Broadcasts, and anything else for more than one station,
 //                  go to the GLISS broadcast group on its KISS port, in the
-//                  mode the Glissando tempo maps to. A keying for a single
-//                  station can instead go through a connected (ARQ) session
-//                  with it, which data2g-host negotiates and rate-shifts.
+//                  mode the Glissando tempo maps to. Messages and pings for a
+//                  single station go through a connected (ARQ) session with
+//                  it, which data2g-host negotiates, rate-shifts and
+//                  acknowledges; its acknowledgements settle each message.
 //
 // data2g-host owns the sound card and the PTT; this only talks TCP to it.
 // The operator starts it. Nothing of Data2G is built into this program.
@@ -58,10 +59,14 @@ public:
         std::string mode;               // the submode of the last burst sent
         std::string sessionPeer;        // a connected session's far end
         bool sessionConnecting = false;
+        int sessionWaiting = 0;         // messages for sessions not yet acknowledged
+        int64_t sessionUnacked = 0;     // data2g-host's last BUFFER in the session
         std::string error;              // why the last connection failed
     };
 
-    using FrameCallback = std::function<void(const Frame& frame, float snr)>;
+    // viaSession: it came through a connected session, which has already
+    // acknowledged it to the sender.
+    using FrameCallback = std::function<void(const Frame& frame, float snr, bool viaSession)>;
     using LogFunction = std::function<void(const std::string& line)>;
 
     Data2GTransport();
@@ -94,49 +99,73 @@ public:
     Data2G::ModeInfo modeForGear(int gear) const;
     AirTiming airTiming() const;
 
+    // Group keyings: broadcasts and the protocol's replies.
     bool transmit(const std::vector<OutgoingBurst>& bursts) override;
     bool isTransmitting() const override;
     bool isChannelBusy() const override;
     double airTimeScale(int gear) const override;
 
+    // Session keyings: with sessions on, a message or ping for one station
+    // that has not lately refused one. Each is reported Delivered once the
+    // far end's modem has acknowledged all of it, Failed if the session is
+    // lost first, and NotTaken if no session could be opened (that station
+    // then gets the group for NO_SESSION_HOLD_MS).
+    bool deliversReliablyTo(const std::string& destination) const override;
+    bool transmitReliably(const std::vector<OutgoingBurst>& bursts, uint64_t keyingId) override;
+    std::vector<KeyingReport> takeKeyingReports() override;
+
     // Test hook: the clock the keying and session timers read.
     void setClock(std::function<uint64_t()> monotonicMs);
 
-    // A keying data2g-host never puts on the air (it holds broadcasts during
-    // a session, and while the channel is busy) is given up after this long.
+    // A group keying data2g-host never puts on the air (it holds broadcasts
+    // during a session, and while the channel is busy) is given up after
+    // this long.
     static constexpr uint64_t NOT_SENT_TIMEOUT_MS = 120000;
 
-    // A session we opened is closed once nothing has gone either way in it
-    // for this long: long enough for the far end's acknowledgement.
+    // A session is closed once nothing has gone either way in it for this
+    // long and nothing of ours is waiting on it, so the group can be heard
+    // again: long enough for the far end to answer in the same session.
     static constexpr uint64_t SESSION_IDLE_MS = 45000;
 
-    // A station that would not take a session is sent broadcasts for this
-    // long before a session is tried again.
+    // A station that would not take a session is sent to through the group
+    // for this long before a session is tried again.
     static constexpr uint64_t NO_SESSION_HOLD_MS = 10 * 60 * 1000;
 
-    // How long a CONNECT may take before the keying goes to the group.
-    static constexpr uint64_t CONNECT_TIMEOUT_MS = 90000;
+    // data2g-host gives up on a CONNECT by itself (five calls, the later ones
+    // in its most robust mode); this only covers a host that never answers.
+    static constexpr uint64_t CONNECT_TIMEOUT_MS = 180000;
+
+    // A session keying still waiting for its session after this long (the
+    // channel taken by somebody else's session, say) goes to the group.
+    static constexpr uint64_t SESSION_WAIT_LIMIT_MS = 10 * 60 * 1000;
 
 private:
     // A keying from transmit() to the moment it has left the transmitter.
     struct Keying
     {
         std::vector<OutgoingBurst> bursts;
-        std::string destination;    // the one station every burst is for; empty otherwise
         int gear = 0;
         uint64_t queuedAtMs = 0;
 
         enum class Stage
         {
-            Waiting,        // for the group's mode, or a session to open
+            Waiting,        // for the group's mode, or a session to end
             Sent,           // written; waiting for data2g-host to transmit it
             Done,
         } stage = Stage::Waiting;
 
-        bool viaSession = false;
         std::set<uint16_t> tags;    // ACKMODE tags not yet reported transmitted
-        bool sawPtt = false;        // a session keying: PTT went on after the write
-        bool pttCycled = false;     // ... and off again
+    };
+
+    // A keying for a session, from transmitReliably() to its report.
+    struct SessionKeying
+    {
+        uint64_t id = 0;
+        std::string peer;
+        std::vector<uint8_t> bytes;     // the frames as the session stream carries them
+        uint64_t queuedAtMs = 0;
+        bool written = false;
+        uint64_t endOffset = 0;         // sessionWritten_ once its last byte was written
     };
 
     enum class SessionState
@@ -148,7 +177,10 @@ private:
     };
 
     void run(Settings settings);
-    void deliver(const std::vector<uint8_t>& bytes);
+    void deliver(const std::vector<uint8_t>& bytes, bool viaSession);
+    bool sessionPossibleLocked(const std::string& call) const;
+    void reportLocked(const std::string& peer, bool writtenOnly, KeyingReport::Result result);
+    void settleSessionLocked();
     void log(const std::string& line);
     uint64_t now() const;
 
@@ -169,8 +201,21 @@ private:
     bool sessionOurs_;
     uint64_t sessionActivityMs_;
     uint64_t connectStartedMs_;
-    int sessionBuffer_;
     std::map<std::string, uint64_t> noSessionUntil_;
+    bool useSessions_;
+    bool dataConnected_;
+
+    // Session keyings in the order given, and what has become of them.
+    // data2g-host's BUFFER is the count of bytes the far end has not yet
+    // acknowledged (exactly, for a client that sent CHAT ON, from Data2G's
+    // PR #51; before that, 1 for "some"), so a batch written together is
+    // settled keying by keying as the count falls past each one's end.
+    std::deque<SessionKeying> sessionKeyings_;
+    std::vector<KeyingReport> reports_;
+    uint64_t sessionWritten_;       // bytes written into this session
+    uint64_t batchBytes_;           // the batch written last, while it is unsettled
+    bool batchCounted_;             // a BUFFER since that write has counted it
+    int bufferExact_;               // -1 not known yet; 1 BUFFER counts bytes; 0 it does not
 
     FrameCallback frameCallback_;
     LogFunction log_;
