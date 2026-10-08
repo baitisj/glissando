@@ -399,7 +399,7 @@ void MainFrame::onRigSwrReading_(double swr)
     bool chatOnAir = m_textMessagingTransport != nullptr && m_textMessagingTransport->isTransmitting();
     glissandoAbortTransmit();
 
-    // Keyed some other way (the PTT key, say): let go as the time-out does.
+    // Keyed some other way (Tune, say): let go as the time-out does.
     if (!chatOnAir && m_btnTogPTT->GetValue())
     {
         m_btnTogPTT->SetValue(false);

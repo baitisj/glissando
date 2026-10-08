@@ -98,7 +98,7 @@ longer changes anything.
 | Engage | Starts and stops audio. |
 | Comms | Lit while the COMMS window is up. Press it to open or close that window. While it is closed, a chat message received, directed to you or broadcast, makes the button flash red, in step with ENGAGE TO SEND, until the window is opened; pongs, acknowledgements and the window's own notices do not. |
 | Snooper | Lit while the snooping window is up. Press it to open or close that window. |
-| Preferences | Drops down Options, Sound cards, Rig control (CAT and PTT, and the ALC Target the Drive knob holds to) and Easy setup. Sound cards, rig control and easy setup only change while disengaged. The app opens only the radio's two audio streams, input from the radio and output to it, so Sound cards and Easy setup ask for nothing else; leave the output as none to only listen. Options has four tabs: Station (your callsign, and the Stations Heard log file, a CSV line for each station whose chat frame is heard), Rig Control (among the rest, the SWR switches: show SWR on the meter while transmitting, on by default, and abort the transmission at the first reading over 3:1, off by default), Modem (start on launch, half duplex, and the Text Chat switches, among them the opening chord and the tail that ends each transmission: off, a chord, or the station's call in Morse, sung on the scale or keyed straight on E4+D5, see [CW_TAIL.md](CW_TAIL.md)) and Debugging. |
+| Preferences | Drops down Options, Sound cards, Rig control (CAT and PTT, and the ALC Target the Drive knob holds to) and Easy setup. Sound cards, rig control and easy setup only change while disengaged. The app opens only the radio's two audio streams, input from the radio and output to it, so Sound cards and Easy setup ask for nothing else; leave the output as none to only listen. Options has four tabs: Station (your callsign, and the Stations Heard log file, a CSV line for each station whose chat frame is heard), Rig Control (frequency control on or off; under Transmit, the TX/RX delay, a wait between keying the radio and the audio for a slow amplifier or relay, and the time-out timer that caps each keying; and the SWR switches: show SWR on the meter while transmitting, on by default, and abort the transmission at the first reading over 3:1, off by default), Modem (start on launch, half duplex, and the Text Chat switches, among them the opening chord and the tail that ends each transmission: off, a chord, or the station's call in Morse, sung on the scale or keyed straight on E4+D5, see [CW_TAIL.md](CW_TAIL.md)) and Debugging. |
 
 ![The visi-scope at Presto, 10 rows a second, with a message from K6ABC and W1AW's acknowledgement written on it as each frame decoded (a simulated channel, drawn by the scope's own code)](images/visi-scope-captions.png)
 
@@ -393,7 +393,7 @@ out, across the whole transmission when it is split into several keyings
 for the time-out timer. Data2G does not say how far it has got, so its chip
 stays plain.
 
-A chat keying runs the same time-out timer as voice. When one would outlast
+A chat keying runs the time-out timer set under Rig Control, Transmit. When one would outlast
 it, the transport sends it as several keyings, each at least 20 s short of the
 limit (clear of the warning the main window gives 15 s before it) and cut only
 between whole frames, and lets the radio up for 2 s in

@@ -63,9 +63,6 @@ public:
     ConfigurationDataElement<wxString> playFileToMicInPath;
     ConfigurationDataElement<wxString> playFileFromRadioPath;
     
-    ConfigurationDataElement<bool> enableSpaceBarForPTT;
-    ConfigurationDataElement<int> pttKeyCode;
-    ConfigurationDataElement<bool> pttMomentaryMode;
 
     
     ConfigurationDataElement<bool> halfDuplexMode;
