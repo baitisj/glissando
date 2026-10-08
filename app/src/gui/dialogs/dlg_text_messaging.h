@@ -35,6 +35,7 @@
 #ifndef __FDV_TEXT_MESSAGING_DIALOG__
 #define __FDV_TEXT_MESSAGING_DIALOG__
 
+#include <ctime>
 #include <map>
 #include <string>
 #include <vector>
@@ -42,10 +43,12 @@
 #include <wx/dialog.h>
 #include <wx/html/htmlwin.h>
 #include <wx/listctrl.h>
+#include <wx/panel.h>
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
 #include <wx/timer.h>
 
+#include "text_messaging/Data2GFileTransfer.h"
 #include "text_messaging/TextMessagingTypes.h"
 #include "text_messaging/TextMessagingProtocol.h"
 
@@ -128,7 +131,7 @@ private:
     void appendMessage(const TextMessaging::TextMessage& message);
     void updateTransmitControls();
     void setColumnIfChanged(long item, int column, const wxString& text);
-    int messageAt(const wxPoint& point) const;
+    int rowAt(const wxPoint& point) const;
     static std::string stationOf(const TextMessaging::TextMessage& message);
     void selectStation(const std::string& callsign, bool addIfMissing);
 
@@ -155,6 +158,18 @@ private:
     void updatePhraseHighlight();
     void updateSendToolTip();
 
+    // Files through a Data2G session: each one a line of the chat, and an
+    // offer to us a box over it until the operator answers.
+    struct FileLine
+    {
+        TextMessaging::Data2G::FileTransfer transfer;  // as last seen
+        std::time_t at = 0;                             // when it first appeared
+    };
+    void updateFileTransfers();
+    void updateOfferBox();
+    wxString fileLineHtml(const FileLine& line, const Palette& colors) const;
+    void sendFileTo(const std::string& callsign);
+
     void OnSend(wxCommandEvent& event);
     void OnPing(wxCommandEvent& event);
     void OnStationSelected(wxListEvent& event);
@@ -171,6 +186,10 @@ private:
     void OnMenuResend(wxCommandEvent& event);
     void OnMenuTempo(wxCommandEvent& event);
     void OnMenuClearMessages(wxCommandEvent& event);
+    void OnMenuSendFile(wxCommandEvent& event);
+    void OnMenuCancelTransfer(wxCommandEvent& event);
+    void OnOfferSave(wxCommandEvent& event);
+    void OnOfferDecline(wxCommandEvent& event);
     void OnAddStationText(wxCommandEvent& event);
     void OnAddStation(wxCommandEvent& event);
     void OnAutoReplyToggled(wxCommandEvent& event);
@@ -248,6 +267,26 @@ private:
     TextMessaging::TextMessage m_menuResend; // the message Re-send would copy; id 0 for none
 
     std::vector<TextMessaging::TextMessage> m_messages;
+
+    // Files sent and received this run, oldest first.
+    std::vector<FileLine> m_fileLines;
+    uint64_t m_fileChanges = 0;     // the transport's count when they were last read
+    bool m_fileLinesRead = false;
+    uint64_t m_menuTransferId = 0;  // the file line the chat log's menu was opened on; 0 for none
+
+    // The box over the chat asking whether to save a file offered to us.
+    wxPanel* m_offerBox = nullptr;
+    WrappingText* m_offerText = nullptr;
+    uint64_t m_offerId = 0;         // the offer it shows; 0 while hidden
+
+    // What each line of the chat is, top to bottom, for a click to find:
+    // a message (an index into m_messages) or a file (into m_fileLines).
+    struct ChatRow
+    {
+        bool file = false;
+        size_t index = 0;
+    };
+    std::vector<ChatRow> m_rows;
 };
 
 #endif // __FDV_TEXT_MESSAGING_DIALOG__

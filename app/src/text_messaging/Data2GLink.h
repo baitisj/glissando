@@ -4,8 +4,9 @@
 //                  data2g-host: KISS framing (with ACKMODE), the command
 //                  port's lines, the modes it offers and which one each
 //                  Glissando tempo maps to, and the framing of chat frames
-//                  inside a connected session's byte stream. No sockets
-//                  here, so all of it can be tested on its own.
+//                  inside a connected session's byte stream, with the
+//                  file transfer records beside them. No sockets here,
+//                  so all of it can be tested on its own.
 //
 // Written for Glissando from the public KISS and VARA protocol descriptions
 // and Data2G's docs/broadcast.md; no Data2G code is used (see
@@ -164,12 +165,58 @@ std::string commandCallsign(const std::string& callsign);
 // frame, so a stream from a program that is not Glissando is told apart.
 std::vector<uint8_t> streamEncode(const std::vector<uint8_t>& frame);
 
+// A file sent through the session goes in records of its own beside the
+// chat frames: 'F', the record's type, a 2-byte big-endian length, then
+// the body, whose first byte is the sender's number for the transfer.
+// A Glissando from before file transfer takes an 'F' for a stream that is
+// not chat and closes the session, which is how the sender learns it
+// can't take files.
+enum class FileRecordType : uint8_t
+{
+    Offer = 1,      // number, size (4 bytes, big-endian), the file's name (UTF-8)
+    Accept = 2,     // number
+    Decline = 3,    // number
+    Data = 4,       // number, the next piece of the file, in order
+    Saved = 5,      // number: the receiver has the whole file on disk
+    Cancel = 6,     // number, and a reason (CancelReason)
+};
+
+// Why a transfer was cancelled. The receiver's reasons have the top bit
+// set, so a Cancel says which side's transfer it ends: each station
+// numbers its own.
+enum class CancelReason : uint8_t
+{
+    SenderStopped = 0x01,       // the sending operator cancelled it
+    SenderFailed = 0x02,        // the file could not be read
+    SenderExpired = 0x03,       // the offer went unanswered
+    ReceiverStopped = 0x81,     // the receiving operator cancelled it
+    ReceiverFailed = 0x82,      // the file could not be written there
+    ReceiverExpired = 0x83,
+};
+constexpr uint8_t CANCEL_FROM_RECEIVER = 0x80;
+
+constexpr int FILE_PIECE_BYTES = 4096;     // the most of the file one Data record carries
+constexpr int FILE_NAME_BYTES = 200;       // the longest name an Offer carries
+
+struct FileRecord
+{
+    uint8_t type = 0;               // a FileRecordType; others are for later versions
+    std::vector<uint8_t> body;
+};
+
+std::vector<uint8_t> fileRecordEncode(FileRecordType type, const std::vector<uint8_t>& body);
+
 class StreamDecoder
 {
 public:
     // Appends every complete frame; returns false once the stream has
-    // shown it is not ours, after which it takes nothing more.
+    // shown it is not ours, after which it takes nothing more. File
+    // records are dropped.
     bool feed(const uint8_t* bytes, int length, std::vector<std::vector<uint8_t>>& framesOut);
+
+    // The same, with the file records too, in the order they came.
+    bool feed(const uint8_t* bytes, int length, std::vector<std::vector<uint8_t>>& framesOut,
+              std::vector<FileRecord>& recordsOut);
     void reset();
 
 private:

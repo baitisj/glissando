@@ -368,6 +368,31 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
           "message goes to the GLISS group instead. Unchecked, everything goes to the group."));
     sbSizer_textChat->Add(m_ckboxData2GSessions, 0, static_cast<int>(wxLEFT) | wxALIGN_LEFT, 25);
 
+    // Files through a session: where they are saved, and from whom they
+    // are taken without asking.
+    wxFlexGridSizer* filesSizer = new wxFlexGridSizer(2, 5, 5);
+    filesSizer->AddGrowableCol(1);
+    filesSizer->Add(new wxStaticText(sb_textChat, wxID_ANY, _("Save received files in:")), 0,
+                    wxALIGN_CENTER_VERTICAL, 0);
+    m_dirData2GReceivedFiles = new wxDirPickerCtrl(sb_textChat, wxID_ANY, wxEmptyString,
+                                                   _("Folder for received files"), wxDefaultPosition,
+                                                   wxSize(300, -1), wxDIRP_USE_TEXTCTRL);
+    m_dirData2GReceivedFiles->SetToolTip(
+        _("Where the chat window saves files sent to you through a Data2G session. Saving a file "
+          "somewhere else makes that folder the one used next time."));
+    filesSizer->Add(m_dirData2GReceivedFiles, 1, wxEXPAND, 0);
+    filesSizer->Add(new wxStaticText(sb_textChat, wxID_ANY, _("Accept files without asking from:")), 0,
+                    wxALIGN_CENTER_VERTICAL, 0);
+    m_txtData2GAutoAcceptFiles = new wxTextCtrl(sb_textChat, wxID_ANY, wxEmptyString, wxDefaultPosition,
+                                                wxSize(300, -1));
+    m_txtData2GAutoAcceptFiles->SetHint(_("Callsigns, separated by spaces"));
+    m_txtData2GAutoAcceptFiles->SetToolTip(
+        _("Files these stations offer are saved in the folder above straight away, without asking. "
+          "Nothing received is ever opened or run."));
+    filesSizer->Add(m_txtData2GAutoAcceptFiles, 1, wxEXPAND, 0);
+    sbSizer_textChat->Add(filesSizer, 0, static_cast<int>(wxLEFT) | static_cast<int>(wxTOP) | static_cast<int>(wxEXPAND),
+                          25);
+
     m_ckboxData2G->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent&) { updateData2GControls_(); });
     m_choiceGlissandoTail->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { updateCwTailControls_(); });
     m_txtGlissandoCwText->Bind(wxEVT_TEXT, [this](wxCommandEvent&) { updateCwTailControls_(); });
@@ -607,6 +632,10 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         m_txtData2GKissPort->SetValue(wxString::Format("%d", wxGetApp().appConfiguration.data2gKissPort.get()));
         m_txtData2GCommandPort->SetValue(wxString::Format("%d", wxGetApp().appConfiguration.data2gCommandPort.get()));
         m_ckboxData2GSessions->SetValue(wxGetApp().appConfiguration.data2gSessions);
+        m_dirData2GReceivedFiles->SetPath(wxGetApp().frame != nullptr
+                                              ? wxGetApp().frame->chatReceivedFilesFolder()
+                                              : (wxString)wxGetApp().appConfiguration.data2gReceivedFilesFolder);
+        m_txtData2GAutoAcceptFiles->SetValue(wxGetApp().appConfiguration.data2gAutoAcceptFilesFrom);
         updateData2GControls_();
         updateCwTailControls_();
         
@@ -699,6 +728,10 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         wxGetApp().appConfiguration.data2gKissPort = port(m_txtData2GKissPort, 8100);
         wxGetApp().appConfiguration.data2gCommandPort = port(m_txtData2GCommandPort, 8300);
         wxGetApp().appConfiguration.data2gSessions = m_ckboxData2GSessions->GetValue();
+        wxString receivedFiles = m_dirData2GReceivedFiles->GetPath().Strip(wxString::both);
+        if (!receivedFiles.IsEmpty()) wxGetApp().appConfiguration.data2gReceivedFilesFolder = receivedFiles;
+        wxGetApp().appConfiguration.data2gAutoAcceptFilesFrom =
+            m_txtData2GAutoAcceptFiles->GetValue().Strip(wxString::both).Upper();
         
         long FifoSize_ms;
         m_txtCtrlFifoSize->GetValue().ToLong(&FifoSize_ms);
@@ -1018,6 +1051,8 @@ void OptionsDlg::updateData2GControls_()
     m_txtData2GKissPort->Enable(on);
     m_txtData2GCommandPort->Enable(on);
     m_ckboxData2GSessions->Enable(on);
+    m_dirData2GReceivedFiles->Enable(on);
+    m_txtData2GAutoAcceptFiles->Enable(on);
 }
 
 //-------------------------------------------------------------------------

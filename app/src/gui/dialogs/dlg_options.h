@@ -24,6 +24,7 @@
 
 #include "../../main.h"
 #include "defines.h"
+#include <wx/filepicker.h>
 #include <wx/spinctrl.h>
 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=--=-=-=-=
@@ -131,6 +132,8 @@ class OptionsDlg : public wxDialog
         wxTextCtrl*  m_txtData2GKissPort;
         wxTextCtrl*  m_txtData2GCommandPort;
         wxCheckBox*  m_ckboxData2GSessions;
+        wxDirPickerCtrl* m_dirData2GReceivedFiles;
+        wxTextCtrl*  m_txtData2GAutoAcceptFiles;
         void updateData2GControls_();
         
         wxListBox*  m_freqList;

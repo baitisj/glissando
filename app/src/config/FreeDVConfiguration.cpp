@@ -66,6 +66,8 @@ FreeDVConfiguration::FreeDVConfiguration()
     , data2gKissPort("/Data2G/KissPort", 8100)
     , data2gCommandPort("/Data2G/CommandPort", 8300)
     , data2gSessions("/Data2G/Sessions", true)
+    , data2gReceivedFilesFolder("/Data2G/ReceivedFilesFolder", "")
+    , data2gAutoAcceptFilesFrom("/Data2G/AutoAcceptFilesFrom", "")
     , glissandoGear("/Glissando/Gear", 3)
     , glissandoAutoGear("/Glissando/AutoGear", true)
     , glissandoScale("/Glissando/Scale", "pentatonic")
@@ -149,6 +151,8 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     load_(config, data2gKissPort);
     load_(config, data2gCommandPort);
     load_(config, data2gSessions);
+    load_(config, data2gReceivedFilesFolder);
+    load_(config, data2gAutoAcceptFilesFrom);
     load_(config, glissandoGear);
     load_(config, glissandoAutoGear);
     load_(config, glissandoScale);
@@ -240,6 +244,8 @@ void FreeDVConfiguration::save(wxConfigBase* config)
     save_(config, data2gKissPort);
     save_(config, data2gCommandPort);
     save_(config, data2gSessions);
+    save_(config, data2gReceivedFilesFolder);
+    save_(config, data2gAutoAcceptFilesFrom);
     save_(config, glissandoGear);
     save_(config, glissandoAutoGear);
     save_(config, glissandoScale);

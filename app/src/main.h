@@ -356,6 +356,25 @@ public:
     // its own radio, so nothing can be stopped there.
     void chatStopKeying();
 
+    // Files through a Data2G session with one station (docs/DATA2G.md).
+    // Whether one can be sent now; why not when it can't.
+    bool chatCanSendFiles(wxString& why);
+    uint64_t chatSendFile(const std::string& callsign, const wxString& path, wxString& error);
+    bool chatAcceptFile(uint64_t id, const wxString& path, wxString& error);
+    void chatDeclineFile(uint64_t id);
+    bool chatCancelFile(uint64_t id);
+
+    // Every transfer this run, sent and received, and a count that moves
+    // whenever any of them changes.
+    std::vector<TextMessaging::Data2G::FileTransfer> chatFileTransfers();
+    uint64_t chatFileTransferChanges();
+
+    // Where received files are saved: the folder Preferences name, which
+    // is also the folder a file was last saved to; Documents/Glissando
+    // received files until one is chosen.
+    wxString chatReceivedFilesFolder();
+    void chatSetReceivedFilesFolder(const wxString& folder);
+
 private:
 
 public:

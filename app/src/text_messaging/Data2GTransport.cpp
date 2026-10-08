@@ -2,7 +2,7 @@
 // Name:            Data2GTransport.cpp
 // Purpose:         Chat through an external data2g-host over TCP: the
 //                  GLISS broadcast group on its KISS port, and connected
-//                  sessions for single stations.
+//                  sessions for single stations, which carry files too.
 //=========================================================================
 
 #include "Data2GTransport.h"
@@ -246,9 +246,11 @@ Data2GTransport::Data2GTransport()
     , dataConnected_(false)
     , sessionAborted_(false)
     , sessionWritten_(0)
-    , batchBytes_(0)
-    , batchSeen_(false)
-    , batchCounted_(false)
+    , sessionRead_(0)
+    , sessionAcked_(0)
+    , lastWriteBytes_(0)
+    , bufferSeen_(false)
+    , bufferRose_(false)
     , bufferExact_(-1)
     , clock_(steadyMs)
     , stopping_(false)
@@ -326,9 +328,7 @@ void Data2GTransport::start(const Settings& settings)
         useSessions_ = settings.useSessions;
         dataConnected_ = false;
         released_.clear();
-        batchBytes_ = 0;
-        batchCounted_ = false;
-        batchSeen_ = false;
+        sessionWritten_ = sessionRead_ = sessionAcked_ = 0;
         bufferExact_ = -1;
     }
     stopping_ = false;
@@ -358,7 +358,10 @@ void Data2GTransport::stop()
         reports_.push_back({k.id, k.written ? KeyingReport::Result::Failed : KeyingReport::Result::NotTaken});
     }
     sessionKeyings_.clear();
-    batchBytes_ = 0;
+    sessionWritten_ = sessionRead_ = sessionAcked_ = 0;
+
+    // So do the files going through it.
+    files_.stopAll("Data2G was stopped.");
 }
 
 Data2GTransport::Status Data2GTransport::status() const
@@ -490,7 +493,6 @@ bool Data2GTransport::releaseStation(const std::string& destination)
     std::lock_guard<std::mutex> lock(mutex_);
     if (peer.empty()) return true;
 
-    bool written = false;
     for (auto it = sessionKeyings_.begin(); it != sessionKeyings_.end();)
     {
         if (it->peer != peer)
@@ -498,15 +500,11 @@ bool Data2GTransport::releaseStation(const std::string& destination)
             ++it;
             continue;
         }
-        written = written || it->written;
         it = sessionKeyings_.erase(it);
     }
-    if (written)
-    {
-        batchBytes_ = 0;
-        batchCounted_ = false;
-        batchSeen_ = false;
-    }
+
+    // Files with it are cancelled here; the far end finds the session gone.
+    files_.release(peer);
 
     if (hasKeying_ && keying_.stage == Keying::Stage::Waiting && soleDestination(keying_.bursts) == peer)
     {
@@ -531,54 +529,69 @@ void Data2GTransport::reportLocked(const std::string& peer, bool written, Keying
         reports_.push_back({it->id, result});
         it = sessionKeyings_.erase(it);
     }
-    if (written) batchBytes_ = 0;
 }
 
-// BUFFER, while connected: how many bytes of ours the far end's modem has
-// not acknowledged. The written keyings are settled from the front as the
-// count falls past where each one ends. A count from before data2g-host had
-// read the batch still says 0 (nothing was outstanding when it was
-// written), so the batch counts only once a BUFFER has included it, which
-// data2g-host sends straight after reading it. That first count also says
-// whether the host counts bytes at all: one that only says 1 for "some" is
-// below the size of the batch, and then the batch settles only at 0.
-void Data2GTransport::settleSessionLocked()
+// BUFFER, while connected: how many bytes of ours data2g-host has read and
+// the far end's modem has not yet acknowledged. What it says moves the
+// least that can have been read and acknowledged (see sessionRead_). A
+// count from before data2g-host had read the last write still says what
+// it said before, and so moves nothing. The first count after a write
+// also says whether the host counts bytes at all: one that only says 1
+// for "some" is below the size of the write, and then everything written
+// is settled together, at 0, once a nonzero count has shown the host had
+// read it.
+void Data2GTransport::bufferLocked(int64_t count)
 {
-    if (batchBytes_ == 0) return;
-    int64_t unacked = status_.sessionUnacked;
+    int64_t previous = status_.sessionUnacked;
+    if (count != previous) sessionActivityMs_ = now();
+    status_.sessionUnacked = count;
+    if (sessionAcked_ >= sessionWritten_) return; // nothing of ours outstanding
 
-    if (!batchCounted_)
+    if (count > 0) bufferSeen_ = true;
+    if (count > previous) bufferRose_ = true;
+
+    if (bufferExact_ < 0 && count > 0)
     {
-        if (unacked > 0)
+        if (count == 1 && lastWriteBytes_ > 1)
         {
-            batchSeen_ = true;
-            if (bufferExact_ < 0 && unacked == 1 && batchBytes_ > 1)
+            bufferExact_ = 0;
+            if (log_)
             {
-                bufferExact_ = 0;
-                if (log_)
-                {
-                    log_("Data2G reports only whether session bytes are unacknowledged: messages "
-                         "written together are settled together");
-                }
+                log_("Data2G reports only whether session bytes are unacknowledged: messages "
+                     "written together are settled together");
             }
-            if (bufferExact_ != 0)
-            {
-                // A host further away may read the batch in pieces, each
-                // answered with a BUFFER: nothing is settled by count until
-                // one has taken in the whole of it.
-                if ((uint64_t)unacked < batchBytes_) return;
-                if (bufferExact_ < 0 && log_) log_("Data2G counts unacknowledged session bytes: each message is settled as its own");
-                bufferExact_ = 1;
-            }
-            batchCounted_ = true;
         }
-        else if (!batchSeen_)
+        else if ((uint64_t)count >= sessionWritten_ - sessionAcked_)
         {
-            return;
+            bufferExact_ = 1;
+            if (log_) log_("Data2G counts unacknowledged session bytes: each message is settled as its own");
         }
     }
 
-    bool anyLeft = false;
+    if (bufferExact_ == 1)
+    {
+        uint64_t read = sessionRead_ + (count > previous ? (uint64_t)(count - previous) : 0);
+        read = std::max(read, sessionAcked_ + (uint64_t)count);
+        sessionRead_ = std::max(sessionRead_, std::min(read, sessionWritten_));
+        if (sessionRead_ >= (uint64_t)count) sessionAcked_ = std::max(sessionAcked_, sessionRead_ - (uint64_t)count);
+
+        // Nothing unacknowledged after the host was seen reading the last
+        // write: all of it (an acknowledgement that came between our write
+        // and its read leaves the counts short of that).
+        if (count == 0 && bufferRose_) sessionRead_ = sessionAcked_ = sessionWritten_;
+    }
+    else if (count == 0 && bufferSeen_)
+    {
+        sessionRead_ = sessionAcked_ = sessionWritten_;
+    }
+
+    settleSessionLocked();
+}
+
+// The written keyings are settled from the front as the bytes acknowledged
+// pass where each one ends, and the file going shows how far it has got.
+void Data2GTransport::settleSessionLocked()
+{
     for (auto it = sessionKeyings_.begin(); it != sessionKeyings_.end();)
     {
         if (!it->written)
@@ -586,21 +599,30 @@ void Data2GTransport::settleSessionLocked()
             ++it;
             continue;
         }
-        bool acked = unacked == 0 || (bufferExact_ == 1 && (uint64_t)unacked <= sessionWritten_ - it->endOffset);
-        if (!acked)
-        {
-            anyLeft = true;
-            break;
-        }
+        if (sessionAcked_ < it->endOffset) break;
         reports_.push_back({it->id, KeyingReport::Result::Delivered});
         it = sessionKeyings_.erase(it);
     }
-    if (!anyLeft)
-    {
-        batchBytes_ = 0;
-        batchCounted_ = false;
-        batchSeen_ = false;
-    }
+    files_.acknowledged(sessionPeer_, sessionAcked_);
+}
+
+// More may go into the session once data2g-host has read everything
+// written so far, or, with a host that does not count, once all of it has
+// been acknowledged: then what the next BUFFER says can be told apart from
+// what it said about the last write.
+bool Data2GTransport::sessionWritableLocked() const
+{
+    if (bufferExact_ == 1) return sessionRead_ >= sessionWritten_;
+    return sessionAcked_ >= sessionWritten_;
+}
+
+void Data2GTransport::wroteLocked(uint64_t bytes)
+{
+    sessionWritten_ += bytes;
+    lastWriteBytes_ = bytes;
+    bufferSeen_ = false;
+    bufferRose_ = false;
+    sessionActivityMs_ = now();
 }
 
 // The group keying, while it waits for its mode, a clear channel or the end
@@ -705,7 +727,11 @@ void Data2GTransport::run(Settings settings)
             status_.groupMode.clear();
             pttOn_ = false;
             busy_ = false;
-            if (session_ == SessionState::Connected) reportLocked(sessionPeer_, true, KeyingReport::Result::Failed);
+            if (session_ == SessionState::Connected)
+            {
+                reportLocked(sessionPeer_, true, KeyingReport::Result::Failed);
+                files_.sessionEnded(sessionPeer_, now());
+            }
             session_ = SessionState::None;
             sessionAborted_ = false;
             bufferExact_ = -1;
@@ -821,6 +847,7 @@ void Data2GTransport::run(Settings settings)
                     if (session_ == SessionState::Connecting) session_ = SessionState::None;
                     noSessionUntil_[done.argument] = now() + NO_SESSION_HOLD_MS;
                     reportLocked(done.argument, false, KeyingReport::Result::NotTaken);
+                    files_.noSession(done.argument, "Data2G is busy with another session.");
                 }
                 break;
             case Command::Kind::Disconnect:
@@ -873,10 +900,10 @@ void Data2GTransport::run(Settings settings)
                 session_ = SessionState::Connected;
                 noSessionUntil_.erase(sessionPeer_);
                 sessionActivityMs_ = now();
-                sessionWritten_ = 0;
-                batchBytes_ = 0;
-                batchCounted_ = false;
-                batchSeen_ = false;
+                sessionWritten_ = sessionRead_ = sessionAcked_ = 0;
+                lastWriteBytes_ = 0;
+                bufferSeen_ = false;
+                bufferRose_ = false;
                 status_.sessionUnacked = 0;
                 stream.reset();
                 if (log_) log_("Data2G session with " + sessionPeer_ + (weCalled ? " (we called)" : " (they called)"));
@@ -895,6 +922,7 @@ void Data2GTransport::run(Settings settings)
                     // goes to the group, and so does the next for a while.
                     noSessionUntil_[peer] = now() + NO_SESSION_HOLD_MS;
                     reportLocked(peer, false, KeyingReport::Result::NotTaken);
+                    files_.noSession(peer, peer + " did not answer the call for a session.");
                     if (log_) log_("Data2G: no session with " + peer + "; sending to the GLISS group");
                 }
                 else if (!peer.empty())
@@ -906,6 +934,7 @@ void Data2GTransport::run(Settings settings)
                                             [](const SessionKeying& k) { return k.written; });
                     reportLocked(peer, true, KeyingReport::Result::Failed);
                     if (lost && log_) log_("Data2G: the session with " + peer + " ended before it acknowledged everything");
+                    files_.sessionEnded(peer, now());
                 }
                 break;
             }
@@ -913,9 +942,7 @@ void Data2GTransport::run(Settings settings)
                 // One after the session has gone is about the next session,
                 // which data2g-host starts listening for at once.
                 if (session_ != SessionState::Connected) break;
-                if (event.count != status_.sessionUnacked) sessionActivityMs_ = now();
-                status_.sessionUnacked = event.count;
-                settleSessionLocked();
+                bufferLocked(event.count);
                 break;
             default:
                 break;
@@ -998,6 +1025,21 @@ void Data2GTransport::run(Settings settings)
             it = sessionKeyings_.erase(it);
         }
 
+        // Files too, which have nowhere else to go; and offers left
+        // unanswered expire.
+        files_.tick(t);
+        std::string filePeer;
+        uint64_t fileSince = 0;
+        auto callingFor = [&](const std::string& peer) {
+            return (session_ == SessionState::Connecting || session_ == SessionState::Connected) && sessionPeer_ == peer;
+        };
+        while (files_.wantsSession(filePeer, fileSince) && t - fileSince >= SESSION_WAIT_LIMIT_MS &&
+               !callingFor(filePeer))
+        {
+            files_.noSession(filePeer, "No session with " + filePeer + " could be had in time.");
+        }
+        bool fileWaiting = files_.wantsSession(filePeer, fileSince);
+
         bool groupWaiting = hasKeying_ && keying_.stage == Keying::Stage::Waiting;
         auto unwrittenFor = [&](const std::string& peer, bool others) {
             return std::any_of(sessionKeyings_.begin(), sessionKeyings_.end(), [&](const SessionKeying& k)
@@ -1006,36 +1048,52 @@ void Data2GTransport::run(Settings settings)
 
         if (session_ == SessionState::Connected)
         {
-            // Everything for the far end goes in as soon as what went before
-            // it is acknowledged, all in one write, so the modem can carry it
-            // in as few turns as it likes.
-            if (batchBytes_ == 0 && data.fd >= 0 && unwrittenFor(sessionPeer_, false))
+            // Into the session, once data2g-host has taken in what went
+            // before: the file records waiting (an offer first of all),
+            // everything for the far end once what went before it is
+            // acknowledged, all in one write, so the modem can carry it in
+            // as few turns as it likes, and then the next piece of a file
+            // once most of the last has been acknowledged. Chat typed
+            // during a file so goes in between its pieces.
+            if (data.fd >= 0 && sessionWritableLocked())
             {
-                std::vector<uint8_t> bytes;
-                for (SessionKeying& k : sessionKeyings_)
+                std::vector<uint8_t> bytes = files_.takeRecords(sessionPeer_, t);
+                bool chatUnsettled = std::any_of(sessionKeyings_.begin(), sessionKeyings_.end(),
+                                                 [](const SessionKeying& k) { return k.written; });
+                if (!chatUnsettled)
                 {
-                    if (k.written || k.peer != sessionPeer_) continue;
-                    bytes.insert(bytes.end(), k.bytes.begin(), k.bytes.end());
-                    sessionWritten_ += k.bytes.size();
-                    k.written = true;
-                    k.endOffset = sessionWritten_;
+                    for (SessionKeying& k : sessionKeyings_)
+                    {
+                        if (k.written || k.peer != sessionPeer_) continue;
+                        bytes.insert(bytes.end(), k.bytes.begin(), k.bytes.end());
+                        k.written = true;
+                        k.endOffset = sessionWritten_ + bytes.size();
+                    }
                 }
-                batchBytes_ = bytes.size();
-                batchCounted_ = false;
-                batchSeen_ = false;
-                sessionActivityMs_ = t;
-                lock.unlock();
-                if (!sendBytes(data, bytes)) closeSocket_(data, "write failed");
-                return;
+                if (sessionWritten_ - sessionAcked_ <= FILE_PIECE_LOW_WATER)
+                {
+                    files_.takePiece(sessionPeer_, sessionWritten_ + bytes.size(), bytes);
+                }
+                if (!bytes.empty())
+                {
+                    wroteLocked(bytes.size());
+                    lock.unlock();
+                    if (!sendBytes(data, bytes)) closeSocket_(data, "write failed");
+                    return;
+                }
             }
 
             // Nothing of ours left in it: one we opened closes once it has
             // been quiet a while, or at once if something else is waiting
             // (the group gets nothing out during a session); one the far end
             // opened is left to it, unless something else has waited a while.
+            // A file under way with the station, or an offer waiting for an
+            // answer either way, keeps it open.
             bool forPeer = std::any_of(sessionKeyings_.begin(), sessionKeyings_.end(),
-                                       [&](const SessionKeying& k) { return k.peer == sessionPeer_; });
-            bool otherWork = groupWaiting || unwrittenFor(sessionPeer_, true);
+                                       [&](const SessionKeying& k) { return k.peer == sessionPeer_; }) ||
+                           files_.busyWith(sessionPeer_);
+            bool otherWork =
+                groupWaiting || unwrittenFor(sessionPeer_, true) || (fileWaiting && filePeer != sessionPeer_);
             bool idle = t - sessionActivityMs_ >= SESSION_IDLE_MS;
             bool close = !forPeer && (sessionOurs_ ? otherWork || idle : otherWork && idle);
             if (close && !commandPending(Command::Kind::Disconnect))
@@ -1054,19 +1112,26 @@ void Data2GTransport::run(Settings settings)
                 sessionAborted_ = true;
                 noSessionUntil_[sessionPeer_] = t + NO_SESSION_HOLD_MS;
                 reportLocked(sessionPeer_, false, KeyingReport::Result::NotTaken);
+                files_.noSession(sessionPeer_, sessionPeer_ + " did not answer the call for a session.");
                 queueCommand(Command::Kind::Disconnect, "ABORT");
                 if (log_) log_("Data2G: no answer from " + sessionPeer_ + "; sending to the GLISS group");
             }
         }
-        else if (session_ == SessionState::None && !sessionKeyings_.empty())
+        else if (session_ == SessionState::None && (!sessionKeyings_.empty() || fileWaiting))
         {
-            // The next station to call, unless the group keying has waited
+            // The next station to call: the one a message or a file has
+            // waited longest for, unless the group keying has waited
             // longer.
-            const SessionKeying& next = sessionKeyings_.front();
-            bool groupFirst = groupWaiting && keying_.queuedAtMs <= next.queuedAtMs;
+            std::string peer = filePeer;
+            uint64_t since = fileSince;
+            if (!sessionKeyings_.empty() && (!fileWaiting || sessionKeyings_.front().queuedAtMs <= fileSince))
+            {
+                peer = sessionKeyings_.front().peer;
+                since = sessionKeyings_.front().queuedAtMs;
+            }
+            bool groupFirst = groupWaiting && keying_.queuedAtMs <= since;
             if (!groupFirst && data.fd >= 0 && !myCall.empty() && !commandPending(Command::Kind::Connect))
             {
-                std::string peer = next.peer;
                 session_ = SessionState::Connecting;
                 sessionPeer_ = peer;
                 connectStartedMs_ = t;
@@ -1133,6 +1198,7 @@ void Data2GTransport::run(Settings settings)
     std::vector<Data2G::KissFrame> kissFrames;
     std::vector<std::string> commandLines;
     std::vector<std::vector<uint8_t>> streamFrames;
+    std::vector<Data2G::FileRecord> fileRecords;
     uint8_t buffer[4096];
 
     while (!stopping_)
@@ -1208,10 +1274,15 @@ void Data2GTransport::run(Settings settings)
             else
             {
                 streamFrames.clear();
-                bool ours = stream.feed(buffer, (int)got, streamFrames);
+                fileRecords.clear();
+                bool ours = stream.feed(buffer, (int)got, streamFrames, fileRecords);
                 {
                     std::lock_guard<std::mutex> lock(mutex_);
                     sessionActivityMs_ = now();
+                    if (session_ == SessionState::Connected)
+                    {
+                        for (const auto& record : fileRecords) files_.onRecord(sessionPeer_, record, now());
+                    }
                 }
                 for (const auto& frame : streamFrames) deliver(frame, true);
                 if (!ours && !commandPending(Command::Kind::Disconnect))
@@ -1230,6 +1301,71 @@ void Data2GTransport::run(Settings settings)
     closeSocket_(kiss, "stopped");
     closeSocket_(command, "stopped");
     closeSocket_(data, "stopped");
+}
+
+// Sessions on, data2g-host's command and data ports up, and a callsign to
+// call from. Unlike a message, a file has no group to fall back on, so a
+// station that lately did not take a session is called again.
+bool Data2GTransport::filesPossibleLocked(const std::string& call) const
+{
+    if (!useSessions_ || !status_.commandConnected || !dataConnected_) return false;
+    return !myCallsign_.empty() && !call.empty() && call != myCallsign_;
+}
+
+bool Data2GTransport::sendsFiles() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return useSessions_ && status_.commandConnected && dataConnected_ && !myCallsign_.empty();
+}
+
+uint64_t Data2GTransport::sendFile(const std::string& destination, const std::string& path, std::string& error)
+{
+    std::string peer = Data2G::commandCallsign(destination);
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!filesPossibleLocked(peer))
+    {
+        error = !useSessions_ ? "Files need Data2G sessions, which are off in Preferences."
+                : peer == myCallsign_ && !peer.empty() ? "That is your own callsign."
+                : "Files need data2g-host's command and session ports, which are not connected.";
+        return 0;
+    }
+    return files_.offer(peer, path, now(), error);
+}
+
+bool Data2GTransport::acceptFile(uint64_t id, const std::string& path, std::string& error)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return files_.accept(id, path, error);
+}
+
+bool Data2GTransport::declineFile(uint64_t id)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return files_.decline(id);
+}
+
+bool Data2GTransport::cancelFile(uint64_t id)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return files_.cancel(id);
+}
+
+void Data2GTransport::setFileAutoAccept(const std::string& folder, const std::vector<std::string>& calls)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    files_.setAutoAccept(folder, calls);
+}
+
+std::vector<Data2G::FileTransfer> Data2GTransport::fileTransfers() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return files_.transfers();
+}
+
+uint64_t Data2GTransport::fileTransferChanges() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return files_.changes();
 }
 
 void Data2GTransport::deliver(const std::vector<uint8_t>& bytes, bool viaSession)

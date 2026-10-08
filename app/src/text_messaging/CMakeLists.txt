@@ -1,5 +1,6 @@
 add_library(fdv_text_messaging STATIC
     AnswerTempo.cpp
+    Data2GFileTransfer.cpp
     Data2GLink.cpp
     Data2GTransport.cpp
     FrameAnnotation.cpp
@@ -55,6 +56,11 @@ if(UNITTEST)
     target_link_libraries(fdv_text_messaging_data2g_test fdv_text_messaging)
     target_compile_options(fdv_text_messaging_data2g_test PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
     add_test(NAME text_messaging_data2g COMMAND fdv_text_messaging_data2g_test)
+
+    add_executable(fdv_text_messaging_data2g_file_test test/Data2GFileTransferTest.cpp)
+    target_link_libraries(fdv_text_messaging_data2g_file_test fdv_text_messaging)
+    target_compile_options(fdv_text_messaging_data2g_file_test PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
+    add_test(NAME text_messaging_data2g_file COMMAND fdv_text_messaging_data2g_file_test)
 
     add_executable(fdv_text_messaging_keying_plan_test test/KeyingPlanTest.cpp)
     target_link_libraries(fdv_text_messaging_keying_plan_test fdv_text_messaging)

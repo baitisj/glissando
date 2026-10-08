@@ -5,8 +5,8 @@ chose KISS plus the command port (2026-09-26), and the operator starts
 `data2g-host`, never the app. On the advice of Data2G's author (relayed by
 Jeff, 2026-10-07) chat now sends its frames straight to Data2G's **GLISS
 broadcast group**, picks a Data2G mode from the Glissando tempo, and puts
-messages for one station through a connected session. Tested against a
-fake host; not yet against a real one.
+messages and files for one station through a connected session. Tested
+against a fake host; not yet against a real one.
 
 [Data2G](https://github.com/arodland/Data2G) is an OFDM/CPM HF data modem
 with its own rate shifting. This adds it to the Glissando app as another
@@ -165,8 +165,9 @@ only when the host counts them.
 
 How the session itself runs:
 
-- Only messages and pings go through a session. Broadcasts, and the
-  protocol's own replies to traffic heard on the group, go to the group.
+- Only messages, pings and files (below) go through a session.
+  Broadcasts, and the protocol's own replies to traffic heard on the
+  group, go to the group.
 - The app sends `CONNECT <mycall> <theircall>`. Once `CONNECTED`, chat
   frames are written to the session data port, each as `G`, a length byte
   and the frame, so a stream from a program that is not Glissando is told
@@ -194,6 +195,102 @@ How the session itself runs:
   after 180 s, and on a message that has waited ten minutes for its
   session (the channel busy with sessions of other stations).
 
+## Files through a session
+
+A file can go to one station through a connected session, the way VarAC
+sends one. Only there: never on the GLISS group, and never over
+Glissando's own modem. Part 2 (a file to everybody on the group) is not
+built yet.
+
+**Sending.** Right-click a station in the call roster and pick **Send
+File...** (dark, with a line under it saying why, unless Data2G is the
+chat modem with sessions on and data2g-host's ports are up). The station
+is selected, as for a message, and the file picked is queued for it. A
+file over 100 kB asks first. The session opens as for a message, and the
+offer is the first thing written into it. One file goes to a station at
+a time; another waits its turn. The chat shows a line for it that
+follows it: `FRED.TXT, 7,000 bytes: offered`, then `sending 3,200 of
+7,000` (bytes the far end's modem has acknowledged), then `delivered`,
+`declined`, `cancelled`, `cancelled by W1AW`, `failed`, `expired`,
+`failed: their Glissando can't take files` or `failed on W1AW's side`.
+Right-click the line for **Cancel Transfer**.
+
+**Receiving.** A box over the chat asks `W1AW offers FRED.TXT (7,000
+bytes). Save it?` with **Save as...** and **Decline**, and the console's
+COMMS button flashes as for a message. Save as... opens the system's save
+dialog in the received files folder with the offered name filled in;
+choosing a place accepts the file, and backing out declines it. The file
+is written to `<name>.part` and renamed once all of it has come; the
+chat line counts it in, and has the same Cancel Transfer. Nothing is
+opened or run after saving.
+
+Preferences, Modem tab, under the Data2G settings: **Save received files
+in** (the folder the save dialog starts in; saving somewhere else makes
+that folder the one used next time) and **Accept files without asking
+from**, a list of callsigns whose files go straight into that folder,
+still through a `.part` file, under the offered name (numbered, `FRED
+(2).TXT`, when one is there already). The chat line says it was saved
+without asking.
+
+How it goes in the session's byte stream, beside the chat frames (`G`, a
+length byte, the frame): `F`, the record's type, a 2-byte big-endian
+length, then the body, whose first byte is the sender's number for the
+transfer.
+
+| Record | From | Body after the number |
+|---|---|---|
+| 1 Offer | sender | size (4 bytes, big-endian), the file's name (UTF-8, up to 200 bytes) |
+| 2 Accept | receiver | |
+| 3 Decline | receiver | |
+| 4 Data | sender | the next piece of the file, in order, up to 4,096 bytes |
+| 5 Saved | receiver | (the file is on disk under its name: this, not the modem's acknowledgement, is delivery) |
+| 6 Cancel | either | a reason: 1 stopped, 2 couldn't read, 3 expired from the sender; the same with the top bit set (0x81 to 0x83) from the receiver |
+
+Each station numbers its own transfers; the reason's top bit says whose
+transfer a Cancel ends. Records of a type it doesn't know are ignored, so
+later versions can add some.
+
+Pacing. The next piece is written only once data2g-host has read what
+went before and no more than a quarter of a piece is still
+unacknowledged, so the modem always has the rest of a piece to send, and
+a message typed during a file, or a Cancel, goes in behind at most that
+much. The app keeps the least data2g-host can have read and the least
+the far end can have acknowledged from the run of `BUFFER` counts (a
+count that rose by n means at least n more were read; acknowledgements
+only lower it), so a message written between pieces is still settled at
+its own end. With an older host that only says 1 for "some", pieces go
+one at a time, each once everything before it is acknowledged.
+
+When things go wrong:
+
+- An offer waiting for its answer counts as traffic: the 45 s idle close
+  doesn't fire, on either side. An offer unanswered for 4 minutes expires
+  on both sides (each side's clock, and a Cancel saying so).
+- The session lost mid-file: `failed` on both sides, and the receiver
+  deletes its `.part`. No resume in this version.
+- The sender cancels: no more pieces, and a Cancel; the receiver deletes
+  what it has and drops pieces that still come after it.
+- The receiver cancels: a Cancel back; the sender stops and shows
+  `cancelled by W1AW`.
+- Deselecting the station ends the session at once, as before, and its
+  files are cancelled on our side; the far end sees the session gone.
+- A station running an older Glissando takes the `F` for a stream that
+  isn't chat and closes the session. A session that ends while our offer
+  is unanswered so shows `failed: their Glissando can't take files`.
+- The receiver can't write the file: a Cancel with that reason, and the
+  sender shows `failed on W1AW's side`.
+- An odd name offered (`../../x`, control characters, nothing, `CON`):
+  only its last path part is kept, without control characters, path
+  separators, the characters Windows refuses, or leading and trailing
+  dots and spaces; a Windows device name, or nothing left, becomes
+  `received-file` (with any extension it had).
+- A station that lately didn't take a session for a message is still
+  called for a file, which has no group to fall back on. A file that
+  can't get its session (no answer, data2g-host busy, or ten minutes of
+  waiting) fails.
+- Sending is off while the station is receive only (outside the US data
+  segments).
+
 Known limit: locators. A station learns that another takes locator
 frames from its pings and acknowledgements. In a session there are no
 chat acknowledgements, so two stations that only exchange session
@@ -205,6 +302,10 @@ messages learn it only from a ping.
   ACKMODE, the command lines (including the broadcast reports and the
   `MODES` list), the tempo-to-mode table, burst lengths and timers, and the
   session stream framing. No sockets, so it is all unit tested.
+- `app/src/text_messaging/Data2GFileTransfer.{h,cpp}`: files through a
+  session: offer, answer, pieces, Saved, cancel and expiry for each
+  station, safe names, and the `.part` file. No sockets, so it is unit
+  tested on its own.
 - `app/src/text_messaging/Data2GTransport.{h,cpp}`: the
   `ITextMessagingTransport` over TCP, on its own thread, reconnecting
   every 2 s (backing off to 30 s) while data2g-host is not there. A
@@ -218,7 +319,7 @@ messages learn it only from a ping.
   conversation (their replies would go out on the other modem) but still
   show in the snooping window.
 - The chat window shows the Data2G host, whether it is reachable, the
-  group's mode, and any session.
+  group's mode, and any session; and files, as above.
 
 ## Tests
 
@@ -233,7 +334,19 @@ messages learn it only from a ping.
   failing a message, a ping through a session, deselecting the station
   ending its session (ABORT with messages outstanding, DISCONNECT without), a station without sessions
   getting the group instead, a lost command port, and a callsign change
-  reopening the group. Clean under ThreadSanitizer.
+  reopening the group; the `F` records (every type, odd lengths, split
+  across reads, interleaved with chat frames); and files through a
+  session: a 7,000-byte file end to end, declined, cancelled by either
+  side, a lost session, an offer expiring, an odd name saved safely
+  without asking, a message overtaking a large file, and deselecting the
+  station mid-file. Clean under ThreadSanitizer.
+- **Unit** (`fdv_text_messaging_data2g_file_test`): the file engine on
+  its own, two engines passing records by hand: safe names, a file end
+  to end, an empty file, declined, cancelled each side with late pieces
+  dropped, expiry on each side's clock, a lost session, an older
+  Glissando, one file at a time, auto-accept numbering a clash, a
+  hostile name, a receiver that can't write, more data than offered, and
+  releasing the station.
   `TextMessagingProtocolTest` covers the protocol's side against a fake
   link, and its older tests, unchanged, show nothing changes for our own
   modem.
@@ -248,3 +361,5 @@ messages learn it only from a ping.
 - `BCAST MODE n AUTO` (Data2G's own rate shifting on the group) could
   stand in for Auto when the console is on Auto.
 - Larger frames: a whole message would fit in one Data2G frame.
+- Files to everybody on the GLISS group (part 2 of the file transfer
+  plan), sharing the received files folder.

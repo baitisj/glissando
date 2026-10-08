@@ -35,6 +35,7 @@
 #include <wx/cmdline.h>
 #include <wx/stdpaths.h>
 #include <wx/filename.h>
+#include <wx/tokenzr.h>
 #include <wx/uiaction.h>
 
 #if wxCHECK_VERSION(3,2,0)
@@ -1060,6 +1061,13 @@ void MainFrame::applyChatModem_()
     // data2g-host's MYCALL, BCAST FROM and sessions use the chat callsign.
     m_data2gTransport->setMyCallsign(config.reportingConfiguration.reportingCallsign->ToStdString());
 
+    // Files from the stations on the auto-accept list go straight into the
+    // received files folder.
+    std::vector<std::string> autoAccept;
+    wxStringTokenizer calls(config.data2gAutoAcceptFilesFrom.get(), " ,;\t");
+    while (calls.HasMoreTokens()) autoAccept.push_back(calls.GetNextToken().ToStdString());
+    m_data2gTransport->setFileAutoAccept(std::string(chatReceivedFilesFolder().utf8_str()), autoAccept);
+
     if (config.data2gEnabled)
     {
         TextMessaging::Data2GTransport::Settings settings;
@@ -1153,6 +1161,90 @@ void MainFrame::chatStopKeying()
     // What the sound card has not played yet goes too, as for Abort on the
     // console.
     if (g_rxUserdata != nullptr && g_rxUserdata->outfifo1 != nullptr) g_rxUserdata->outfifo1->reset();
+}
+
+bool MainFrame::chatCanSendFiles(wxString& why)
+{
+    if (m_data2gTransport == nullptr || !data2gChatActive_.load())
+    {
+        why = _("Files go through a Data2G session. Choose Send chat through Data2G, with sessions, "
+                "in Preferences.");
+        return false;
+    }
+    if (!appliedData2GSettings_.useSessions)
+    {
+        why = _("Files go through a Data2G session. Turn on Connect a session for messages to one "
+                "station in Preferences.");
+        return false;
+    }
+    if (!m_data2gTransport->sendsFiles())
+    {
+        why = _("data2g-host's command and session ports are not connected yet.");
+        return false;
+    }
+    why.clear();
+    return true;
+}
+
+uint64_t MainFrame::chatSendFile(const std::string& callsign, const wxString& path, wxString& error)
+{
+    wxString why;
+    if (!chatCanSendFiles(why))
+    {
+        error = why;
+        return 0;
+    }
+    std::string reason;
+    uint64_t id = m_data2gTransport->sendFile(callsign, std::string(path.utf8_str()), reason);
+    if (id == 0) error = wxString::FromUTF8(reason);
+    else log_info("File %s queued for %s through Data2G", (const char*)path.utf8_str(), callsign.c_str());
+    return id;
+}
+
+bool MainFrame::chatAcceptFile(uint64_t id, const wxString& path, wxString& error)
+{
+    if (m_data2gTransport == nullptr) return false;
+    std::string reason;
+    if (m_data2gTransport->acceptFile(id, std::string(path.utf8_str()), reason)) return true;
+    error = wxString::FromUTF8(reason);
+    return false;
+}
+
+void MainFrame::chatDeclineFile(uint64_t id)
+{
+    if (m_data2gTransport != nullptr) m_data2gTransport->declineFile(id);
+}
+
+bool MainFrame::chatCancelFile(uint64_t id)
+{
+    return m_data2gTransport != nullptr && m_data2gTransport->cancelFile(id);
+}
+
+std::vector<TextMessaging::Data2G::FileTransfer> MainFrame::chatFileTransfers()
+{
+    if (m_data2gTransport == nullptr) return {};
+    return m_data2gTransport->fileTransfers();
+}
+
+uint64_t MainFrame::chatFileTransferChanges()
+{
+    return m_data2gTransport != nullptr ? m_data2gTransport->fileTransferChanges() : 0;
+}
+
+wxString MainFrame::chatReceivedFilesFolder()
+{
+    wxString folder = wxGetApp().appConfiguration.data2gReceivedFilesFolder;
+    if (!folder.IsEmpty()) return folder;
+    return wxStandardPaths::Get().GetDocumentsDir() + wxFileName::GetPathSeparator() +
+           wxString("Glissando received files");
+}
+
+void MainFrame::chatSetReceivedFilesFolder(const wxString& folder)
+{
+    if (folder.IsEmpty() || folder == wxGetApp().appConfiguration.data2gReceivedFilesFolder.get()) return;
+    wxGetApp().appConfiguration.data2gReceivedFilesFolder = folder;
+    wxGetApp().appConfiguration.save(pConfig);
+    applyChatModem_();
 }
 
 wxString MainFrame::chatModemStatus()

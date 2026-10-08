@@ -7,6 +7,7 @@
 //                  single station go through a connected (ARQ) session with
 //                  it, which data2g-host negotiates, rate-shifts and
 //                  acknowledges; its acknowledgements settle each message.
+//                  Files go through such a session too, beside the chat.
 //
 // data2g-host owns the sound card and the PTT; this only talks TCP to it.
 // The operator starts it. Nothing of Data2G is built into this program.
@@ -26,6 +27,7 @@
 #include <thread>
 #include <vector>
 
+#include "Data2GFileTransfer.h"
 #include "Data2GLink.h"
 #include "FrameCodec.h"
 #include "TextMessagingProtocol.h"
@@ -121,6 +123,26 @@ public:
     bool withdrawReliably(uint64_t keyingId) override;
     bool releaseStation(const std::string& destination) override;
 
+    // Files for one station, through a session with it (docs/DATA2G.md):
+    // possible with sessions on and data2g-host's command and data ports
+    // up. A file is offered once a session with the station is open and
+    // the file before it is done; the session stays open while anything
+    // is under way in it. The rest is the engine's (Data2GFileTransfer.h).
+    bool sendsFiles() const;
+    uint64_t sendFile(const std::string& destination, const std::string& path, std::string& error);
+    bool acceptFile(uint64_t id, const std::string& path, std::string& error);
+    bool declineFile(uint64_t id);
+    bool cancelFile(uint64_t id);
+    void setFileAutoAccept(const std::string& folder, const std::vector<std::string>& calls);
+    std::vector<Data2G::FileTransfer> fileTransfers() const;
+    uint64_t fileTransferChanges() const;
+
+    // The next piece of a file is written once no more than this much of
+    // what went before is unacknowledged, so the modem always has the
+    // rest of a piece to send while chat typed meanwhile, or a Cancel,
+    // waits at most that long behind it.
+    static constexpr uint64_t FILE_PIECE_LOW_WATER = Data2G::FILE_PIECE_BYTES / 4;
+
     // Test hook: the clock the keying and session timers read.
     void setClock(std::function<uint64_t()> monotonicMs);
 
@@ -187,8 +209,12 @@ private:
     void run(Settings settings);
     void deliver(const std::vector<uint8_t>& bytes, bool viaSession);
     bool sessionPossibleLocked(const std::string& call) const;
+    bool filesPossibleLocked(const std::string& call) const;
     void reportLocked(const std::string& peer, bool writtenOnly, KeyingReport::Result result);
+    void bufferLocked(int64_t count);
     void settleSessionLocked();
+    bool sessionWritableLocked() const;
+    void wroteLocked(uint64_t bytes);
     void log(const std::string& line);
     uint64_t now() const;
 
@@ -216,17 +242,28 @@ private:
     bool sessionAborted_;               // ABORT sent for the session now ending
 
     // Session keyings in the order given, and what has become of them.
-    // data2g-host's BUFFER is the count of bytes the far end has not yet
-    // acknowledged (exactly, for a client that sent CHAT ON, from Data2G's
-    // PR #51; before that, 1 for "some"), so a batch written together is
-    // settled keying by keying as the count falls past each one's end.
     std::deque<SessionKeying> sessionKeyings_;
     std::vector<KeyingReport> reports_;
+
+    // What the far end's modem has acknowledged of what we wrote into the
+    // session. data2g-host's BUFFER is the count of bytes it has read from
+    // us that the far end has not yet acknowledged (exactly, for a client
+    // that sent CHAT ON, from Data2G's PR #51; before that, 1 for "some").
+    // It can't say how much it has read, so both are kept as the least
+    // they can be: a BUFFER that rose by n means at least n more were read
+    // (acknowledgements only lower it), and one of b means at least b more
+    // were read than acknowledged. A message is settled once the bytes
+    // acknowledged pass its end.
     uint64_t sessionWritten_;       // bytes written into this session
-    uint64_t batchBytes_;           // the batch written last, while it is unsettled
-    bool batchSeen_;                // a nonzero BUFFER since that write
-    bool batchCounted_;             // a BUFFER since that write has counted all of it
+    uint64_t sessionRead_;          // at least this many read by data2g-host
+    uint64_t sessionAcked_;         // at least this many acknowledged by the far end
+    uint64_t lastWriteBytes_;       // the size of the last write
+    bool bufferSeen_;               // a nonzero BUFFER since the last write
+    bool bufferRose_;               // a BUFFER since the last write rose: it read some of it
     int bufferExact_;               // -1 not known yet; 1 BUFFER counts bytes; 0 it does not
+
+    // Files through the session, under mutex_ like the rest.
+    Data2G::FileTransferEngine files_;
 
     FrameCallback frameCallback_;
     LogFunction log_;

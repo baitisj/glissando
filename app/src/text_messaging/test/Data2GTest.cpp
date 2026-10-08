@@ -3,7 +3,8 @@
 // Purpose:         Chat over an external data2g-host: the KISS, command,
 //                  mode and session-stream formats, and two chat stations
 //                  talking through a fake pair of hosts on localhost, over
-//                  the GLISS broadcast group and over connected sessions.
+//                  the GLISS broadcast group and over connected sessions,
+//                  and files sent through those sessions.
 //=========================================================================
 
 #include <algorithm>
@@ -12,17 +13,22 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <mutex>
+#include <random>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "../Data2GFileTransfer.h"
 #include "../Data2GLink.h"
 #include "../Data2GTransport.h"
 #include "../FrameCodec.h"
@@ -190,6 +196,82 @@ void testSessionStream()
     frames.clear();
     CHECK(!other.feed((const uint8_t*)b2f, (int)strlen(b2f), frames));
     CHECK(frames.empty());
+}
+
+// File records beside chat frames: every type, bodies of odd lengths,
+// records split across reads, and the two kinds interleaved.
+void testFileRecordsInTheStream()
+{
+    CHECK((Data2G::fileRecordEncode(Data2G::FileRecordType::Data, {9, 8}) ==
+           std::vector<uint8_t>{'F', 4, 0, 2, 9, 8}));
+    CHECK(Data2G::fileRecordEncode(Data2G::FileRecordType::Accept, {}).empty());
+    CHECK(Data2G::fileRecordEncode(Data2G::FileRecordType::Data, std::vector<uint8_t>(0x10000, 1)).empty());
+
+    std::vector<uint8_t> chatA = textFrame("W1AW", "before");
+    std::vector<uint8_t> chatB = textFrame("W1AW", "between");
+    std::vector<std::pair<Data2G::FileRecordType, std::vector<uint8_t>>> records = {
+        {Data2G::FileRecordType::Offer, {1, 0, 0, 0x1B, 0x58, 'F', 'R', 'E', 'D', '.', 'T', 'X', 'T'}},
+        {Data2G::FileRecordType::Accept, {1}},
+        {Data2G::FileRecordType::Decline, {1}},
+        {Data2G::FileRecordType::Data, std::vector<uint8_t>(1 + Data2G::FILE_PIECE_BYTES, 'G')},
+        {Data2G::FileRecordType::Data, std::vector<uint8_t>(256, 0xC0)},   // a length with a low byte of 0
+        {Data2G::FileRecordType::Data, std::vector<uint8_t>(255, 'F')},
+        {Data2G::FileRecordType::Saved, {1}},
+        {Data2G::FileRecordType::Cancel, {1, (uint8_t)Data2G::CancelReason::ReceiverStopped}},
+        {(Data2G::FileRecordType)99, {5, 6}},   // a later version's, passed on to be ignored
+    };
+
+    std::vector<uint8_t> stream = Data2G::streamEncode(chatA);
+    for (size_t i = 0; i < records.size(); i++)
+    {
+        std::vector<uint8_t> bytes = Data2G::fileRecordEncode(records[i].first, records[i].second);
+        stream.insert(stream.end(), bytes.begin(), bytes.end());
+        if (i == 3)
+        {
+            std::vector<uint8_t> chat = Data2G::streamEncode(chatB);
+            stream.insert(stream.end(), chat.begin(), chat.end());
+        }
+    }
+
+    auto expect = [&](const std::vector<std::vector<uint8_t>>& frames, const std::vector<Data2G::FileRecord>& got) {
+        CHECK(frames.size() == 2 && frames[0] == chatA && frames[1] == chatB);
+        CHECK(got.size() == records.size());
+        for (size_t i = 0; i < got.size() && i < records.size(); i++)
+        {
+            CHECK(got[i].type == (uint8_t)records[i].first && got[i].body == records[i].second);
+        }
+    };
+
+    // Whole, a byte at a time, and in uneven reads.
+    for (size_t step : {stream.size(), (size_t)1, (size_t)3, (size_t)1000, (size_t)4096})
+    {
+        Data2G::StreamDecoder decoder;
+        std::vector<std::vector<uint8_t>> frames;
+        std::vector<Data2G::FileRecord> got;
+        for (size_t at = 0; at < stream.size(); at += step)
+        {
+            size_t n = std::min(step, stream.size() - at);
+            CHECK(decoder.feed(stream.data() + at, (int)n, frames, got));
+        }
+        expect(frames, got);
+    }
+
+    // The chat-only feed passes the frames and drops the records.
+    Data2G::StreamDecoder chatOnly;
+    std::vector<std::vector<uint8_t>> frames;
+    CHECK(chatOnly.feed(stream.data(), (int)stream.size(), frames));
+    CHECK(frames.size() == 2);
+
+    // A record of type 0, or of no length, is not ours.
+    for (std::vector<uint8_t> bad : {std::vector<uint8_t>{'F', 0, 0, 1, 7}, std::vector<uint8_t>{'F', 4, 0, 0},
+                                     std::vector<uint8_t>{'X', 1}})
+    {
+        Data2G::StreamDecoder decoder;
+        std::vector<Data2G::FileRecord> got;
+        frames.clear();
+        CHECK(!decoder.feed(bad.data(), (int)bad.size(), frames, got));
+        CHECK(got.empty());
+    }
 }
 
 void testCommandCallsign()
@@ -589,6 +671,10 @@ private:
                 {
                     if (side.client[which] >= 0) close(side.client[which]);
                     side.client[which] = accept(side.listen[which], nullptr, nullptr);
+                    // Pieces of a file reach the far end as the test lets
+                    // them through, not held back to coalesce.
+                    int one = 1;
+                    setsockopt(side.client[which], IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
                     if (which == 1) say(side, "IAMALIVE");
                     continue;
                 }
@@ -1125,6 +1211,364 @@ void testACallsignChangeReopensTheGroup()
     CHECK(hosts.heardCommand(0, "MYCALL W1AW-2"));
 }
 
+//-------------------------------------------------------------------------
+// Files through a session
+//-------------------------------------------------------------------------
+
+using FileState = Data2G::FileTransfer::State;
+namespace fs = std::filesystem;
+
+// A folder of its own for each test, removed afterwards.
+struct FileScratch
+{
+    explicit FileScratch(const std::string& name)
+    {
+        std::random_device random;
+        dir = fs::temp_directory_path() / ("glissando-d2g-test-" + name + "-" + std::to_string(random()));
+        fs::create_directories(dir);
+    }
+    ~FileScratch()
+    {
+        std::error_code ec;
+        fs::remove_all(dir, ec);
+    }
+
+    std::string path(const std::string& name) const { return (dir / name).string(); }
+
+    std::string write(const std::string& name, size_t size)
+    {
+        std::string content(size, '\0');
+        for (size_t i = 0; i < size; i++) content[i] = (char)((i * 13 + i / 509) & 0xFF);
+        std::ofstream out(dir / name, std::ios::binary);
+        out.write(content.data(), (std::streamsize)content.size());
+        return path(name);
+    }
+
+    fs::path dir;
+};
+
+std::string fileContents(const std::string& path)
+{
+    std::ifstream in(path, std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
+
+bool fileExists(const std::string& path)
+{
+    std::error_code ec;
+    return fs::exists(path, ec);
+}
+
+// The newest transfer one way, or a blank one in Waiting with id 0.
+Data2G::FileTransfer newestFile(Data2GTransport& transport, bool outgoing)
+{
+    Data2G::FileTransfer found;
+    for (const Data2G::FileTransfer& t : transport.fileTransfers())
+    {
+        if (t.outgoing == outgoing) found = t;
+    }
+    return found;
+}
+
+FileState fileState(Data2GTransport& transport, uint64_t id)
+{
+    for (const Data2G::FileTransfer& t : transport.fileTransfers())
+    {
+        if (t.id == id) return t.state;
+    }
+    return FileState::Waiting;
+}
+
+bool sessionsReady(FakeHostPair& hosts, Station& a, Station& b)
+{
+    return settled(hosts, a, b) && waitFor([&]() { return hosts.heardCommand(1, "LISTEN ON"); }) &&
+           waitFor([&]() { return a.transport.sendsFiles() && b.transport.sendsFiles(); });
+}
+
+// Side 0 holds its session bytes; each step the far end's modem takes in
+// and acknowledges up to perStep of them.
+void runAcking(FakeHostPair& hosts, Station& a, Station& b, size_t perStep, const std::function<bool()>& done,
+               int steps = 6000)
+{
+    for (int i = 0; i < steps && !done(); i++)
+    {
+        hosts.ackSome(0, perStep);
+        a.step();
+        b.step();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+void holdSide0(FakeHostPair& hosts)
+{
+    hosts.with([&]() {
+        hosts.sides[0].holdAcks = true;
+        return 0;
+    });
+}
+
+void testAFileGoesThroughASession()
+{
+    FakeHostPair hosts;
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(sessionsReady(hosts, a, b));
+    FileScratch scratch("end-to-end");
+    std::string source = scratch.write("FRED.TXT", 7000);
+
+    std::string error;
+    uint64_t id = a.transport.sendFile("VK3ABC", source, error);
+    CHECK(id != 0);
+    runBoth(a, b, [&]() { return newestFile(b.transport, false).state == FileState::Asking; });
+    Data2G::FileTransfer offer = newestFile(b.transport, false);
+    CHECK(offer.state == FileState::Asking && offer.name == "FRED.TXT" && offer.size == 7000 && offer.peer == "W1AW");
+    CHECK(hosts.heardCommand(0, "CONNECT W1AW VK3ABC"));
+    CHECK(fileState(a.transport, id) == FileState::Offered);
+
+    // An offer waiting for its answer keeps the session open past the
+    // usual 45 s of quiet.
+    runBoth(a, b, [&]() { return false; }, 600);
+    CHECK(!hosts.heardCommand(0, "DISCONNECT") && !hosts.heardCommand(1, "DISCONNECT"));
+    CHECK(a.transport.status().sessionPeer == "VK3ABC");
+
+    std::string saveAs = scratch.path("saved.txt");
+    CHECK(b.transport.acceptFile(offer.id, saveAs, error));
+    runBoth(a, b, [&]() { return fileState(a.transport, id) == FileState::Delivered; });
+    CHECK(fileState(a.transport, id) == FileState::Delivered);
+    Data2G::FileTransfer got = newestFile(b.transport, false);
+    CHECK(got.state == FileState::Saved && got.done == 7000 && got.path == saveAs);
+    CHECK(fileContents(saveAs) == fileContents(source));
+    CHECK(!fileExists(saveAs + ".part"));
+    CHECK(newestFile(a.transport, true).done == 7000);
+    CHECK(hosts.with([&]() { return hosts.sides[0].burstModes.size() + hosts.sides[1].burstModes.size(); }) == 0);
+
+    // Done, and quiet: the caller closes the session as usual.
+    runBoth(a, b, [&]() { return hosts.heardCommand(0, "DISCONNECT"); });
+    CHECK(hosts.heardCommand(0, "DISCONNECT"));
+}
+
+void testAFileDeclined()
+{
+    FakeHostPair hosts;
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(sessionsReady(hosts, a, b));
+    FileScratch scratch("decline");
+
+    std::string error;
+    uint64_t id = a.transport.sendFile("VK3ABC", scratch.write("x.bin", 500), error);
+    runBoth(a, b, [&]() { return newestFile(b.transport, false).state == FileState::Asking; });
+    CHECK(b.transport.declineFile(newestFile(b.transport, false).id));
+    runBoth(a, b, [&]() { return fileState(a.transport, id) == FileState::Declined; });
+    CHECK(fileState(a.transport, id) == FileState::Declined);
+    CHECK(newestFile(b.transport, false).state == FileState::Declined);
+}
+
+// The sender cancels part way: no more pieces go, and the receiver, told,
+// deletes what it has and drops anything still coming.
+void testTheSenderCancelsAFile()
+{
+    FakeHostPair hosts;
+    holdSide0(hosts);
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(sessionsReady(hosts, a, b));
+    FileScratch scratch("sender-cancels");
+
+    std::string error;
+    uint64_t id = a.transport.sendFile("VK3ABC", scratch.write("big.bin", 30000), error);
+    runAcking(hosts, a, b, 2000, [&]() { return newestFile(b.transport, false).state == FileState::Asking; });
+    std::string saveAs = scratch.path("big.got");
+    CHECK(b.transport.acceptFile(newestFile(b.transport, false).id, saveAs, error));
+    runAcking(hosts, a, b, 1000, [&]() { return newestFile(b.transport, false).done >= 4096; });
+    CHECK(newestFile(b.transport, false).state == FileState::Receiving);
+    CHECK(fileExists(saveAs + ".part"));
+
+    CHECK(a.transport.cancelFile(id));
+    CHECK(fileState(a.transport, id) == FileState::Cancelled);
+    runAcking(hosts, a, b, 1000, [&]() { return newestFile(b.transport, false).state == FileState::CancelledThere; });
+    CHECK(newestFile(b.transport, false).state == FileState::CancelledThere);
+    CHECK(newestFile(b.transport, false).done < 30000);
+    CHECK(!fileExists(saveAs + ".part") && !fileExists(saveAs));
+    runAcking(hosts, a, b, 100000, [&]() { return false; }, 50);
+    CHECK(hosts.unackedBytes(0) == 0);
+    CHECK(!fileExists(saveAs + ".part"));
+}
+
+void testTheReceiverCancelsAFile()
+{
+    FakeHostPair hosts;
+    holdSide0(hosts);
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(sessionsReady(hosts, a, b));
+    FileScratch scratch("receiver-cancels");
+
+    std::string error;
+    uint64_t id = a.transport.sendFile("VK3ABC", scratch.write("big.bin", 30000), error);
+    runAcking(hosts, a, b, 2000, [&]() { return newestFile(b.transport, false).state == FileState::Asking; });
+    std::string saveAs = scratch.path("big.got");
+    CHECK(b.transport.acceptFile(newestFile(b.transport, false).id, saveAs, error));
+    runAcking(hosts, a, b, 1000, [&]() { return newestFile(b.transport, false).done >= 4096; });
+
+    CHECK(b.transport.cancelFile(newestFile(b.transport, false).id));
+    CHECK(!fileExists(saveAs + ".part"));
+    runAcking(hosts, a, b, 1000, [&]() { return fileState(a.transport, id) == FileState::CancelledThere; });
+    CHECK(fileState(a.transport, id) == FileState::CancelledThere);
+    CHECK(newestFile(b.transport, false).state == FileState::Cancelled);
+}
+
+// The link fails part way: both sides fail it, and the part file goes.
+void testALostSessionFailsTheFile()
+{
+    FakeHostPair hosts;
+    holdSide0(hosts);
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(sessionsReady(hosts, a, b));
+    FileScratch scratch("lost");
+
+    std::string error;
+    uint64_t id = a.transport.sendFile("VK3ABC", scratch.write("big.bin", 30000), error);
+    runAcking(hosts, a, b, 2000, [&]() { return newestFile(b.transport, false).state == FileState::Asking; });
+    std::string saveAs = scratch.path("big.got");
+    CHECK(b.transport.acceptFile(newestFile(b.transport, false).id, saveAs, error));
+    runAcking(hosts, a, b, 1000, [&]() { return newestFile(b.transport, false).done >= 4096; });
+    CHECK(fileExists(saveAs + ".part"));
+
+    hosts.loseSession();
+    runBoth(a, b, [&]() {
+        return fileState(a.transport, id) == FileState::Failed &&
+               newestFile(b.transport, false).state == FileState::Failed;
+    });
+    CHECK(fileState(a.transport, id) == FileState::Failed);
+    CHECK(newestFile(b.transport, false).state == FileState::Failed);
+    CHECK(!fileExists(saveAs + ".part"));
+}
+
+// Deselecting the station mid-file ends the session at once: cancelled
+// here, failed there.
+void testDeselectingTheStationCancelsTheFile()
+{
+    FakeHostPair hosts;
+    holdSide0(hosts);
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(sessionsReady(hosts, a, b));
+    FileScratch scratch("deselect");
+
+    std::string error;
+    uint64_t id = a.transport.sendFile("VK3ABC", scratch.write("big.bin", 30000), error);
+    runAcking(hosts, a, b, 2000, [&]() { return newestFile(b.transport, false).state == FileState::Asking; });
+    CHECK(b.transport.acceptFile(newestFile(b.transport, false).id, scratch.path("big.got"), error));
+    runAcking(hosts, a, b, 1000, [&]() { return newestFile(b.transport, false).done >= 4096; });
+
+    a.protocol.releaseStation("VK3ABC");
+    CHECK(fileState(a.transport, id) == FileState::Cancelled);
+    runBoth(a, b, [&]() { return newestFile(b.transport, false).state == FileState::Failed; });
+    CHECK(newestFile(b.transport, false).state == FileState::Failed);
+    CHECK(hosts.heardCommand(0, "ABORT"));
+}
+
+void testAnUnansweredOfferExpires()
+{
+    FakeHostPair hosts;
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(sessionsReady(hosts, a, b));
+    FileScratch scratch("expiry");
+
+    std::string error;
+    uint64_t id = a.transport.sendFile("VK3ABC", scratch.write("x.bin", 500), error);
+    runBoth(a, b, [&]() { return newestFile(b.transport, false).state == FileState::Asking; });
+    a.nowMs += Data2G::FileTransferEngine::OFFER_EXPIRY_MS;
+    b.nowMs += Data2G::FileTransferEngine::OFFER_EXPIRY_MS;
+    runBoth(a, b, [&]() {
+        return fileState(a.transport, id) == FileState::Expired &&
+               newestFile(b.transport, false).state == FileState::Expired;
+    });
+    CHECK(fileState(a.transport, id) == FileState::Expired);
+    CHECK(newestFile(b.transport, false).state == FileState::Expired);
+    CHECK(!b.transport.acceptFile(newestFile(b.transport, false).id, scratch.path("late.bin"), error));
+}
+
+// A name that would be trouble on the receiver's disk, taken without
+// asking from a station on the auto-accept list, is saved under a safe
+// one in the received-files folder.
+void testAnOddNameIsSavedSafely()
+{
+    FakeHostPair hosts;
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(sessionsReady(hosts, a, b));
+    FileScratch scratch("odd-name");
+    fs::create_directories(scratch.dir / "received");
+    std::string folder = (scratch.dir / "received").string();
+    b.transport.setFileAutoAccept(folder, {"w1aw"});
+
+    std::string error;
+    std::string source = scratch.write(" .evil\x01:name?.txt", 1234);
+    uint64_t id = a.transport.sendFile("VK3ABC", source, error);
+    runBoth(a, b, [&]() { return fileState(a.transport, id) == FileState::Delivered; });
+    CHECK(fileState(a.transport, id) == FileState::Delivered);
+    Data2G::FileTransfer got = newestFile(b.transport, false);
+    CHECK(got.autoAccepted && got.state == FileState::Saved);
+    CHECK(got.name == "evilname.txt");
+    CHECK(got.path == (fs::path(folder) / "evilname.txt").string());
+    CHECK(fileContents(got.path) == fileContents(source));
+}
+
+// A message typed while a large file is going goes in after the piece
+// under way, not after the whole file.
+void testChatOvertakesALargeFile()
+{
+    FakeHostPair hosts;
+    holdSide0(hosts);
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(sessionsReady(hosts, a, b));
+    FileScratch scratch("overtake");
+    b.transport.setFileAutoAccept(scratch.dir.string(), {"W1AW"});
+
+    std::string error;
+    uint64_t id = a.transport.sendFile("VK3ABC", scratch.write("large.bin", 40000), error);
+    runAcking(hosts, a, b, 1500, [&]() { return newestFile(b.transport, false).done >= 4096; });
+    CHECK(newestFile(b.transport, false).state == FileState::Receiving);
+
+    // No more of the file is waiting at the host than a piece and a bit.
+    CHECK(hosts.unackedBytes(0) <= 2 * (Data2G::FILE_PIECE_BYTES + 5));
+
+    CHECK(a.protocol.sendMessage("Overtaking", "VK3ABC", error));
+    int64_t message = a.observer.lastAddedId();
+    uint64_t fileDoneWhenHeard = 0;
+    runAcking(hosts, a, b, 1500, [&]() {
+        if (fileDoneWhenHeard == 0 && !b.observer.receivedTexts().empty())
+        {
+            fileDoneWhenHeard = std::max<uint64_t>(1, newestFile(b.transport, false).done);
+        }
+        return fileState(a.transport, id) == FileState::Delivered;
+    });
+    CHECK(fileState(a.transport, id) == FileState::Delivered);
+    CHECK(a.observer.statusOf(message) == MessageStatus::Acknowledged);
+    std::vector<TextMessage> got = b.observer.receivedTexts();
+    CHECK(got.size() == 1 && got[0].text == "Overtaking");
+    CHECK(fileDoneWhenHeard > 0 && fileDoneWhenHeard <= 2 * (uint64_t)Data2G::FILE_PIECE_BYTES);
+    CHECK(newestFile(b.transport, false).state == FileState::Saved);
+}
+
+// Without sessions there are no files.
+void testNoFilesWithoutSessions()
+{
+    FakeHostPair hosts;
+    Station a("W1AW", hosts.sides[0], 3, false);
+    CHECK(waitFor([&]() { return hosts.ready(0); }));
+    CHECK(!a.transport.sendsFiles());
+    FileScratch scratch("no-sessions");
+    std::string error;
+    CHECK(a.transport.sendFile("VK3ABC", scratch.write("x.bin", 10), error) == 0);
+    CHECK(!error.empty());
+}
+
 } // namespace
 
 int main()
@@ -1133,6 +1577,7 @@ int main()
     testCommandLines();
     testTemposMapToModes();
     testSessionStream();
+    testFileRecordsInTheStream();
     testCommandCallsign();
     testNotConnectedRefusesToTransmit();
     testBroadcastGoesToTheGroupAtAdagio();
@@ -1148,6 +1593,16 @@ int main()
     testAStationWithoutSessionsGetsTheGroup();
     testLosingTheCommandPortClearsBusyAndReopens();
     testACallsignChangeReopensTheGroup();
+    testAFileGoesThroughASession();
+    testAFileDeclined();
+    testTheSenderCancelsAFile();
+    testTheReceiverCancelsAFile();
+    testALostSessionFailsTheFile();
+    testDeselectingTheStationCancelsTheFile();
+    testAnUnansweredOfferExpires();
+    testAnOddNameIsSavedSafely();
+    testChatOvertakesALargeFile();
+    testNoFilesWithoutSessions();
 
     if (failures > 0)
     {
