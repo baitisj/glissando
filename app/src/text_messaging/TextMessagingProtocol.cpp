@@ -445,6 +445,7 @@ void TextMessagingProtocol::abortTransmission()
     std::vector<PendingEvent> events;
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        withdrawKeyingLocked();
         dropOutboxLocked(MessageStatus::Aborted, true, events);
     }
 
@@ -464,7 +465,29 @@ uint64_t TextMessagingProtocol::holdTransmissions()
 // not sent; an acknowledgement or pong has no line and simply goes.
 void TextMessagingProtocol::discardQueuedLocked(std::vector<PendingEvent>& events)
 {
+    // A keying a self-pacing transport has not started on is still waiting
+    // too.
+    withdrawKeyingLocked();
     dropOutboxLocked(MessageStatus::NotSent, false, events);
+}
+
+// Takes back the keying handed to the transport, if it has not started to
+// go out: what was in it is queued again, with nothing sent.
+bool TextMessagingProtocol::withdrawKeyingLocked()
+{
+    if (transport_ == nullptr) return false;
+    bool handed = std::any_of(outbox_.begin(), outbox_.end(), [](const PendingTransmission& pending)
+                              { return pending.state == TransmissionState::Transmitting; });
+    if (!handed || !transport_->withdrawKeying()) return false;
+
+    for (PendingTransmission& pending : outbox_)
+    {
+        if (pending.state != TransmissionState::Transmitting) continue;
+        pending.state = TransmissionState::Queued;
+    }
+    if (keyingCarriesLocator_) locatorPeers_[keyingLocatorTo_].sent = false;
+    keyingCarriesLocator_ = false;
+    return true;
 }
 
 // Drops what is waiting for the transmitter and, with everything, what is on
@@ -1425,6 +1448,22 @@ TextMessagingProtocol::Cancel TextMessagingProtocol::cancelMessage(int64_t messa
                 if (it->locatorRode) locatorPeers_[it->destination].sent = false;
             }
 
+            // Handed to a transport that has not started on it: taken back,
+            // and it was never sent. One that has started is the transport's
+            // to finish if it paces itself, as nothing here can stop it.
+            if (it->state == TransmissionState::Transmitting && transport_ != nullptr)
+            {
+                if (withdrawKeyingLocked())
+                {
+                    done = cancelForLocked(*it); // queued again: Remove, unless an earlier try went
+                }
+                else if (transport_->pacesItself())
+                {
+                    done = Cancel::None;
+                    break;
+                }
+            }
+
             if (onAirOut != nullptr) *onAirOut = it->state == TransmissionState::Transmitting;
             updateStatusLocked(*it, done == Cancel::Remove ? MessageStatus::NotSent : MessageStatus::Aborted, events);
             outbox_.erase(it);
@@ -1544,6 +1583,20 @@ std::vector<QueuedWait> TextMessagingProtocol::queuedWaits() const
                 QueuedWait wait;
                 wait.messageId = pending.message.id;
                 wait.reliableLink = true;
+                waits.push_back(wait);
+            }
+            continue;
+        }
+
+        // A transport that takes its own turns says nothing of when: no
+        // countdown.
+        if (transport_ != nullptr && transport_->pacesItself())
+        {
+            if (!pending.reply && !pending.isPing && pending.message.kind == MessageKind::Chat)
+            {
+                QueuedWait wait;
+                wait.messageId = pending.message.id;
+                wait.gear = pending.gear;
                 waits.push_back(wait);
             }
             continue;
@@ -1705,7 +1758,8 @@ void TextMessagingProtocol::tick()
         // acknowledgement we owed a third station keyed for two minutes
         // while a ping waited for its pong, and the ping gave up before the
         // far end could have answered it.
-        bool frozen = channelFrozenLocked(nowMs);
+        bool paced = transport_ != nullptr && transport_->pacesItself();
+        bool frozen = !paced && channelFrozenLocked(nowMs);
         channelHeld_ = frozen;
         bool keyed = transport_ != nullptr && transport_->isTransmitting();
         if ((frozen || keyed) && lastTickMs_ != 0 && nowMs > lastTickMs_) holdTimersLocked(nowMs - lastTickMs_);
@@ -1796,8 +1850,15 @@ void TextMessagingProtocol::serviceOutboxLocked(uint64_t nowMs, bool frozen,
                 PendingTransmission& next = outbox_[i];
                 if (next.state != TransmissionState::Queued) continue;
                 if (goesReliablyLocked(next)) continue;
-                if (nowMs < next.notBeforeMs) continue;
-                if (nowMs < quietUntilLocked(next.reply)) continue;
+                if (transport_->pacesItself())
+                {
+                    if (nowMs < operatorHoldUntilMs_) break;
+                }
+                else
+                {
+                    if (nowMs < next.notBeforeMs) continue;
+                    if (nowMs < quietUntilLocked(next.reply)) continue;
+                }
 
                 std::vector<PendingTransmission*> entries{&next};
                 if (next.reply)
@@ -1813,6 +1874,7 @@ void TextMessagingProtocol::serviceOutboxLocked(uint64_t nowMs, bool frozen,
                 if (!keying.empty() && transport_->transmit(keying))
                 {
                     keyingCarriesLocator_ = !locatorTo.empty();
+                    keyingLocatorTo_ = locatorTo;
                     if (keyingCarriesLocator_) locatorPeers_[locatorTo].sent = true;
                     for (const OutgoingBurst& burst : keying)
                     {

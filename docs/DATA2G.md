@@ -56,7 +56,22 @@ Each frame is written as a KISS ACKMODE frame with a tag. The host answers
 with the tag once the burst carrying it has gone out, which is how the app
 knows the keying is over and the acknowledgement timer can start. A keying
 the host never sends (it holds broadcasts during a session, and while the
-channel is busy) is given up after two minutes.
+channel is busy) is given up after two minutes, not counting time a
+session holds the group back.
+
+On the group too, data2g-host takes its own turns: it waits for a clear
+channel and for any session to end. So the app keeps none of its own
+pauses there (Jeff, 2026-10-08): no turnaround after hearing a frame, no
+reply windows, no channel-busy hold and no retry backoff, and the chat
+window shows no countdown on a queued message. Only "Woah!" holds it.
+The app still hands over one keying at a time, the next as soon as the
+host reports the last one sent, so whatever waits behind it stays in the
+app's queue, where it can be cancelled. A keying the host has been given
+but not yet sent (waiting for its mode, a clear channel or the end of a
+session) can be cancelled too, and is dropped when sending is inhibited;
+one that has started goes out. A directed message on the group still
+waits for the far end's chat acknowledgement, since the group has no
+acknowledgement of its own.
 
 The command port is now required: without it there is no group. Data2G
 serves one command client at a time, so a station that also runs VarAC or
