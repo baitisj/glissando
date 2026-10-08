@@ -199,8 +199,7 @@ How the session itself runs:
 
 A file can go to one station through a connected session, the way VarAC
 sends one. Only there: never on the GLISS group, and never over
-Glissando's own modem. Part 2 (a file to everybody on the group) is not
-built yet.
+Glissando's own modem. A file to everybody on the group is below.
 
 **Sending.** Right-click a station in the call roster and pick **Send
 File...** (dark, with a line under it saying why, unless Data2G is the
@@ -316,6 +315,123 @@ frames from its pings and acknowledgements. In a session there are no
 chat acknowledgements, so two stations that only exchange session
 messages learn it only from a ping.
 
+## Files to the GLISS group
+
+A file can also go to everybody on the GLISS group at once. Nobody
+confirms it: the sender streams it, then opens short windows in which
+stations still missing pieces ask for them, and resends what was asked,
+until the windows go quiet or its time is up. Only with Data2G as the
+chat modem, never over Glissando's own modem, and never from a station
+that is receive only.
+
+**Sending.** Right-click in the chat and pick **Send File to Group...**
+(dark, with a line saying why, as Send File... is). The file
+can be 64 KiB at most. Before it goes a box gives the estimate at the
+tempo the console has set now: `FRED.TXT, 7,000 bytes, 32 pieces at
+Presto: about 2 min on the air, then repairs until 14:32 at the latest.
+Stations will not confirm receipt.` Above 15 minutes of air the box warns
+that this holds the group for a long time, names the faster tempos with
+their times, and defaults to No. Above an hour it refuses, naming the
+faster tempos. One file goes to the group at a time.
+
+The chat line follows it: `announced`, `sending 12 of 32`, `repairs
+open, round 1 (14 s left)`, `round 2: resending 5 pieces, W1AW first in
+line (+1 others)`, `idle; the next window in 40 s`, and at the end
+`ended: no more requests`, `ended: repair time over`, `ended: stopped
+serving repairs`, `cancelled` or `failed`. Under it, who asked and when,
+and the reminder that silence says nothing. Right-click it for **Stop
+Serving Repairs** (the stream, if still going, finishes, then an End) and
+**Cancel Transfer** (an End that tells listeners to delete what they
+have).
+
+**Receiving.** A file heard on the group gets a line on the left, `W1AW
+is sending FRED.TXT, 7,000 bytes: have 12 of 32`, with **Receive...** and
+**Ignore** as links on it (and in its right-click menu). Pieces are kept
+in memory whatever the operator says, so a file heard whole can be saved
+at once; Receive... opens the save dialog in the received files folder,
+and the missing pieces are then asked for in the sender's windows. The
+line counts them in (`asking in slot 3 (in 12 s)`, `W1AW first in line;
+4 of your pieces coming`) and says `saved to ...` once the file's hash
+matches. Ignore stops asking and drops the pieces. Pieces of an
+unfinished file are kept for a day (up to 4 files and 4 MB), so the same
+file sent again by the same station, which has the same id, finishes it.
+
+Preferences, Modem tab: **Receive group files automatically** (off by
+default) saves every group file into the received files folder without
+asking, numbering a name already there, but only while the chat window's
+**Auto acknowledge** is lit too. Nothing is opened or run after saving.
+
+**Tempo.** The piece size is fixed when the file is announced, from the
+tempo then (106 bytes at Adagio, 220 at Presto, 228 at Duet). Every
+keying after that goes at the tempo the console has set at that moment,
+so turning the console mid-transfer changes the pace, not the pieces. A
+Window says which tempo to ask in.
+
+### On the air
+
+Each frame goes on the group port as chat frames do. Its first byte's
+top nibble is 0, which the chat frame codec never uses, so chat never
+takes a file frame and a file frame never reaches the chat. All numbers
+are big-endian; a call is a length byte and the call; the id is 3 bytes.
+
+| Frame | Layout after the type byte |
+|---|---|
+| `01` Announce | id, version (1), size (3), piece size P (1), pieces N (2), the file's SHA-256 first 8 bytes, tempo (0 Adagio .. 4 Duet), first-pass airtime in s (2), call, name (length byte, UTF-8, up to 64) |
+| `02` Data | id, piece number (2), the piece (P bytes, the last one shorter) |
+| `03` Window | id, round (0: the end of the stream), size (3), P, N (2), hash (8), slots M, slot length in 0.5 s, the sender's time left in 10 s (2), a call given slot 0 (or empty), then the tempo to ask in (an addition: a listener that doesn't know it uses the Announce's) |
+| `04` Request | id, round (`FF`: outside any window), flags (1 needs the Announce, 2 more missing than listed, 4 the hash failed: all of it again), total missing (2), call, the pieces |
+| `05` Grant | id, round, flags (1 an Announce follows), the call first in line, count, the pieces that follow, ascending |
+| `06` End | id, reason (0 quiet, 1 time over, 2 stopped, 3 cancelled: delete it, 4 failed), rounds |
+
+A list of pieces is an encoding byte, then either a bitmap (0: the first
+piece in 2 bytes, then a bit per piece from it, most significant first)
+or ranges (1: 2 bytes of first piece and a byte of count - 1 each),
+whichever is shorter; when not all fit the frame, the lowest are listed.
+The id is the first 3 bytes of SHA-256 over the sender's call, the file's
+SHA-256 and its size (4 bytes); SHA-256 is Glissando's own
+(`Sha256.{h,cpp}`, checked against the standard vectors).
+
+A piece is a Data frame of whole codewords less its 6-byte header: three
+codewords in Data2G's FSK (CPM) modes, which send one piece per keying,
+and as many as fit 255 bytes in its OFDM modes, which send up to 8 per
+keying within 12 s. An Announce goes before the stream and again every
+20 pieces.
+
+**Windows.** After the stream, round 0's window has 4 slots; later ones
+`ceil(1.5 x stations that asked) + 1`, kept to 3..8, plus 2 for each
+station data2g-host reports lost on the group, 12 at most. A slot is a
+one-codeword Request's airtime plus 4 s (20 s at Adagio, 6 s at Duet). A
+listener asks in a random slot, up to 2 s into it, and leaves out pieces
+others asked for in the same window. The sender then picks who is first
+in line, in turn (last round's goes to the back, and a station named 3
+times without getting anything is passed over), sends a Grant and resends
+the union of what was asked, up to 600 s of air and 255 pieces, that
+station's first. After one quiet window the next comes at once, after a
+second one after a window's length, and after a third the End.
+
+**Time.** The sender serves repairs for the first pass's airtime, at
+least 10 minutes and at most 2 hours, from the end of the stream; time a
+session holds the group is not counted. A listener that hears nothing for
+`max(60 s, 3 x (a piece's keying + 5 s))` asks outside any window (round
+`FF`), after a random 0 to 30 s; it gives up when the file goes quiet for
+long, or 2 minutes after the sender's time left runs out.
+
+**Taking turns.** File keyings are handed to data2g-host one at a time,
+each once the host acknowledges the last (ACKMODE), and a chat keying
+always goes first. After each of our file keyings the app leaves the
+channel for 4 s (2 s more after any busy report), so others can get in;
+chat keeps no such pause. Woah! holds file keyings too. A file keying the
+host doesn't send within 2 minutes (not counting a session) is tried once
+more; lost twice, the transfer fails.
+
+**When things go wrong.** The hash doesn't match: the listener asks for
+all of it again once, then the line says `failed verification: nothing
+saved`. The sender cancels: listeners delete what they have
+(`cancelled by W1AW`). The station turns receive only: our transfer
+ends without an End (`failed`), and listeners time out; listening goes on,
+but no Requests go. Chat moved off Data2G: our transfer fails. The
+command port lost mid-keying: the keying counts as lost, as above.
+
 ## What was built
 
 - `app/src/text_messaging/Data2GLink.{h,cpp}`: KISS framing with ports and
@@ -326,6 +442,13 @@ messages learn it only from a ping.
   session: offer, answer, pieces, Saved, cancel and expiry for each
   station, safe names, and the `.part` file. No sockets, so it is unit
   tested on its own.
+- `app/src/text_messaging/Data2GBroadcast.{h,cpp}`: files to the GLISS
+  group: the frames, piece sizes and estimates, and the engine for both
+  ends (stream, windows, turns, resends, spool, deadlines), driven by the
+  transport with the time passed in. No sockets and no clock of its own,
+  so it is unit tested with a simulated one.
+- `app/src/text_messaging/Sha256.{h,cpp}`: SHA-256, written for
+  Glissando.
 - `app/src/text_messaging/Data2GTransport.{h,cpp}`: the
   `ITextMessagingTransport` over TCP, on its own thread, reconnecting
   every 2 s (backing off to 30 s) while data2g-host is not there. A
@@ -379,6 +502,21 @@ messages learn it only from a ping.
   `TextMessagingProtocolTest` covers the protocol's side against a fake
   link, and its older tests, unchanged, show nothing changes for our own
   modem.
+- **Unit** (`fdv_text_messaging_data2g_broadcast_test`): the group file
+  frames both ways (and that chat never takes one), piece lists, piece
+  sizes and estimates, and engines on a simulated group with a simulated
+  clock: a clean channel, two lossy listeners, a late joiner, the same file
+  sent again, cancel, the deadline, the console's tempo changing
+  mid-transfer, receiving only when told and ignoring, a hash failure
+  (once restarted, twice failed), lost windows answered by a late
+  request, turns going round, stopping serving, and the limits. In
+  `fdv_text_messaging_data2g_test`, the same through transports and fake
+  data2g-hosts sharing one group: one sender and two lossy listeners, a
+  late joiner, the same file again, cancel, the deadline, a chat message
+  going ahead of the file, and no group without the command port. Clean
+  under ThreadSanitizer.
+- **Unit** (`fdv_text_messaging_sha256_test`): SHA-256 against the FIPS
+  180-4 and NIST vectors, whole and in pieces.
 - **Bench** (manual, not yet run): two `data2g-host` instances on
   PulseAudio null sinks, each with a Glissando app attached; chat both
   ways at Adagio and Duet, a broadcast, a directed message through a
@@ -390,5 +528,6 @@ messages learn it only from a ping.
 - `BCAST MODE n AUTO` (Data2G's own rate shifting on the group) could
   stand in for Auto when the console is on Auto.
 - Larger frames: a whole message would fit in one Data2G frame.
-- Files to everybody on the GLISS group (part 2 of the file transfer
-  plan), sharing the received files folder.
+- Group files: keep the pieces of an unfinished file on disk, so they
+  outlive a restart; show file frames in the snooping window; check the
+  window and slot timings on the bench.

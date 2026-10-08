@@ -393,6 +393,17 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     sbSizer_textChat->Add(filesSizer, 0, static_cast<int>(wxLEFT) | static_cast<int>(wxTOP) | static_cast<int>(wxEXPAND),
                           25);
 
+    // Files broadcast to the GLISS group: asked about (the default), or
+    // received into the folder above without asking.
+    m_ckboxData2GReceiveGroupFiles = new wxCheckBox(sb_textChat, wxID_ANY, _("Receive group files automatically"),
+                                                    wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
+    m_ckboxData2GReceiveGroupFiles->SetToolTip(
+        _("Files a station sends to the whole GLISS group are saved in the folder above without asking, and "
+          "this station asks for the pieces it missed. Only while Auto acknowledge is lit in the chat window, "
+          "since asking transmits. Unchecked, the chat window asks first. Nothing received is ever opened or run."));
+    sbSizer_textChat->Add(m_ckboxData2GReceiveGroupFiles, 0, static_cast<int>(wxLEFT) | static_cast<int>(wxTOP) | wxALIGN_LEFT,
+                          25);
+
     m_ckboxData2G->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent&) { updateData2GControls_(); });
     m_choiceGlissandoTail->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { updateCwTailControls_(); });
     m_txtGlissandoCwText->Bind(wxEVT_TEXT, [this](wxCommandEvent&) { updateCwTailControls_(); });
@@ -636,6 +647,7 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
                                               ? wxGetApp().frame->chatReceivedFilesFolder()
                                               : (wxString)wxGetApp().appConfiguration.data2gReceivedFilesFolder);
         m_txtData2GAutoAcceptFiles->SetValue(wxGetApp().appConfiguration.data2gAutoAcceptFilesFrom);
+        m_ckboxData2GReceiveGroupFiles->SetValue(wxGetApp().appConfiguration.data2gReceiveGroupFiles);
         updateData2GControls_();
         updateCwTailControls_();
         
@@ -732,6 +744,7 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         if (!receivedFiles.IsEmpty()) wxGetApp().appConfiguration.data2gReceivedFilesFolder = receivedFiles;
         wxGetApp().appConfiguration.data2gAutoAcceptFilesFrom =
             m_txtData2GAutoAcceptFiles->GetValue().Strip(wxString::both).Upper();
+        wxGetApp().appConfiguration.data2gReceiveGroupFiles = m_ckboxData2GReceiveGroupFiles->GetValue();
         
         long FifoSize_ms;
         m_txtCtrlFifoSize->GetValue().ToLong(&FifoSize_ms);
@@ -1053,6 +1066,7 @@ void OptionsDlg::updateData2GControls_()
     m_ckboxData2GSessions->Enable(on);
     m_dirData2GReceivedFiles->Enable(on);
     m_txtData2GAutoAcceptFiles->Enable(on);
+    m_ckboxData2GReceiveGroupFiles->Enable(on);
 }
 
 //-------------------------------------------------------------------------

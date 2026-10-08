@@ -49,6 +49,7 @@
 #include <wx/textctrl.h>
 #include <wx/timer.h>
 
+#include "text_messaging/Data2GBroadcast.h"
 #include "text_messaging/Data2GFileTransfer.h"
 #include "text_messaging/TextMessagingTypes.h"
 #include "text_messaging/TextMessagingProtocol.h"
@@ -161,15 +162,26 @@ private:
 
     // Files through a Data2G session: each one a line of the chat, and an
     // offer to us a box over it until the operator answers.
+    // A file to or from the whole GLISS group is a line too, with group
+    // set and groupFile, not transfer, telling its story.
     struct FileLine
     {
         TextMessaging::Data2G::FileTransfer transfer;  // as last seen
         std::time_t at = 0;                             // when it first appeared
+        bool group = false;
+        TextMessaging::Data2G::GroupFile groupFile;     // as last seen
+
+        bool live() const { return group ? groupFile.live() : transfer.live(); }
     };
     void updateFileTransfers();
+    void updateGroupFiles(bool& added, bool& changed, bool& incoming);
     void updateOfferBox();
     wxString fileLineHtml(const FileLine& line, const Palette& colors) const;
+    wxString groupLineHtml(const FileLine& line, const Palette& colors) const;
     void sendFileTo(const std::string& callsign);
+    void sendFileToGroup();
+    void receiveGroupFile(uint64_t id);
+    void ignoreGroupFile(uint64_t id);
 
     void OnSend(wxCommandEvent& event);
     void OnPing(wxCommandEvent& event);
@@ -189,6 +201,12 @@ private:
     void OnMenuClearMessages(wxCommandEvent& event);
     void OnMenuSendFile(wxCommandEvent& event);
     void OnMenuCancelTransfer(wxCommandEvent& event);
+    void OnMenuSendGroupFile(wxCommandEvent& event);
+    void OnMenuStopServing(wxCommandEvent& event);
+    void OnMenuCancelGroupFile(wxCommandEvent& event);
+    void OnMenuReceiveGroupFile(wxCommandEvent& event);
+    void OnMenuIgnoreGroupFile(wxCommandEvent& event);
+    void OnChatLink(wxHtmlLinkEvent& event);
     void OnOfferSave(wxCommandEvent& event);
     void OnOfferDecline(wxCommandEvent& event);
     void OnAddStationText(wxCommandEvent& event);
@@ -275,6 +293,12 @@ private:
     bool m_fileLinesRead = false;
     std::set<uint64_t> m_clearedFiles; // finished ones Clear Messages took away, not to come back
     uint64_t m_menuTransferId = 0;  // the file line the chat log's menu was opened on; 0 for none
+
+    // Files to and from the group, which the transport numbers apart.
+    uint64_t m_groupFileChanges = 0;
+    bool m_groupLinesRead = false;
+    std::set<uint64_t> m_clearedGroupFiles;
+    uint64_t m_menuGroupFileId = 0; // the group file line the chat log's menu was opened on; 0 for none
 
     // The box over the chat asking whether to save a file offered to us.
     wxPanel* m_offerBox = nullptr;

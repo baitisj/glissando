@@ -84,6 +84,11 @@ std::string safeFileName(const std::string& offered);
 std::filesystem::path pathFromUtf8(const std::string& utf8);
 std::string utf8FromPath(const std::filesystem::path& path);
 
+// A name in the folder that neither a file nor a part file has taken:
+// the name given, or "name (2).ext" and so on; empty if none is free up
+// to 999.
+std::filesystem::path freeSavePath(const std::filesystem::path& folder, const std::string& name);
+
 // The transfers of every station chat has had a session with. One file
 // goes to a station at a time; the next waits for it. Not thread safe:
 // the transport holds its lock around every call.

@@ -7,7 +7,8 @@
 //                  single station go through a connected (ARQ) session with
 //                  it, which data2g-host negotiates, rate-shifts and
 //                  acknowledges; its acknowledgements settle each message.
-//                  Files go through such a session too, beside the chat.
+//                  Files go through such a session too, beside the chat,
+//                  and files for everybody go to the GLISS group.
 //
 // data2g-host owns the sound card and the PTT; this only talks TCP to it.
 // The operator starts it. Nothing of Data2G is built into this program.
@@ -27,6 +28,7 @@
 #include <thread>
 #include <vector>
 
+#include "Data2GBroadcast.h"
 #include "Data2GFileTransfer.h"
 #include "Data2GLink.h"
 #include "FrameCodec.h"
@@ -136,6 +138,27 @@ public:
     void setFileAutoAccept(const std::string& folder, const std::vector<std::string>& calls);
     std::vector<Data2G::FileTransfer> fileTransfers() const;
     uint64_t fileTransferChanges() const;
+
+    // Files for everybody on the GLISS group (docs/DATA2G.md): possible
+    // once the group is open, with a callsign. One of ours goes at a time,
+    // in keyings of its own that wait behind any chat keying and pause 4 s
+    // after each, at the console's tempo. Every file heard on the group is
+    // kept as it comes. The rest is the engine's (Data2GBroadcast.h).
+    bool sendsGroupFiles(std::string& why) const;
+    uint64_t sendGroupFile(const std::string& path, std::string& error);
+    Data2G::GroupFileEstimate groupFileEstimate(uint64_t size, int gear) const;
+    bool stopServingGroupFile(uint64_t id);
+    bool cancelGroupFile(uint64_t id);
+    bool receiveGroupFile(uint64_t id, const std::string& path, std::string& error);
+    bool ignoreGroupFile(uint64_t id);
+    // Received without asking into folder; empty: not.
+    void setGroupFileAutoReceive(const std::string& folder);
+    // Sending not allowed here: no file keyings at all.
+    void setGroupFilesInhibited(bool inhibited);
+    // "Woah!": no file keying for this long.
+    void holdGroupFiles(uint64_t holdMs);
+    std::vector<Data2G::GroupFile> groupFiles() const;
+    uint64_t groupFileChanges() const;
 
     // The next piece of a file is written once no more than this much of
     // what went before is unacknowledged, so the modem always has the
@@ -263,6 +286,16 @@ private:
 
     // Files through the session, under mutex_ like the rest.
     Data2G::FileTransferEngine files_;
+
+    // Files on the group, and the keying of theirs with data2g-host, which
+    // goes only while no chat keying is there, and the other way round.
+    Data2G::GroupFileEngine groupFiles_;
+    struct FileKeying
+    {
+        bool active = false;
+        uint64_t heldSinceMs = 0;   // NOT_SENT_TIMEOUT runs from here
+        std::set<uint16_t> tags;
+    } fileKeying_;
 
     FrameCallback frameCallback_;
     LogFunction log_;

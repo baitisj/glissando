@@ -134,6 +134,7 @@ class OptionsDlg : public wxDialog
         wxCheckBox*  m_ckboxData2GSessions;
         wxDirPickerCtrl* m_dirData2GReceivedFiles;
         wxTextCtrl*  m_txtData2GAutoAcceptFiles;
+        wxCheckBox*  m_ckboxData2GReceiveGroupFiles;
         void updateData2GControls_();
         
         wxListBox*  m_freqList;

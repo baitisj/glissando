@@ -77,31 +77,6 @@ std::vector<uint8_t> numbered(uint8_t number)
     return std::vector<uint8_t>(1, number);
 }
 
-// A name in the folder that neither a file nor a part file has taken:
-// the name offered, or "name (2).ext" and so on; empty if none is free.
-std::filesystem::path freePath(const std::filesystem::path& folder, const std::string& name)
-{
-    std::filesystem::path wanted = folder / pathFromUtf8(name);
-    auto taken = [](const std::filesystem::path& path) {
-        std::error_code ec;
-        std::filesystem::path part = path;
-        part += ".part";
-        return std::filesystem::exists(path, ec) || std::filesystem::exists(part, ec);
-    };
-    if (!taken(wanted)) return wanted;
-
-    std::filesystem::path stem = wanted.stem();
-    std::filesystem::path extension = wanted.extension();
-    for (int n = 2; n < 1000; n++)
-    {
-        std::filesystem::path candidate = folder / stem;
-        candidate += " (" + std::to_string(n) + ")";
-        candidate += extension;
-        if (!taken(candidate)) return candidate;
-    }
-    return std::filesystem::path();
-}
-
 } // namespace
 
 bool FileTransfer::live() const
@@ -177,6 +152,31 @@ std::string utf8FromPath(const std::filesystem::path& path)
 {
     std::u8string text = path.u8string();
     return std::string(text.begin(), text.end());
+}
+
+// A name in the folder that neither a file nor a part file has taken:
+// the name offered, or "name (2).ext" and so on; empty if none is free.
+std::filesystem::path freeSavePath(const std::filesystem::path& folder, const std::string& name)
+{
+    std::filesystem::path wanted = folder / pathFromUtf8(name);
+    auto taken = [](const std::filesystem::path& path) {
+        std::error_code ec;
+        std::filesystem::path part = path;
+        part += ".part";
+        return std::filesystem::exists(path, ec) || std::filesystem::exists(part, ec);
+    };
+    if (!taken(wanted)) return wanted;
+
+    std::filesystem::path stem = wanted.stem();
+    std::filesystem::path extension = wanted.extension();
+    for (int n = 2; n < 1000; n++)
+    {
+        std::filesystem::path candidate = folder / stem;
+        candidate += " (" + std::to_string(n) + ")";
+        candidate += extension;
+        if (!taken(candidate)) return candidate;
+    }
+    return std::filesystem::path();
 }
 
 FileTransferEngine::~FileTransferEngine()
@@ -549,7 +549,7 @@ void FileTransferEngine::autoAccept(Entry& entry)
     std::error_code ec;
     std::filesystem::path folder = pathFromUtf8(autoFolder_);
     std::filesystem::create_directories(folder, ec);
-    std::filesystem::path chosen = freePath(folder, entry.transfer.name);
+    std::filesystem::path chosen = freeSavePath(folder, entry.transfer.name);
     std::string path = utf8FromPath(chosen);
     std::string error = "No free name for \"" + entry.transfer.name + "\" in \"" + autoFolder_ + "\".";
     if (!chosen.empty() && openPart(entry, path, error))
@@ -719,7 +719,7 @@ void FileTransferEngine::completeReceive(Entry& entry)
         {
             // Taken while it came: auto-accept never replaces a file, so
             // it gets the next free name.
-            std::filesystem::path other = freePath(final.parent_path(), t.name);
+            std::filesystem::path other = freeSavePath(final.parent_path(), t.name);
             if (!other.empty() && !clash(other))
             {
                 final = other;

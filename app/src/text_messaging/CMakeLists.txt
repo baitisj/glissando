@@ -1,5 +1,6 @@
 add_library(fdv_text_messaging STATIC
     AnswerTempo.cpp
+    Data2GBroadcast.cpp
     Data2GFileTransfer.cpp
     Data2GLink.cpp
     Data2GTransport.cpp
@@ -9,6 +10,7 @@ add_library(fdv_text_messaging STATIC
     HeardStationList.cpp
     KeyingPlan.cpp
     MessageStore.cpp
+    Sha256.cpp
     SnoopFeed.cpp
     TextMessagingProtocol.cpp
     TextMessagingSession.cpp
@@ -61,6 +63,16 @@ if(UNITTEST)
     target_link_libraries(fdv_text_messaging_data2g_file_test fdv_text_messaging)
     target_compile_options(fdv_text_messaging_data2g_file_test PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
     add_test(NAME text_messaging_data2g_file COMMAND fdv_text_messaging_data2g_file_test)
+
+    add_executable(fdv_text_messaging_data2g_broadcast_test test/Data2GBroadcastTest.cpp)
+    target_link_libraries(fdv_text_messaging_data2g_broadcast_test fdv_text_messaging)
+    target_compile_options(fdv_text_messaging_data2g_broadcast_test PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
+    add_test(NAME text_messaging_data2g_broadcast COMMAND fdv_text_messaging_data2g_broadcast_test)
+
+    add_executable(fdv_text_messaging_sha256_test test/Sha256Test.cpp)
+    target_link_libraries(fdv_text_messaging_sha256_test fdv_text_messaging)
+    target_compile_options(fdv_text_messaging_sha256_test PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
+    add_test(NAME text_messaging_sha256 COMMAND fdv_text_messaging_sha256_test)
 
     add_executable(fdv_text_messaging_keying_plan_test test/KeyingPlanTest.cpp)
     target_link_libraries(fdv_text_messaging_keying_plan_test fdv_text_messaging)

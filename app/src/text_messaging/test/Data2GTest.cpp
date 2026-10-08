@@ -4,7 +4,9 @@
 //                  mode and session-stream formats, and two chat stations
 //                  talking through a fake pair of hosts on localhost, over
 //                  the GLISS broadcast group and over connected sessions,
-//                  and files sent through those sessions.
+//                  and files sent through those sessions; and files sent
+//                  to everybody on the group, through a fake group of
+//                  hosts losing what each test says.
 //=========================================================================
 
 #include <algorithm>
@@ -17,7 +19,10 @@
 #include <fstream>
 #include <functional>
 #include <mutex>
+#include <map>
+#include <memory>
 #include <random>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -28,6 +33,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "../Data2GBroadcast.h"
 #include "../Data2GFileTransfer.h"
 #include "../Data2GLink.h"
 #include "../Data2GTransport.h"
@@ -841,7 +847,9 @@ public:
 // the protocol's turnarounds pass in a blink.
 struct Station
 {
-    Station(const std::string& callsign, const FakeHostPair::Side& host, int gear, bool useSessions = true)
+    // Any fake host with a KISS and a command port.
+    template <typename Host>
+    Station(const std::string& callsign, const Host& host, int gear, bool useSessions = true)
         : protocol(store, stations)
     {
         CHECK(store.open(":memory:"));
@@ -1910,6 +1918,563 @@ void testNoFilesWithoutSessions()
     CHECK(!error.empty());
 }
 
+
+//-------------------------------------------------------------------------
+// Files to the whole group: a fake group of data2g-hosts, one a station,
+// each with a KISS and a command port. A burst one station sends reaches
+// every other station that is listening, less the frames the test's loss
+// rule takes, and is acknowledged to the sender at once.
+//-------------------------------------------------------------------------
+
+class FakeGroup
+{
+public:
+    struct Side
+    {
+        int listen[2] = {-1, -1};   // KISS, command
+        int client[2] = {-1, -1};
+        int kissPort = 0, commandPort = 0;
+        std::string call;
+        int groupPort = 0;
+        std::string groupMode = "qpsk-r1/5";
+        bool listening = true;      // false: hears nothing on the group
+        Data2G::KissDecoder kiss;
+        Data2G::LineSplitter lines;
+    };
+
+    struct Burst
+    {
+        int from = 0;
+        std::string mode;
+        std::vector<std::vector<uint8_t>> frames;
+    };
+
+    // from, to, the frame: true to lose it.
+    using LossRule = std::function<bool(int from, int to, const std::vector<uint8_t>& frame)>;
+
+    explicit FakeGroup(int count)
+        : sides(count)
+    {
+        for (Side& side : sides)
+        {
+            side.listen[0] = listenOnLoopback(side.kissPort);
+            side.listen[1] = listenOnLoopback(side.commandPort);
+        }
+        thread = std::thread([this]() { run(); });
+    }
+
+    ~FakeGroup()
+    {
+        stopping = true;
+        thread.join();
+        for (Side& side : sides)
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                if (side.listen[i] >= 0) close(side.listen[i]);
+                if (side.client[i] >= 0) close(side.client[i]);
+            }
+        }
+    }
+
+    template <typename Function>
+    auto with(Function f)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        return f();
+    }
+
+    bool ready(int side)
+    {
+        return with([&]() { return sides[(size_t)side].groupPort != 0 && sides[(size_t)side].client[0] >= 0; });
+    }
+
+    void setLoss(LossRule rule)
+    {
+        with([&]() {
+            loss = std::move(rule);
+            return 0;
+        });
+    }
+
+    void setListening(int side, bool on)
+    {
+        with([&]() {
+            sides[(size_t)side].listening = on;
+            return 0;
+        });
+    }
+
+    std::vector<Burst> sent()
+    {
+        return with([&]() { return bursts; });
+    }
+
+    // Keyings from a station whose first frame is of this type.
+    int sentOfType(int from, Data2G::GroupFileFrame type)
+    {
+        int n = 0;
+        for (const Burst& b : sent())
+        {
+            if (b.from == from && !b.frames.empty() && b.frames[0][0] == (uint8_t)type) n++;
+        }
+        return n;
+    }
+
+    std::vector<Side> sides;
+
+private:
+    void say(Side& side, const std::string& line)
+    {
+        if (side.client[1] < 0) return;
+        std::string text = line + "\r";
+        send(side.client[1], text.data(), text.size(), MSG_NOSIGNAL);
+    }
+
+    void command(int s, const std::string& line)
+    {
+        Side& side = sides[(size_t)s];
+        std::vector<std::string> w;
+        std::string word;
+        for (char c : line + " ")
+        {
+            if (c != ' ')
+            {
+                word.push_back(c);
+                continue;
+            }
+            if (!word.empty()) w.push_back(word);
+            word.clear();
+        }
+        if (w.empty()) return;
+
+        if (w[0] == "MYCALL" && w.size() == 2)
+        {
+            side.call = w[1];
+            say(side, "OK");
+        }
+        else if (w[0] == "BCAST" && w.size() >= 3 && w[1] == "OPEN")
+        {
+            side.groupPort = 1;
+            say(side, "BCAST PORT 1");
+        }
+        else if (w[0] == "BCAST" && w.size() == 4 && w[1] == "MODE")
+        {
+            side.groupMode = w[3];
+            say(side, "OK");
+        }
+        else if (w[0] == "MODES")
+        {
+            for (const Data2G::ModeInfo& m : Data2G::knownModes())
+            {
+                char text[200];
+                snprintf(text, sizeof(text), "MODE %s %d %d %d %.2f %.2f", m.name.c_str(), m.bandwidthHz,
+                         m.bytesPerCodeword, m.maxCodewords, m.secondsAtOne, m.secondsAtMax);
+                say(side, text);
+            }
+            say(side, "OK");
+        }
+        else
+        {
+            say(side, "OK");
+        }
+    }
+
+    void kissIn(int s, const uint8_t* bytes, int length)
+    {
+        Side& side = sides[(size_t)s];
+        std::vector<Data2G::KissFrame> frames;
+        side.kiss.feed(bytes, length, frames);
+        if (frames.empty()) return;
+
+        Burst burst;
+        burst.from = s;
+        burst.mode = side.groupMode;
+        std::vector<uint16_t> tags;
+        for (const Data2G::KissFrame& frame : frames)
+        {
+            if (frame.port != side.groupPort || frame.payload.size() < 2) continue;
+            std::vector<uint8_t> data = frame.payload;
+            if (frame.command == Data2G::KISS_ACKMODE)
+            {
+                tags.push_back((uint16_t)((data[0] << 8) | data[1]));
+                data.erase(data.begin(), data.begin() + 2);
+            }
+            burst.frames.push_back(data);
+        }
+        bursts.push_back(burst);
+
+        say(side, "PTT ON");
+        say(side, "MODE " + side.groupMode);
+        for (size_t to = 0; to < sides.size(); to++)
+        {
+            Side& other = sides[to];
+            if ((int)to == s || other.groupPort == 0 || !other.listening) continue;
+            say(other, "BUSY ON");
+            int lost = 0;
+            for (const auto& data : burst.frames)
+            {
+                if (loss && loss(s, (int)to, data))
+                {
+                    lost++;
+                    continue;
+                }
+                std::vector<uint8_t> kiss = Data2G::kissEncode(other.groupPort, data);
+                if (other.client[0] >= 0) send(other.client[0], kiss.data(), kiss.size(), MSG_NOSIGNAL);
+            }
+            say(other, "BCAST " + std::to_string(other.groupPort) + " HEARD " + side.call);
+            if (lost > 0) say(other, "BCAST " + std::to_string(other.groupPort) + " LOST " + std::to_string(lost));
+            say(other, "BUSY OFF");
+        }
+        say(side, "PTT OFF");
+        for (uint16_t tag : tags)
+        {
+            std::vector<uint8_t> ack = Data2G::kissEncodeAckMode(side.groupPort, tag, {});
+            send(side.client[0], ack.data(), ack.size(), MSG_NOSIGNAL);
+        }
+    }
+
+    void run()
+    {
+        std::vector<uint8_t> buffer(4096);
+        while (!stopping)
+        {
+            std::vector<pollfd> fds;
+            std::vector<std::pair<int, int>> what; // side, socket (0-1 listen, 2-3 client)
+            with([&]() {
+                for (size_t s = 0; s < sides.size(); s++)
+                {
+                    for (int i = 0; i < 2; i++)
+                    {
+                        fds.push_back({sides[s].listen[i], POLLIN, 0});
+                        what.push_back({(int)s, i});
+                        if (sides[s].client[i] >= 0)
+                        {
+                            fds.push_back({sides[s].client[i], POLLIN, 0});
+                            what.push_back({(int)s, 2 + i});
+                        }
+                    }
+                }
+                return 0;
+            });
+            if (poll(fds.data(), (nfds_t)fds.size(), 20) <= 0) continue;
+
+            std::lock_guard<std::mutex> lock(mutex);
+            for (size_t i = 0; i < fds.size(); i++)
+            {
+                if (fds[i].revents == 0) continue;
+                int s = what[i].first;
+                Side& side = sides[(size_t)s];
+                int which = what[i].second;
+                if (which < 2)
+                {
+                    if (side.client[which] >= 0) close(side.client[which]);
+                    side.client[which] = accept(side.listen[which], nullptr, nullptr);
+                    int one = 1;
+                    setsockopt(side.client[which], IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+                    continue;
+                }
+                int c = which - 2;
+                if (side.client[c] < 0) continue;
+                ssize_t got = recv(side.client[c], buffer.data(), buffer.size(), 0);
+                if (got <= 0)
+                {
+                    close(side.client[c]);
+                    side.client[c] = -1;
+                    if (c == 1) side.groupPort = 0;
+                    continue;
+                }
+                if (c == 0)
+                {
+                    kissIn(s, buffer.data(), (int)got);
+                }
+                else
+                {
+                    std::vector<std::string> lines;
+                    side.lines.feed((const char*)buffer.data(), (int)got, lines);
+                    for (const std::string& line : lines) command(s, line);
+                }
+            }
+        }
+    }
+
+    std::mutex mutex;
+    std::atomic<bool> stopping{false};
+    LossRule loss;
+    std::vector<Burst> bursts;
+    std::thread thread;
+};
+
+using GroupState = Data2G::GroupFile::State;
+
+// Stations on the group, without sessions, each stepping its own clock.
+struct GroupStations
+{
+    GroupStations(FakeGroup& hosts, const std::vector<std::string>& calls, int gear = 5)
+    {
+        for (size_t i = 0; i < calls.size(); i++)
+        {
+            stations.push_back(std::make_unique<Station>(calls[i], hosts.sides[i], gear, false));
+        }
+        CHECK(waitFor(
+            [&]() {
+                for (size_t i = 0; i < calls.size(); i++)
+                {
+                    if (!hosts.ready((int)i) || stations[i]->transport.status().groupPort == 0) return false;
+                    std::string why;
+                    if (!stations[i]->transport.sendsGroupFiles(why)) return false;
+                }
+                return true;
+            },
+            5000));
+    }
+
+    Station& operator[](size_t i) { return *stations[i]; }
+
+    // The clocks run about 50 times faster than the transports' threads
+    // poll, so a request slot of 6 s spans a few of their turns.
+    void step(uint64_t ms = 100)
+    {
+        for (auto& s : stations) s->step(ms);
+        std::this_thread::sleep_for(std::chrono::microseconds(2000));
+    }
+
+    bool runUntil(const std::function<bool()>& done, int steps = 20000, uint64_t ms = 100)
+    {
+        for (int i = 0; i < steps && !done(); i++) step(ms);
+        return done();
+    }
+
+    std::vector<std::unique_ptr<Station>> stations;
+};
+
+Data2G::GroupFile groupFile(Station& station, bool outgoing)
+{
+    Data2G::GroupFile found;
+    found.id = 0;
+    for (const Data2G::GroupFile& f : station.transport.groupFiles())
+    {
+        if (f.outgoing == outgoing) found = f;
+    }
+    return found;
+}
+
+bool isGroupData(const std::vector<uint8_t>& frame, int index = -1)
+{
+    Data2G::GroupData d;
+    return Data2G::decodeGroupData(frame.data(), frame.size(), d) && (index < 0 || d.index == index);
+}
+
+// One sender, two listeners losing different pieces: both ask, both are
+// served in one round, and both save the file; chat never sees a file
+// frame; every keying goes in Duet's mode.
+void testAFileToTheGroup()
+{
+    FakeGroup hosts(3);
+    GroupStations group(hosts, {"AG7EW", "K7ABC", "VK3XYZ"});
+    FileScratch scratch("group");
+    std::string source = scratch.write("FRED.TXT", 7000);
+    group[1].transport.setGroupFileAutoReceive((scratch.dir / "k7abc").string());
+    group[2].transport.setGroupFileAutoReceive((scratch.dir / "vk3xyz").string());
+
+    std::set<std::pair<int, int>> lose = {{1, 2}, {2, 5}, {2, 6}};
+    hosts.setLoss([&](int from, int to, const std::vector<uint8_t>& frame) {
+        Data2G::GroupData d;
+        if (from != 0 || !Data2G::decodeGroupData(frame.data(), frame.size(), d)) return false;
+        return lose.erase({to, d.index}) > 0; // once each
+    });
+
+    // The estimate the window shows: 31 pieces at Duet, about half a minute.
+    Data2G::GroupFileEstimate estimate = group[0].transport.groupFileEstimate(7000, 5);
+    CHECK(estimate.pieces == 31 && estimate.airSeconds < 60);
+
+    std::string error;
+    uint64_t id = group[0].transport.sendGroupFile(source, error);
+    CHECK(id != 0);
+    CHECK(group.runUntil([&]() {
+        return groupFile(group[1], false).state == GroupState::Saved &&
+               groupFile(group[2], false).state == GroupState::Saved;
+    }));
+    for (size_t n : {1, 2})
+    {
+        Data2G::GroupFile got = groupFile(group[n], false);
+        CHECK(got.name == "FRED.TXT" && got.sender == "AG7EW" && got.autoReceived);
+        CHECK(fileContents(got.path) == fileContents(source));
+        CHECK(group[n].observer.receivedTexts().empty()); // chat saw none of it
+    }
+    CHECK(hosts.sentOfType(1, Data2G::GroupFileFrame::Request) + hosts.sentOfType(2, Data2G::GroupFileFrame::Request) >=
+          1);
+    CHECK(hosts.sentOfType(0, Data2G::GroupFileFrame::Grant) == 1);
+
+    CHECK(group.runUntil([&]() { return groupFile(group[0], true).state == GroupState::Ended; }));
+    CHECK(groupFile(group[0], true).endReason == Data2G::GroupFileEnd::Quiet);
+    for (const FakeGroup::Burst& b : hosts.sent()) CHECK(b.mode == "w48-16qam-r1/2");
+}
+
+// A listener tuned in part way through finishes the file from the
+// repairs, and learns its name from the Announce the Grant brings.
+void testALateJoinerOnTheGroup()
+{
+    FakeGroup hosts(2);
+    GroupStations group(hosts, {"AG7EW", "K7ABC"});
+    FileScratch scratch("group-late");
+    std::string source = scratch.write("MAP.BIN", 9000);
+    group[1].transport.setGroupFileAutoReceive((scratch.dir / "in").string());
+    hosts.setListening(1, false);
+
+    std::string error;
+    CHECK(group[0].transport.sendGroupFile(source, error) != 0);
+    CHECK(group.runUntil([&]() {
+        return hosts.sentOfType(0, Data2G::GroupFileFrame::Announce) == 2 &&
+               hosts.sentOfType(0, Data2G::GroupFileFrame::Data) >= 4;
+    }));
+    hosts.setListening(1, true);
+    CHECK(group.runUntil([&]() { return groupFile(group[1], false).state == GroupState::Saved; }));
+    Data2G::GroupFile got = groupFile(group[1], false);
+    CHECK(got.name == "MAP.BIN" && fileContents(got.path) == fileContents(source));
+}
+
+// Sent again, the same file is the same transfer: the station that kept
+// its pieces from the first time finishes it.
+void testTheSameFileAgainOnTheGroup()
+{
+    FakeGroup hosts(2);
+    GroupStations group(hosts, {"AG7EW", "K7ABC"});
+    FileScratch scratch("group-again");
+    std::string source = scratch.write("NET.TXT", 4000);
+    group[1].transport.setGroupFileAutoReceive((scratch.dir / "in").string());
+
+    // The first time half of it is lost and its requests are not heard.
+    std::atomic<bool> second{false};
+    hosts.setLoss([&](int from, int, const std::vector<uint8_t>& frame) {
+        if (second) return from == 0 && isGroupData(frame) && frame[5] % 2 == 1;
+        return from == 1 || (isGroupData(frame) && frame[5] % 2 == 0);
+    });
+    std::string error;
+    CHECK(group[0].transport.sendGroupFile(source, error) != 0);
+    CHECK(group.runUntil([&]() { return groupFile(group[0], true).state == GroupState::Ended; }));
+    Data2G::GroupFile kept = groupFile(group[1], false);
+    CHECK(kept.state == GroupState::Incomplete && kept.have > 0 && kept.have < kept.pieces);
+
+    second = true;
+    CHECK(group[0].transport.sendGroupFile(source, error) != 0);
+    CHECK(group.runUntil([&]() { return groupFile(group[1], false).state == GroupState::Saved; }));
+    Data2G::GroupFile got = groupFile(group[1], false);
+    CHECK(got.fileId == kept.fileId && fileContents(got.path) == fileContents(source));
+}
+
+// Cancelled mid-stream: no more pieces, the End twice, and the listener
+// deletes what it had.
+void testCancellingAGroupFile()
+{
+    FakeGroup hosts(2);
+    GroupStations group(hosts, {"AG7EW", "K7ABC"});
+    FileScratch scratch("group-cancel");
+    std::string source = scratch.write("BIG.BIN", 20000);
+    group[1].transport.setGroupFileAutoReceive((scratch.dir / "in").string());
+
+    std::string error;
+    uint64_t id = group[0].transport.sendGroupFile(source, error);
+    CHECK(group.runUntil([&]() { return groupFile(group[1], false).have >= 16; }));
+    CHECK(group[0].transport.cancelGroupFile(id));
+    size_t before = hosts.sent().size();
+    CHECK(group.runUntil([&]() { return groupFile(group[0], true).state == GroupState::Ended; }));
+    CHECK(groupFile(group[0], true).endReason == Data2G::GroupFileEnd::Cancelled);
+    std::vector<FakeGroup::Burst> after = hosts.sent();
+    int pieces = 0;
+    for (size_t i = before; i < after.size(); i++)
+    {
+        if (after[i].from == 0 && isGroupData(after[i].frames[0])) pieces++;
+    }
+    CHECK(pieces <= 1); // at most the keying already with the host
+    CHECK(hosts.sentOfType(0, Data2G::GroupFileFrame::End) == 2);
+    CHECK(group.runUntil([&]() { return groupFile(group[1], false).state == GroupState::CancelledThere; }));
+    CHECK(groupFile(group[1], false).have == 0);
+    std::error_code ec;
+    CHECK(!fs::exists(scratch.dir / "in" / "BIG.BIN", ec));
+}
+
+// A listener the sender hears asking, whose resends never get through:
+// repairs go on until the deadline, ten minutes, then end.
+void testAGroupFileDeadline()
+{
+    FakeGroup hosts(2);
+    GroupStations group(hosts, {"AG7EW", "K7ABC"});
+    FileScratch scratch("group-deadline");
+    std::string source = scratch.write("X.BIN", 3000);
+    group[1].transport.setGroupFileAutoReceive((scratch.dir / "in").string());
+
+    std::atomic<bool> streamed{false};
+    hosts.setLoss([&](int from, int, const std::vector<uint8_t>& frame) {
+        if (from != 0) return false;
+        if (!frame.empty() && frame[0] == (uint8_t)Data2G::GroupFileFrame::Window) streamed = true;
+        return isGroupData(frame, 5) || (streamed && isGroupData(frame));
+    });
+    std::string error;
+    CHECK(group[0].transport.sendGroupFile(source, error) != 0);
+    uint64_t started = group[0].nowMs;
+    CHECK(group.runUntil([&]() { return groupFile(group[0], true).state == GroupState::Ended; }, 12000));
+    CHECK(groupFile(group[0], true).endReason == Data2G::GroupFileEnd::Deadline);
+    CHECK(group[0].nowMs - started >= Data2G::GroupFileEngine::MIN_SERVICE_MS);
+    CHECK(hosts.sentOfType(0, Data2G::GroupFileFrame::Grant) >= 3);
+    CHECK(group.runUntil([&]() { return groupFile(group[1], false).state == GroupState::Incomplete; }));
+}
+
+// A message typed while a file streams goes out before the next piece
+// keying, at once, with no pause of its own.
+void testChatGoesAheadOfTheFile()
+{
+    FakeGroup hosts(2);
+    GroupStations group(hosts, {"AG7EW", "K7ABC"});
+    FileScratch scratch("group-chat");
+    std::string source = scratch.write("BIG.BIN", 20000);
+
+    std::string error;
+    CHECK(group[0].transport.sendGroupFile(source, error) != 0);
+    CHECK(group.runUntil([&]() { return hosts.sentOfType(0, Data2G::GroupFileFrame::Data) >= 2; }));
+    std::string why;
+    CHECK(group[0].protocol.sendMessage("hello while a file goes", "", why));
+    CHECK(group.runUntil([&]() { return !group[1].observer.receivedTexts().empty(); }));
+    std::vector<TextMessage> got = group[1].observer.receivedTexts();
+    CHECK(!got.empty() && got[0].text == "hello while a file goes");
+
+    // The chat keying went between two file keyings.
+    std::vector<FakeGroup::Burst> bursts = hosts.sent();
+    int chatAt = -1;
+    for (size_t i = 0; i < bursts.size(); i++)
+    {
+        if (bursts[i].from == 0 && !bursts[i].frames.empty() &&
+            !Data2G::isGroupFileFrame(bursts[i].frames[0].data(), bursts[i].frames[0].size()))
+        {
+            chatAt = (int)i;
+            break;
+        }
+    }
+    CHECK(chatAt > 0);
+    int dataBefore = 0;
+    for (int i = 0; i < chatAt; i++)
+    {
+        if (isGroupData(bursts[(size_t)i].frames[0])) dataBefore++;
+    }
+    CHECK(dataBefore >= 2 && dataBefore <= 3);
+}
+
+// Without a callsign, or with sending not allowed, nothing goes.
+void testGroupFilesNeedTheGroup()
+{
+    FakeGroup hosts(1);
+    GroupStations group(hosts, {"AG7EW"});
+    FileScratch scratch("group-inhibit");
+    std::string source = scratch.write("A.BIN", 500);
+    group[0].transport.setGroupFilesInhibited(true);
+    std::string error;
+    CHECK(group[0].transport.sendGroupFile(source, error) == 0 && !error.empty());
+    group[0].transport.setGroupFilesInhibited(false);
+    CHECK(group[0].transport.sendGroupFile(source, error) != 0);
+    group[0].transport.stop();
+    CHECK(groupFile(group[0], true).state == GroupState::Ended);
+}
+
 } // namespace
 
 int main()
@@ -1952,6 +2517,13 @@ int main()
     testAnOfferExpiresOnOneClock();
     testCountsBeforeTheHostReadsAWriteSettleNothingOfIt();
     testNoFilesWithoutSessions();
+    testAFileToTheGroup();
+    testALateJoinerOnTheGroup();
+    testTheSameFileAgainOnTheGroup();
+    testCancellingAGroupFile();
+    testAGroupFileDeadline();
+    testChatGoesAheadOfTheFile();
+    testGroupFilesNeedTheGroup();
 
     if (failures > 0)
     {

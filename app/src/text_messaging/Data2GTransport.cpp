@@ -2,7 +2,8 @@
 // Name:            Data2GTransport.cpp
 // Purpose:         Chat through an external data2g-host over TCP: the
 //                  GLISS broadcast group on its KISS port, and connected
-//                  sessions for single stations, which carry files too.
+//                  sessions for single stations, which carry files too,
+//                  and files for everybody on the group.
 //=========================================================================
 
 #include "Data2GTransport.h"
@@ -281,12 +282,14 @@ void Data2GTransport::setMyCallsign(const std::string& callsign)
     if (call == myCallsign_) return;
     myCallsign_ = call;
     callsignChanged_ = true;
+    groupFiles_.setMyCallsign(call);
 }
 
 void Data2GTransport::setGear(int gear)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     gear_ = gear;
+    groupFiles_.setGear(gear);
 }
 
 void Data2GTransport::setClock(std::function<uint64_t()> monotonicMs)
@@ -329,6 +332,7 @@ void Data2GTransport::start(const Settings& settings)
         released_.clear();
         sessionWritten_ = sessionRead_ = sessionAcked_ = 0;
         bufferExact_ = -1;
+        fileKeying_ = FileKeying();
     }
     stopping_ = false;
     thread_ = std::thread([this, settings]() { run(settings); });
@@ -359,8 +363,10 @@ void Data2GTransport::stop()
     sessionKeyings_.clear();
     sessionWritten_ = sessionRead_ = sessionAcked_ = 0;
 
-    // So do the files going through it.
+    // So do the files going through it, and one of ours on the group.
     files_.stopAll("Data2G was stopped.");
+    groupFiles_.stopAll("Data2G was stopped.");
+    fileKeying_ = FileKeying();
 }
 
 Data2GTransport::Status Data2GTransport::status() const
@@ -669,6 +675,7 @@ void Data2GTransport::run(Settings settings)
     std::string triedMode;      // a BCAST MODE refused: send in the port's mode
     uint16_t nextTag = 1;
     std::string myCall;
+    std::string heardCall;      // the sender of the group burst last heard
 
     auto sendBytes = [&](Socket& socket, const std::vector<uint8_t>& bytes) {
         return socket.fd >= 0 && sendAll(socket.fd, bytes.data(), bytes.size());
@@ -745,6 +752,11 @@ void Data2GTransport::run(Settings settings)
             bufferExact_ = -1;
             if (hasKeying_ && keying_.stage == Keying::Stage::Sent) hasKeying_ = false;
             else if (hasKeying_) keying_.stage = Keying::Stage::Waiting;
+            if (fileKeying_.active)
+            {
+                fileKeying_ = FileKeying();
+                groupFiles_.keyingLost(now());
+            }
         }
     };
 
@@ -844,6 +856,7 @@ void Data2GTransport::run(Settings settings)
                 std::lock_guard<std::mutex> lock(mutex_);
                 if (!modeLines.empty()) modes_ = modeLines;
                 modeLines.clear();
+                groupFiles_.setModes(modes_);
                 break;
             }
             case Command::Kind::Connect:
@@ -893,11 +906,27 @@ void Data2GTransport::run(Settings settings)
                 status_.mode = event.text;
                 break;
             case Type::BcastDropped:
-                if (event.number == status_.groupPort && hasKeying_ && keying_.stage == Keying::Stage::Sent)
+                // Only one keying is with data2g-host at a time, a file's or
+                // chat's.
+                if (event.number == status_.groupPort && fileKeying_.active)
+                {
+                    fileKeying_ = FileKeying();
+                    groupFiles_.keyingLost(now());
+                    if (log_) log_("Data2G dropped " + std::to_string(event.count) + " file frame(s) unsent");
+                }
+                else if (event.number == status_.groupPort && hasKeying_ && keying_.stage == Keying::Stage::Sent)
                 {
                     hasKeying_ = false;
                     if (log_) log_("Data2G dropped " + std::to_string(event.count) + " chat frame(s) unsent");
                 }
+                break;
+            case Type::BcastHeard:
+                if (event.number == status_.groupPort) heardCall = event.text;
+                break;
+            case Type::BcastLost:
+                // A burst heard with codewords lost: maybe a request for a
+                // file of ours that didn't make it.
+                if (event.number == status_.groupPort) groupFiles_.onHeardLost(heardCall, event.count, now());
                 break;
             case Type::Connected:
             {
@@ -970,11 +999,24 @@ void Data2GTransport::run(Settings settings)
             if (frame.payload.size() < 2) return;
             uint16_t tag = (uint16_t)((frame.payload[0] << 8) | frame.payload[1]);
             std::lock_guard<std::mutex> lock(mutex_);
-            if (hasKeying_ && keying_.stage == Keying::Stage::Sent)
+            if (hasKeying_ && keying_.stage == Keying::Stage::Sent && keying_.tags.count(tag) != 0)
             {
                 keying_.tags.erase(tag);
                 if (keying_.tags.empty()) hasKeying_ = false;
             }
+            else if (fileKeying_.active && fileKeying_.tags.erase(tag) != 0 && fileKeying_.tags.empty())
+            {
+                fileKeying_ = FileKeying();
+                groupFiles_.keyingSent(now());
+            }
+            return;
+        }
+
+        // A file frame never reaches chat, which could not decode it anyway.
+        if (Data2G::isGroupFileFrame(frame.payload.data(), frame.payload.size()))
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            groupFiles_.onFrame(frame.payload.data(), frame.payload.size(), now());
             return;
         }
 
@@ -1100,8 +1142,8 @@ void Data2GTransport::run(Settings settings)
             bool forPeer = std::any_of(sessionKeyings_.begin(), sessionKeyings_.end(),
                                        [&](const SessionKeying& k) { return k.peer == sessionPeer_; }) ||
                            files_.busyWith(sessionPeer_);
-            bool otherWork =
-                groupWaiting || unwrittenFor(sessionPeer_, true) || (fileWaiting && filePeer != sessionPeer_);
+            bool otherWork = groupWaiting || groupFiles_.wantsGroup() || unwrittenFor(sessionPeer_, true) ||
+                             (fileWaiting && filePeer != sessionPeer_);
             bool idle = t - sessionActivityMs_ >= SESSION_IDLE_MS;
             bool close = !forPeer && (sessionOurs_ ? otherWork || idle : otherWork && idle);
             if (close && !commandPending(Command::Kind::Disconnect))
@@ -1149,35 +1191,84 @@ void Data2GTransport::run(Settings settings)
             }
         }
 
-        if (!hasKeying_) return;
-
-        if (keying_.stage == Keying::Stage::Sent)
+        // Files on the group: their timers, and the keying of theirs with
+        // data2g-host, which a session holds back as it does chat's.
+        bool held = session_ != SessionState::None;
+        groupFiles_.tick(t, busy_, held);
+        if (fileKeying_.active)
         {
-            if (keying_.tags.empty()) hasKeying_ = false;
-            else if (t - keying_.queuedAtMs >= NOT_SENT_TIMEOUT_MS)
+            if (held) fileKeying_.heldSinceMs = t;
+            if (t - fileKeying_.heldSinceMs >= NOT_SENT_TIMEOUT_MS)
+            {
+                fileKeying_ = FileKeying();
+                groupFiles_.keyingLost(t);
+                if (log_) log_("Data2G never reported the file keying sent");
+            }
+        }
+
+        if (hasKeying_)
+        {
+            if (keying_.stage == Keying::Stage::Sent)
+            {
+                if (keying_.tags.empty()) hasKeying_ = false;
+                else if (t - keying_.queuedAtMs >= NOT_SENT_TIMEOUT_MS)
+                {
+                    hasKeying_ = false;
+                    if (log_) log_("Data2G never reported the chat keying sent");
+                }
+                return;
+            }
+
+            // A session holds the group back for as long as it takes, and a
+            // file keying with the host for one burst, so the time they do
+            // is not counted against the keying.
+            if (held || fileKeying_.active) keying_.heldSinceMs = t;
+            if (t - keying_.heldSinceMs >= NOT_SENT_TIMEOUT_MS)
             {
                 hasKeying_ = false;
-                if (log_) log_("Data2G never reported the chat keying sent; giving up on it");
+                if (log_) log_("Data2G: the chat keying could not be sent in time");
+                return;
             }
+
+            // The GLISS group, in the tempo's mode, once no session is open
+            // (data2g-host sends no broadcasts during one) and a file keying
+            // has gone.
+            if (status_.groupPort == 0 || kiss.fd < 0) return;
+            if (held || fileKeying_.active) return;
+
+            Data2G::ModeInfo mode = Data2G::modeForGear(keying_.gear, modes_);
+            if (mode.valid() && mode.name != status_.groupMode && mode.name != triedMode)
+            {
+                if (!commandPending(Command::Kind::BcastMode))
+                {
+                    queueCommand(Command::Kind::BcastMode,
+                                 "BCAST MODE " + std::to_string(status_.groupPort) + " " + mode.name, mode.name);
+                }
+                return;
+            }
+            if (commandPending(Command::Kind::BcastMode)) return;
+
+            std::vector<uint8_t> bytes;
+            for (const OutgoingBurst& burst : keying_.bursts)
+            {
+                uint16_t tag = nextTag++;
+                if (nextTag == 0) nextTag = 1;
+                keying_.tags.insert(tag);
+                std::vector<uint8_t> frame = Data2G::kissEncodeAckMode(status_.groupPort, tag, burst.frame);
+                bytes.insert(bytes.end(), frame.begin(), frame.end());
+            }
+            keying_.stage = Keying::Stage::Sent;
+            lock.unlock();
+            if (!sendBytes(kiss, bytes)) closeSocket_(kiss, "write failed");
             return;
         }
 
-        // A session holds the group back for as long as it takes, so the
-        // time it does is not counted against the keying.
-        if (session_ != SessionState::None) keying_.heldSinceMs = t;
-        if (t - keying_.heldSinceMs >= NOT_SENT_TIMEOUT_MS)
-        {
-            hasKeying_ = false;
-            if (log_) log_("Data2G: the chat keying could not be sent in time");
-            return;
-        }
-
-        // The GLISS group, in the tempo's mode, once no session is open:
-        // data2g-host sends no broadcasts during one.
-        if (status_.groupPort == 0 || kiss.fd < 0) return;
-        if (session_ != SessionState::None) return;
-
-        Data2G::ModeInfo mode = Data2G::modeForGear(keying_.gear, modes_);
+        // No chat keying: the next file keying, once one is due, in the
+        // mode of the tempo it wants.
+        if (fileKeying_.active || held || status_.groupPort == 0 || kiss.fd < 0) return;
+        int fileGear = groupFiles_.dueGear(t);
+        if (fileGear == 0) return;
+        Data2G::ModeInfo mode = Data2G::modeForGear(fileGear, modes_);
         if (mode.valid() && mode.name != status_.groupMode && mode.name != triedMode)
         {
             if (!commandPending(Command::Kind::BcastMode))
@@ -1189,16 +1280,20 @@ void Data2GTransport::run(Settings settings)
         }
         if (commandPending(Command::Kind::BcastMode)) return;
 
+        std::vector<std::vector<uint8_t>> frames;
+        if (!groupFiles_.takeKeying(t, frames)) return;
         std::vector<uint8_t> bytes;
-        for (const OutgoingBurst& burst : keying_.bursts)
+        fileKeying_ = FileKeying();
+        fileKeying_.active = true;
+        fileKeying_.heldSinceMs = t;
+        for (const std::vector<uint8_t>& frame : frames)
         {
             uint16_t tag = nextTag++;
             if (nextTag == 0) nextTag = 1;
-            keying_.tags.insert(tag);
-            std::vector<uint8_t> frame = Data2G::kissEncodeAckMode(status_.groupPort, tag, burst.frame);
-            bytes.insert(bytes.end(), frame.begin(), frame.end());
+            fileKeying_.tags.insert(tag);
+            std::vector<uint8_t> kissFrame = Data2G::kissEncodeAckMode(status_.groupPort, tag, frame);
+            bytes.insert(bytes.end(), kissFrame.begin(), kissFrame.end());
         }
-        keying_.stage = Keying::Stage::Sent;
         lock.unlock();
         if (!sendBytes(kiss, bytes)) closeSocket_(kiss, "write failed");
     };
@@ -1378,6 +1473,95 @@ uint64_t Data2GTransport::fileTransferChanges() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
     return files_.changes();
+}
+
+bool Data2GTransport::sendsGroupFiles(std::string& why) const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (myCallsign_.empty())
+    {
+        why = "Set your callsign in Preferences first.";
+        return false;
+    }
+    if (!status_.kissConnected || !status_.commandConnected || status_.groupPort == 0)
+    {
+        why = "The GLISS group is not open: is data2g-host running?";
+        return false;
+    }
+    why.clear();
+    return true;
+}
+
+uint64_t Data2GTransport::sendGroupFile(const std::string& path, std::string& error)
+{
+    std::string why;
+    if (!sendsGroupFiles(why))
+    {
+        error = why;
+        return 0;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    return groupFiles_.send(path, now(), error);
+}
+
+Data2G::GroupFileEstimate Data2GTransport::groupFileEstimate(uint64_t size, int gear) const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return groupFiles_.estimate(size, gear);
+}
+
+bool Data2GTransport::stopServingGroupFile(uint64_t id)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return groupFiles_.stopServing(id);
+}
+
+bool Data2GTransport::cancelGroupFile(uint64_t id)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return groupFiles_.cancel(id);
+}
+
+bool Data2GTransport::receiveGroupFile(uint64_t id, const std::string& path, std::string& error)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return groupFiles_.receive(id, path, now(), error);
+}
+
+bool Data2GTransport::ignoreGroupFile(uint64_t id)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return groupFiles_.ignore(id);
+}
+
+void Data2GTransport::setGroupFileAutoReceive(const std::string& folder)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    groupFiles_.setAutoReceive(folder);
+}
+
+void Data2GTransport::setGroupFilesInhibited(bool inhibited)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    groupFiles_.setInhibited(inhibited);
+}
+
+void Data2GTransport::holdGroupFiles(uint64_t holdMs)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    groupFiles_.holdUntil(now(), holdMs);
+}
+
+std::vector<Data2G::GroupFile> Data2GTransport::groupFiles() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return groupFiles_.files(now());
+}
+
+uint64_t Data2GTransport::groupFileChanges() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return groupFiles_.changes();
 }
 
 void Data2GTransport::deliver(const std::vector<uint8_t>& bytes, bool viaSession)
