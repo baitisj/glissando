@@ -86,6 +86,19 @@ public:
         return 1.0;
     }
 
+    // A transport that takes its own turns on the channel, as data2g-host
+    // does for the GLISS group: it waits for a clear channel and for any
+    // session to end, so the protocol keeps none of its own pauses (no
+    // turnarounds, reply windows, channel-busy holds or retry backoffs) and
+    // hands over the next keying as soon as the last has gone out. Only
+    // "Woah!" holds it. One keying at a time still, so what waits behind it
+    // can be cancelled. Our own modem says no.
+    virtual bool pacesItself() const { return false; }
+
+    // Takes back the keying given to transmit() if none of it has started
+    // to go out. False once it has, or with nothing to take back.
+    virtual bool withdrawKeying() { return false; }
+
     // A link that acknowledges, retries and paces what it carries by itself,
     // such as a Data2G connected session. Nothing else has one: the defaults
     // say no, and the protocol then works exactly as it does without them.
@@ -444,6 +457,7 @@ private:
     void discardQueuedLocked(std::vector<PendingEvent>& events);
     void dropOutboxLocked(MessageStatus status, bool everything, std::vector<PendingEvent>& events);
     Cancel cancelForLocked(const PendingTransmission& pending) const;
+    bool withdrawKeyingLocked();
 
     // Holds the transmitter off until the far end has had its turn. Never
     // shortens a wait that is already running.
@@ -498,6 +512,7 @@ private:
     // misses that burst holds its answer for a text burst's time after the
     // message, so the wait for that answer is that much longer.
     bool keyingCarriesLocator_;
+    std::string keyingLocatorTo_;   // whose locator it carries
     std::string inhibitReason_;   // empty unless transmitting is inhibited
     uint16_t nextAirId_;
 

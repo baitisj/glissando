@@ -603,6 +603,16 @@ void Data2GTransport::settleSessionLocked()
     }
 }
 
+// The group keying, while it waits for its mode, a clear channel or the end
+// of a session: nothing of it is with data2g-host yet.
+bool Data2GTransport::withdrawKeying()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!hasKeying_ || keying_.stage != Keying::Stage::Waiting) return false;
+    hasKeying_ = false;
+    return true;
+}
+
 bool Data2GTransport::isTransmitting() const
 {
     std::lock_guard<std::mutex> lock(mutex_);

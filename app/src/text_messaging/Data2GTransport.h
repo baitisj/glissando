@@ -104,6 +104,10 @@ public:
     bool transmit(const std::vector<OutgoingBurst>& bursts) override;
     bool isTransmitting() const override;
     bool isChannelBusy() const override;
+    // data2g-host waits for a clear channel, and holds the group back
+    // during a session, by itself.
+    bool pacesItself() const override { return true; }
+    bool withdrawKeying() override;
     double airTimeScale(int gear) const override;
 
     // Session keyings: with sessions on, a message or ping for one station

@@ -94,6 +94,21 @@ public:
 
     bool isTransmitting() const override { return transmitting || voiceActive; }
     bool isChannelBusy() const override { return channelBusy; }
+
+    // A transport that takes its own turns, as data2g-host does for the
+    // group, when paced is set. A keying it was given can be taken back
+    // until started is set.
+    bool pacesItself() const override { return paced; }
+    bool withdrawKeying() override
+    {
+        if (!paced || !transmitting || started) return false;
+        transmitting = false;
+        withdrawnKeyings++;
+        return true;
+    }
+    bool paced = false;
+    bool started = false;
+    int withdrawnKeyings = 0;
     double airTimeScale(int gear) const override { return gear == 1 ? 8.0 : 1.0; }
 
     // A link that acknowledges by itself, such as a Data2G session, to the
@@ -3174,6 +3189,96 @@ void testWhatTheLinkHasNotStartedCanBeTakenBack()
     CHECK(a.observer.lastUpdateFor(one)->status == MessageStatus::Acknowledged);
 }
 
+// A transport that takes its own turns gets the next keying as soon as the
+// last has gone, whatever was heard or is on the channel, but only one at a
+// time, so what waits behind it can still be cancelled. Only "Woah!" holds
+// it.
+void testATransportThatPacesItselfGetsNoPauses()
+{
+    Station a("W1AW");
+    a.transport.paced = true;
+
+    // Our own turn taking would hold anything back now.
+    Frame heard;
+    heard.type = FrameType::Broadcast;
+    heard.originCallsign = "N0CALL";
+    heard.airId = 9;
+    heard.fragmentCount = 1;
+    heard.burstsFollowing = 3;
+    a.protocol.onFrameReceived(heard, 5.0f);
+    a.transport.channelBusy = true;
+
+    std::string error;
+    CHECK(a.protocol.sendMessage("first", "", error));
+    int64_t first = a.observer.added.back().id;
+    CHECK(a.protocol.sendMessage("second", "", error));
+    int64_t second = a.observer.added.back().id;
+    CHECK(a.protocol.sendMessage("third", "", error));
+    int64_t third = a.observer.added.back().id;
+    a.protocol.tick();
+    CHECK(a.transport.transmissions.size() == 1);
+    CHECK(a.observer.lastUpdateFor(first)->status == MessageStatus::Transmitting);
+
+    // No countdown for what waits: the transport decides when.
+    for (const QueuedWait& wait : a.protocol.queuedWaits()) CHECK(wait.waitMs == 0 && !wait.channelBusy);
+
+    // Behind the keying, still the operator's to cancel.
+    CHECK(a.protocol.cancelMessage(third) == TextMessagingProtocol::Cancel::Remove);
+
+    // The first gone, the next goes at once: no turnaround.
+    a.transport.transmitting = false;
+    a.protocol.tick();
+    CHECK(a.transport.transmissions.size() == 2);
+    CHECK(a.observer.lastUpdateFor(first)->status == MessageStatus::Sent);
+    CHECK(a.observer.lastUpdateFor(second)->status == MessageStatus::Transmitting);
+
+    // Handed over but not started: taken back and never sent.
+    bool onAir = true;
+    CHECK(a.protocol.cancelMessage(second, &onAir) == TextMessagingProtocol::Cancel::Remove);
+    CHECK(!onAir);
+    CHECK(a.transport.withdrawnKeyings == 1);
+    CHECK(a.observer.lastUpdateFor(second)->status == MessageStatus::NotSent);
+
+    // Started: the transport's to finish.
+    CHECK(a.protocol.sendMessage("fourth", "", error));
+    int64_t fourth = a.observer.added.back().id;
+    a.protocol.tick();
+    a.transport.started = true;
+    CHECK(a.protocol.cancelMessage(fourth) == TextMessagingProtocol::Cancel::None);
+    a.transport.transmitting = false;
+    a.transport.started = false;
+    a.protocol.tick();
+    CHECK(a.observer.lastUpdateFor(fourth)->status == MessageStatus::Sent);
+
+    // "Woah!" still holds it.
+    a.protocol.holdTransmissions();
+    CHECK(a.protocol.sendMessage("fifth", "", error));
+    size_t before = a.transport.transmissions.size();
+    a.protocol.tick();
+    CHECK(a.transport.transmissions.size() == before);
+    a.nowMs += 60 * 1000;
+    a.protocol.tick();
+    CHECK(a.transport.transmissions.size() == before + 1);
+}
+
+// Inhibited, a keying a self-pacing transport has not started on is taken
+// back and dropped with the queue.
+void testAnInhibitTakesBackAnUnstartedKeying()
+{
+    Station a("W1AW");
+    a.transport.paced = true;
+
+    std::string error;
+    CHECK(a.protocol.sendMessage("hello", "", error));
+    int64_t id = a.observer.added.back().id;
+    a.protocol.tick();
+    CHECK(a.transport.transmissions.size() == 1);
+
+    a.protocol.setTransmitInhibited("outside the data segment");
+    CHECK(a.transport.withdrawnKeyings == 1);
+    CHECK(a.observer.lastUpdateFor(id)->status == MessageStatus::NotSent);
+}
+
 // What arrives through such a link has been acknowledged by it: no
 // acknowledgement, pong or report of missing fragments of ours, whatever
 // the Auto acknowledge setting, and nothing held up on the channel.
@@ -3340,6 +3445,8 @@ int main()
     testMessageTheLinkDidNotTakeGoesTheOrdinaryWay();
     testFramesThroughAReliableLinkAreNotAnswered();
     testReleasingAStationDropsWhatIsOutstanding();
+    testATransportThatPacesItselfGetsNoPauses();
+    testAnInhibitTakesBackAnUnstartedKeying();
     testWhatTheLinkHasNotStartedCanBeTakenBack();
     testQueuedWaitsLeaveTheLinkOut();
     testChangingTransportRequeuesWhatTheLinkHeld();
