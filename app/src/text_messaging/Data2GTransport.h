@@ -258,7 +258,7 @@ private:
     uint64_t sessionRead_;          // at least this many read by data2g-host
     uint64_t sessionAcked_;         // at least this many acknowledged by the far end
     uint64_t lastWriteBytes_;       // the size of the last write
-    bool bufferSeen_;               // a nonzero BUFFER since the last write
+    bool bufferSeen_;               // a BUFFER since the last write showing data2g-host read it
     int bufferExact_;               // -1 not known yet; 1 BUFFER counts bytes; 0 it does not
 
     // Files through the session, under mutex_ like the rest.

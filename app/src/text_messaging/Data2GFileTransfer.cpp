@@ -64,8 +64,12 @@ bool reservedOnWindows(const std::string& stem)
     {
         if (upper == device) return true;
     }
-    return upper.size() == 4 && (upper.compare(0, 3, "COM") == 0 || upper.compare(0, 3, "LPT") == 0) &&
-           upper[3] >= '0' && upper[3] <= '9';
+    bool port = upper.compare(0, 3, "COM") == 0 || upper.compare(0, 3, "LPT") == 0;
+    if (!port) return false;
+    if (upper.size() == 4) return upper[3] >= '0' && upper[3] <= '9';
+    // Superscript one, two and three name the same ports.
+    return upper.size() == 5 && (unsigned char)upper[3] == 0xC2 &&
+           ((unsigned char)upper[4] == 0xB9 || (unsigned char)upper[4] == 0xB2 || (unsigned char)upper[4] == 0xB3);
 }
 
 std::vector<uint8_t> numbered(uint8_t number)
@@ -411,6 +415,10 @@ bool FileTransferEngine::cancel(uint64_t id)
             break;
         case State::Offered:
         case State::Sending:
+            // With all of it written, the far end may have saved it
+            // already, and then ignores the Cancel: its Saved still counts.
+            entry->awaitingSaved =
+                entry->transfer.state == State::Sending && entry->written >= entry->transfer.size;
             queueCancel(*entry, CancelReason::SenderStopped);
             finish(*entry, State::Cancelled);
             break;
@@ -617,7 +625,21 @@ void FileTransferEngine::onRecord(const std::string& peer, const FileRecord& rec
         case FileRecordType::Saved:
         {
             Entry* entry = findOutgoing(peer, number);
-            if (entry == nullptr || entry->transfer.state != State::Sending) return;
+            if (entry == nullptr)
+            {
+                // Saved before our Cancel of it arrived: it was delivered.
+                for (Entry& e : entries_)
+                {
+                    const FileTransfer& t = e.transfer;
+                    if (e.awaitingSaved && t.outgoing && t.peer == peer && e.number == number) entry = &e;
+                }
+                if (entry == nullptr) return;
+                entry->awaitingSaved = false;
+            }
+            else if (entry->transfer.state != State::Sending)
+            {
+                return;
+            }
             entry->transfer.done = entry->transfer.size;
             finish(*entry, State::Delivered);
             break;
@@ -688,9 +710,36 @@ void FileTransferEngine::completeReceive(Entry& entry)
     std::error_code ec;
     if (written)
     {
-        // The operator agreed to replace one already there.
-        if (std::filesystem::exists(final, ec)) std::filesystem::remove(final, ec);
-        std::filesystem::rename(part, final, ec);
+        // Another transfer's part file is never replaced.
+        auto clash = [&](const std::filesystem::path& path) {
+            return std::any_of(entries_.begin(), entries_.end(),
+                               [&](const Entry& e) { return &e != &entry && !e.part.empty() && e.part == path; });
+        };
+        if (t.autoAccepted && (std::filesystem::exists(final, ec) || clash(final)))
+        {
+            // Taken while it came: auto-accept never replaces a file, so
+            // it gets the next free name.
+            std::filesystem::path other = freePath(final.parent_path(), t.name);
+            if (!other.empty() && !clash(other))
+            {
+                final = other;
+                t.path = utf8FromPath(final);
+            }
+            else
+            {
+                written = false;
+            }
+        }
+        else if (clash(final))
+        {
+            written = false;
+        }
+        else if (std::filesystem::exists(final, ec))
+        {
+            // The operator agreed, in the save dialog, to replace it.
+            std::filesystem::remove(final, ec);
+        }
+        if (written) std::filesystem::rename(part, final, ec);
     }
     if (!written || ec)
     {
@@ -704,13 +753,14 @@ void FileTransferEngine::completeReceive(Entry& entry)
     finish(entry, FileTransfer::State::Saved);
 }
 
-void FileTransferEngine::sessionEnded(const std::string& peer, uint64_t nowMs)
+void FileTransferEngine::sessionEnded(const std::string& peer, uint64_t nowMs, bool endedThere)
 {
     using State = FileTransfer::State;
     pending_.erase(peer);
     for (Entry& entry : entries_)
     {
         FileTransfer& t = entry.transfer;
+        if (t.peer == peer) entry.awaitingSaved = false;
         if (t.peer != peer || !t.live()) continue;
         switch (t.state)
         {
@@ -719,8 +769,10 @@ void FileTransferEngine::sessionEnded(const std::string& peer, uint64_t nowMs)
                 break;
             case State::Offered:
                 // A Glissando without file transfer closes the session on
-                // the offer.
-                finish(entry, State::NotSupported);
+                // the offer. One that ended on this side says nothing of
+                // the far end.
+                if (endedThere) finish(entry, State::NotSupported);
+                else finish(entry, State::Failed, "The session with " + peer + " ended.");
                 break;
             default:
                 finish(entry, State::Failed, "The session with " + peer + " ended.");
@@ -745,6 +797,7 @@ void FileTransferEngine::release(const std::string& peer)
     pending_.erase(peer);
     for (Entry& entry : entries_)
     {
+        if (entry.transfer.peer == peer) entry.awaitingSaved = false;
         if (entry.transfer.peer == peer && entry.transfer.live()) finish(entry, FileTransfer::State::Cancelled);
     }
 }
@@ -754,6 +807,7 @@ void FileTransferEngine::stopAll(const std::string& why)
     pending_.clear();
     for (Entry& entry : entries_)
     {
+        entry.awaitingSaved = false;
         if (entry.transfer.live()) finish(entry, FileTransfer::State::Failed, why);
     }
 }

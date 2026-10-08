@@ -168,6 +168,10 @@ void testSafeNames()
     CHECK(safeFileName("con.txt") == "received-file.txt");
     CHECK(safeFileName("Lpt1.tar.gz") == "received-file.tar.gz");
     CHECK(safeFileName("COM10.txt") == "COM10.txt");
+    CHECK(safeFileName("COM\xC2\xB9.txt") == "received-file.txt");    // COM superscript one
+    CHECK(safeFileName("lpt\xC2\xB2") == "received-file");            // superscript two
+    CHECK(safeFileName("COM\xC2\xB3.log") == "received-file.log");    // superscript three
+    CHECK(safeFileName("COM\xC2\xB4.txt") == "COM\xC2\xB4.txt");      // an acute accent: not a port
     CHECK(safeFileName("console.txt") == "console.txt");
     CHECK(safeFileName("caf\xC3\xA9.txt") == "caf\xC3\xA9.txt");     // UTF-8 kept
     CHECK(safeFileName("bad\xFF\xC3.txt") == "bad.txt");             // not UTF-8: dropped
@@ -340,8 +344,8 @@ void testALostSession()
     link.turns(2);
     CHECK(exists(saveAs + ".part"));
 
-    link.a.sessionEnded("VK3ABC", link.nowMs + 5);
-    link.b.sessionEnded("W1AW", link.nowMs + 5);
+    link.a.sessionEnded("VK3ABC", link.nowMs + 5, true);
+    link.b.sessionEnded("W1AW", link.nowMs + 5, true);
     CHECK(transferOf(link.a, id).state == State::Failed);
     CHECK(last(link.b, false).state == State::Failed);
     CHECK(!exists(saveAs + ".part"));
@@ -362,8 +366,60 @@ void testAnOlderGlissandoCantTakeFiles()
     std::string error;
     uint64_t id = a.offer("VK3ABC", scratch.write("x.bin", 10), 1000, error);
     CHECK(!a.takeRecords("VK3ABC", 1000).empty());
-    a.sessionEnded("VK3ABC", 2000); // it closed the session on the offer
+    a.sessionEnded("VK3ABC", 2000, true); // it closed the session on the offer
     CHECK(transferOf(a, id).state == State::NotSupported);
+
+    // A session that ended on this side (data2g-host's port lost, say)
+    // says nothing of the far end's Glissando.
+    uint64_t second = a.offer("VK3ABC", scratch.write("y.bin", 10), 3000, error);
+    CHECK(!a.takeRecords("VK3ABC", 3000).empty());
+    a.sessionEnded("VK3ABC", 4000, false);
+    CHECK(transferOf(a, second).state == State::Failed && !transferOf(a, second).error.empty());
+}
+
+// The sender cancels once every piece is written, but the receiver had
+// saved it already and ignores the Cancel: its Saved, crossing the
+// Cancel, makes it delivered on both sides.
+void testACancelCrossingSaved()
+{
+    Scratch scratch("cancel-crossing-saved");
+    Link link;
+    std::string error;
+    uint64_t id = link.a.offer("VK3ABC", scratch.write("x.bin", 5000), link.nowMs, error);
+    link.turn();
+    std::string saveAs = scratch.path("x.got");
+    CHECK(link.b.accept(last(link.b, false).id, saveAs, error));
+    link.turn(); // the Accept reaches A
+
+    // Both pieces written; B has them and has saved it.
+    std::vector<uint8_t> pieces;
+    CHECK(link.a.takePiece("VK3ABC", link.writtenByA, pieces));
+    CHECK(link.a.takePiece("VK3ABC", link.writtenByA + pieces.size(), pieces));
+    link.writtenByA += pieces.size();
+    link.deliver(pieces, link.toB, link.b, "W1AW");
+    CHECK(last(link.b, false).state == State::Saved);
+    CHECK(transferOf(link.a, id).state == State::Sending);
+
+    CHECK(link.a.cancel(id));
+    CHECK(transferOf(link.a, id).state == State::Cancelled);
+    link.turn(); // A's Cancel and B's Saved cross
+    CHECK(last(link.b, false).state == State::Saved && readFile(saveAs).size() == 5000);
+    CHECK(transferOf(link.a, id).state == State::Delivered && transferOf(link.a, id).done == 5000);
+
+    // Cancelled with only part of it written, a Saved can't come, and
+    // one that did is not taken.
+    uint64_t second = link.a.offer("VK3ABC", scratch.write("y.bin", 5000), link.nowMs, error);
+    link.turn();
+    CHECK(link.b.accept(last(link.b, false).id, scratch.path("y.got"), error));
+    link.turn();
+    std::vector<uint8_t> one;
+    CHECK(link.a.takePiece("VK3ABC", link.writtenByA, one));
+    CHECK(link.a.cancel(second));
+    FileRecord saved;
+    saved.type = (uint8_t)FileRecordType::Saved;
+    saved.body = {2};
+    link.a.onRecord("VK3ABC", saved, link.nowMs);
+    CHECK(transferOf(link.a, second).state == State::Cancelled);
 }
 
 void testOneFileAtATime()
@@ -489,6 +545,42 @@ void testAutoAcceptNeverOverwrites()
     CHECK(!exists(scratch.path("beacon.txt.part")));
 }
 
+// A file that turns up under the auto-accepted name while the transfer
+// runs is not replaced: the file gets the next free name. One the
+// operator chose in the save dialog is replaced, as they agreed to.
+void testAutoAcceptDoesntReplaceAFileMadeMeanwhile()
+{
+    Scratch scratch("auto-meanwhile");
+    FileTransferEngine b;
+    b.setAutoAccept(utf8FromPath(scratch.dir), {"W1AW"});
+    b.onRecord("W1AW", offerRecord(1, 3, "notes.txt"), 1000);
+    CHECK(last(b, false).state == State::Receiving && last(b, false).path == scratch.path("notes.txt"));
+    { std::ofstream(scratch.dir / "notes.txt") << "the operator's"; }
+    b.onRecord("W1AW", dataRecord(1, "abc"), 1000);
+    FileTransfer got = last(b, false);
+    CHECK(got.state == State::Saved && got.path == scratch.path("notes (2).txt"));
+    CHECK(readFile(scratch.path("notes.txt")) == "the operator's");
+    CHECK(readFile(got.path) == "abc");
+
+    // A file named for another's part file, finishing first, leaves that
+    // part file alone.
+    b.onRecord("W1AW", offerRecord(2, 3, "log.txt.part"), 1000);
+    b.onRecord("W1AW", offerRecord(4, 3, "log.txt"), 1000);
+    CHECK(last(b, false).path == scratch.path("log.txt") && exists(scratch.path("log.txt.part")));
+    b.onRecord("W1AW", dataRecord(2, "one"), 1000);
+    b.onRecord("W1AW", dataRecord(4, "two"), 1000);
+    CHECK(readFile(scratch.path("log.txt")) == "two");
+    CHECK(readFile(scratch.path("log.txt (2).part")) == "one");
+
+    b.setAutoAccept("", {});
+    { std::ofstream(scratch.dir / "chosen.txt") << "old"; }
+    b.onRecord("W1AW", offerRecord(3, 3, "chosen.txt"), 1000);
+    std::string error;
+    CHECK(b.accept(last(b, false).id, scratch.path("chosen.txt"), error));
+    b.onRecord("W1AW", dataRecord(3, "new"), 1000);
+    CHECK(last(b, false).state == State::Saved && readFile(scratch.path("chosen.txt")) == "new");
+}
+
 void testAHostileNameIsSavedSafely()
 {
     Scratch scratch("hostile");
@@ -595,6 +687,8 @@ int main()
     testALostSession();
     testAnOlderGlissandoCantTakeFiles();
     testOneFileAtATime();
+    testACancelCrossingSaved();
+    testAutoAcceptDoesntReplaceAFileMadeMeanwhile();
     testAutoAcceptNumbersAClash();
     testAHostileNameIsSavedSafely();
     testAPartFileOfTheOperatorsIsLeftAlone();

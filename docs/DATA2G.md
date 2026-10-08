@@ -204,9 +204,11 @@ built yet.
 
 **Sending.** Right-click a station in the call roster and pick **Send
 File...** (dark, with a line under it saying why, unless Data2G is the
-chat modem with sessions on and data2g-host's ports are up). The station
-is selected, as for a message, and the file picked is queued for it. A
-file over 100 kB asks first. The session opens as for a message, and the
+chat modem with sessions on and data2g-host's ports are up). The file
+picked is queued for the station, which is then selected, as for a
+message. A file over 100 kB asks first, and so does selecting the station
+when a file is still going to or from the one selected before, as letting
+go of that one cancels it. The session opens as for a message, and the
 offer is the first thing written into it. One file goes to a station at
 a time; another waits its turn. The chat shows a line for it that
 follows it: `FRED.TXT, 7,000 bytes: offered`, then `sending 3,200 of
@@ -232,7 +234,10 @@ that folder the one used next time) and **Accept files without asking
 from**, a list of callsigns whose files go straight into that folder,
 still through a `.part` file, under the offered name (numbered, `FRED
 (2).TXT`, when one is there already; with no number free up to 999 the
-operator is asked instead). The chat line says it was saved without
+operator is asked instead). A file that turns up under that name while
+the transfer runs is not replaced either: the file takes the next free
+number when it is renamed. Only a name chosen in the save dialog, which
+asks, replaces a file. The chat line says it was saved without
 asking.
 
 How it goes in the session's byte stream, beside the chat frames (`G`, a
@@ -264,7 +269,10 @@ only lower it), so a message written between pieces is still settled at
 its own end. When the host reads a write in the same step as it takes an
 acknowledgement bigger than it, its one answer falls instead of rising;
 then everything is settled at `BUFFER 0` (data2g-host answers every write
-with a count, never 0), and the next piece waits for that. With an older host that only says 1 for "some", pieces go
+with a count, never 0, and never below the size of the write), and the
+next piece waits for that. A count below the size of the last write may
+be from before the host read it, reporting only acknowledgements of what
+went before, so a `BUFFER 0` after it settles only what was read. With an older host that only says 1 for "some", pieces go
 one at a time, each once everything before it is acknowledged.
 
 When things go wrong:
@@ -276,21 +284,26 @@ When things go wrong:
   status line), and the receiver deletes its `.part`. No resume in this
   version.
 - The sender cancels: no more pieces, and a Cancel; the receiver deletes
-  what it has and drops pieces that still come after it.
+  what it has and drops pieces that still come after it. Cancelled once
+  every piece is written, the receiver may have saved it already; then
+  it ignores the Cancel, and its Saved, crossing it, shows `delivered`.
 - The receiver cancels: a Cancel back; the sender stops and shows
   `cancelled by W1AW`.
 - Deselecting the station ends the session at once, as before, and its
   files are cancelled on our side; the far end sees the session gone.
 - A station running an older Glissando takes the `F` for a stream that
-  isn't chat and closes the session. A session that ends while our offer
-  is unanswered so shows `failed: their Glissando can't take files`.
+  isn't chat and closes the session. A session the far end ends while our
+  offer is unanswered so shows `failed: their Glissando can't take
+  files`. One that ends on this side (data2g-host's command or data port
+  lost, a write to it failing) shows `failed`.
 - The receiver can't write the file: a Cancel with that reason, and the
   sender shows `failed on W1AW's side`.
 - An odd name offered (`../../x`, control characters, nothing, `CON`):
   only its last path part is kept, without control characters, path
   separators, the characters Windows refuses, or leading and trailing
   dots and spaces; a Windows device name, or nothing left, becomes
-  `received-file` (with any extension it had).
+  `received-file` (with any extension it had); so do `COM¹` to `COM³`
+  and `LPT¹` to `LPT³`, which Windows reserves too.
 - A station that lately didn't take a session for a message is still
   called for a file, which has no group to fall back on. A file that
   can't get its session (no answer, data2g-host busy, or ten minutes of
@@ -346,13 +359,19 @@ messages learn it only from a ping.
   session: a 7,000-byte file end to end, declined, cancelled by either
   side, a lost session, an offer expiring, an odd name saved safely
   without asking, a message overtaking a large file, a message whose read
-  is answered together with an acknowledgement, an offer crossing the far
-  end's DISCONNECT, and deselecting the station mid-file. Clean under ThreadSanitizer.
+  is answered together with an acknowledgement, counts sent before the host
+  reads a piece settling nothing of it, an offer crossing the far end's
+  DISCONNECT, deselecting the station mid-file, a far end running an older
+  Glissando, a lost command port failing an offer, two files for one
+  station going in turn, a file through an older host, and an offer
+  expiring on one side's clock. Clean under ThreadSanitizer.
 - **Unit** (`fdv_text_messaging_data2g_file_test`): the file engine on
   its own, two engines passing records by hand: safe names, a file end
   to end, an empty file, declined, cancelled each side with late pieces
-  dropped, expiry on each side's clock, a lost session, an older
-  Glissando, one file at a time, auto-accept numbering a clash, a
+  dropped, a Cancel crossing the receiver's Saved, expiry on each side's
+  clock, a lost session, an older Glissando (and a session ended on this
+  side, which is not that), one file at a time, auto-accept numbering a
+  clash, a file made meanwhile under an auto-accepted name kept, a
   hostile name, direction controls in a name, a part file of the
   operator's left alone, two files refused one name, auto-accept never
   overwriting, a receiver that can't write, more data than offered, and

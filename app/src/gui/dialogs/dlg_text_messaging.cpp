@@ -2151,8 +2151,10 @@ void TextMessagingDialog::OnMenuSendFile(wxCommandEvent&)
     sendFileTo(m_menuCallsign);
 }
 
-// The station is selected, as for a message, and the file picked is
-// queued for it: it is offered once the session with the station is open.
+// The file picked is queued for the station, which is then selected, as
+// for a message: it is offered once the session with the station is open.
+// Selecting it lets go of the station selected before, which cancels any
+// file going to or from that one, so the operator is asked first.
 void TextMessagingDialog::sendFileTo(const std::string& callsign)
 {
     MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
@@ -2170,9 +2172,7 @@ void TextMessagingDialog::sendFileTo(const std::string& callsign)
         return;
     }
 
-    long item = stationItem(callsign);
-    if (item < 0) return; // aged out while the menu was open
-    if (m_stationList->GetItemState(item, wxLIST_STATE_SELECTED) == 0) setStationSelected(item, true);
+    if (stationItem(callsign) < 0) return; // aged out while the menu was open
 
     wxString call = wxString::FromUTF8(callsign);
     wxFileDialog dialog(this, wxString::Format(_("Send a file to %s"), call), wxEmptyString, wxEmptyString,
@@ -2191,6 +2191,32 @@ void TextMessagingDialog::sendFileTo(const std::string& callsign)
             _("Send File"), wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
         if (confirm.ShowModal() != wxID_YES) return;
     }
+
+    std::string before = selectedCallsign();
+    if (!before.empty() && before != callsign)
+    {
+        int live = 0;
+        for (const Data2G::FileTransfer& t : frame->chatFileTransfers())
+        {
+            if (t.peer == before && t.live()) live++;
+        }
+        if (live > 0)
+        {
+            wxMessageDialog confirm(
+                this,
+                wxString::Format(wxPLURAL("%d file is going to or from %s. Sending to %s lets go of %s, which "
+                                          "cancels it. Go ahead?",
+                                          "%d files are going to or from %s. Sending to %s lets go of %s, which "
+                                          "cancels them. Go ahead?",
+                                          live),
+                                 live, wxString::FromUTF8(before), call, wxString::FromUTF8(before)),
+                _("Send File"), wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
+            if (confirm.ShowModal() != wxID_YES) return;
+        }
+    }
+    long item = stationItem(callsign);
+    if (item < 0) return; // aged out while the dialogs were open
+    if (m_stationList->GetItemState(item, wxLIST_STATE_SELECTED) == 0) setStationSelected(item, true);
 
     wxString error;
     if (frame->chatSendFile(callsign, path, error) == 0)

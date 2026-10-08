@@ -337,6 +337,11 @@ public:
         // DISCONNECT is answered but the session goes on until the test
         // ends it (loseSession), as while data2g-host closes it cleanly.
         bool holdDisconnect = false;
+        // Session bytes written to this side are left unread (and so
+        // unanswered) until the test lets the host read them, while the
+        // far end's acknowledgements of what it read before go on.
+        bool holdReads = false;
+        std::vector<uint8_t> unread;
         Data2G::KissDecoder kiss;
         Data2G::LineSplitter lines;
     };
@@ -441,6 +446,32 @@ public:
     size_t unackedBytes(int side)
     {
         return with([&]() { return sides[side].unacked.size(); });
+    }
+
+    void holdReads(int side)
+    {
+        with([&]() {
+            sides[side].holdReads = true;
+            return 0;
+        });
+    }
+
+    size_t unreadBytes(int side)
+    {
+        return with([&]() { return sides[side].unread.size(); });
+    }
+
+    // The host reads, and answers, what it left unread.
+    void releaseReads(int side)
+    {
+        with([&]() {
+            Side& held = sides[side];
+            held.holdReads = false;
+            std::vector<uint8_t> bytes;
+            bytes.swap(held.unread);
+            if (!bytes.empty()) dataIn(side, bytes.data(), (int)bytes.size());
+            return 0;
+        });
     }
 
     // The link fails: both ends are told, what was unacknowledged is gone,
@@ -628,6 +659,11 @@ private:
     {
         Side& side = sides[s];
         if (sessionWith < 0) return;
+        if (side.holdReads)
+        {
+            side.unread.insert(side.unread.end(), bytes, bytes + length);
+            return;
+        }
         side.unacked.insert(side.unacked.end(), bytes, bytes + length);
         if (side.foldAck > 0)
         {
@@ -1644,6 +1680,223 @@ void testAnOfferCrossingADisconnectIsSeen()
     CHECK(newestFile(b.transport, false).state == FileState::Failed);
 }
 
+// A file sent to a station whose Glissando is older, without file
+// transfer: its stream decoder takes the Offer for something that is not
+// chat and closes the session, and the file fails as not supported. The
+// far end here is a raw client of the second host, doing just that.
+int connectLoopback(int port)
+{
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = htons((uint16_t)port);
+    if (connect(fd, (sockaddr*)&addr, sizeof(addr)) != 0)
+    {
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+void testAnOlderGlissandoCantTakeTheFile()
+{
+    FakeHostPair hosts;
+    Station a("W1AW", hosts.sides[0], 3);
+    int command = connectLoopback(hosts.sides[1].commandPort);
+    int data = connectLoopback(hosts.sides[1].dataPort);
+    CHECK(command >= 0 && data >= 0);
+    std::string hello = "MYCALL VK3ABC\rCHAT ON\rLISTEN ON\r";
+    send(command, hello.data(), hello.size(), MSG_NOSIGNAL);
+    CHECK(waitFor([&]() { return hosts.ready(0) && hosts.heardCommand(1, "LISTEN ON"); }));
+    CHECK(waitFor([&]() { return a.transport.sendsFiles(); }));
+
+    FileScratch scratch("older");
+    std::string error;
+    uint64_t id = a.transport.sendFile("VK3ABC", scratch.write("x.bin", 500), error);
+    CHECK(id != 0);
+    bool closed = false;
+    for (int i = 0; i < 3000 && fileState(a.transport, id) != FileState::NotSupported; i++)
+    {
+        a.step();
+        uint8_t byte = 0;
+        // Its decoder knows only chat records, 'G'.
+        if (!closed && recv(data, &byte, 1, MSG_DONTWAIT) == 1 && byte != 'G')
+        {
+            std::string bye = "DISCONNECT\r";
+            send(command, bye.data(), bye.size(), MSG_NOSIGNAL);
+            closed = true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(closed);
+    CHECK(fileState(a.transport, id) == FileState::NotSupported);
+    close(command);
+    close(data);
+}
+
+// data2g-host's command port lost while the offer waits for its answer:
+// the session ends on this side, which says nothing of the far end's
+// Glissando, so the file fails rather than being called not supported.
+void testLosingTheCommandPortFailsAnOffer()
+{
+    FakeHostPair hosts;
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(sessionsReady(hosts, a, b));
+    FileScratch scratch("lost-port");
+
+    std::string error;
+    uint64_t id = a.transport.sendFile("VK3ABC", scratch.write("x.bin", 500), error);
+    runBoth(a, b, [&]() { return newestFile(b.transport, false).state == FileState::Asking; });
+    CHECK(fileState(a.transport, id) == FileState::Offered);
+    hosts.dropCommandClient(0);
+    runBoth(a, b, [&]() { return fileState(a.transport, id) != FileState::Offered; });
+    CHECK(fileState(a.transport, id) == FileState::Failed);
+}
+
+// Two files for one station: the second is offered only once the first
+// has been delivered, in the same session.
+void testTwoFilesForOneStationGoInTurn()
+{
+    FakeHostPair hosts;
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(sessionsReady(hosts, a, b));
+    FileScratch scratch("in-turn");
+    fs::create_directories(scratch.dir / "in");
+    b.transport.setFileAutoAccept((scratch.dir / "in").string(), {"W1AW"});
+
+    std::string error;
+    std::string one = scratch.write("one.bin", 9000);
+    std::string two = scratch.write("two.bin", 3000);
+    uint64_t first = a.transport.sendFile("VK3ABC", one, error);
+    uint64_t second = a.transport.sendFile("VK3ABC", two, error);
+    CHECK(first != 0 && second != 0);
+    bool early = false;
+    runBoth(a, b, [&]() {
+        if (fileState(a.transport, second) != FileState::Waiting &&
+            fileState(a.transport, first) != FileState::Delivered)
+        {
+            early = true;
+        }
+        return fileState(a.transport, second) == FileState::Delivered;
+    });
+    CHECK(!early);
+    CHECK(fileState(a.transport, first) == FileState::Delivered);
+    CHECK(fileState(a.transport, second) == FileState::Delivered);
+    CHECK(fileContents((scratch.dir / "in" / "one.bin").string()) == fileContents(one));
+    CHECK(fileContents((scratch.dir / "in" / "two.bin").string()) == fileContents(two));
+    int connects = hosts.with([&]() {
+        return (int)std::count_if(hosts.sides[0].commands.begin(), hosts.sides[0].commands.end(),
+                                  [](const std::string& c) { return c.rfind("CONNECT", 0) == 0; });
+    });
+    CHECK(connects == 1);
+}
+
+// A host that only says 1 for "some": each piece goes once everything
+// before it is acknowledged, and the file still arrives whole.
+void testAFileThroughAnOlderHost()
+{
+    FakeHostPair hosts;
+    hosts.with([&]() {
+        hosts.sides[0].holdAcks = true;
+        hosts.sides[0].exactBuffer = false;
+        return 0;
+    });
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(sessionsReady(hosts, a, b));
+    FileScratch scratch("older-host");
+    fs::create_directories(scratch.dir / "in");
+    b.transport.setFileAutoAccept((scratch.dir / "in").string(), {"W1AW"});
+
+    std::string error;
+    std::string source = scratch.write("big.bin", 20000);
+    uint64_t id = a.transport.sendFile("VK3ABC", source, error);
+    size_t most = 0;
+    runAcking(hosts, a, b, 1500, [&]() {
+        most = std::max(most, hosts.unackedBytes(0));
+        return fileState(a.transport, id) == FileState::Delivered;
+    });
+    CHECK(fileState(a.transport, id) == FileState::Delivered);
+    CHECK(!a.transport.status().sessionUnackedExact);
+    CHECK(most > 0 && most <= (size_t)Data2G::FILE_PIECE_BYTES + 16); // one piece at a time
+    Data2G::FileTransfer got = newestFile(b.transport, false);
+    CHECK(got.state == FileState::Saved && fileContents(got.path) == fileContents(source));
+}
+
+// Each side's clock runs on its own: the side whose clock runs out first
+// expires the offer, and its Cancel expires it on the other.
+void testAnOfferExpiresOnOneClock()
+{
+    for (int expiring = 0; expiring < 2; expiring++)
+    {
+        FakeHostPair hosts;
+        Station a("W1AW", hosts.sides[0], 3);
+        Station b("VK3ABC", hosts.sides[1], 3);
+        CHECK(sessionsReady(hosts, a, b));
+        FileScratch scratch("one-clock");
+
+        std::string error;
+        uint64_t id = a.transport.sendFile("VK3ABC", scratch.write("x.bin", 500), error);
+        runBoth(a, b, [&]() { return newestFile(b.transport, false).state == FileState::Asking; });
+        CHECK(newestFile(b.transport, false).state == FileState::Asking);
+        (expiring == 0 ? a : b).nowMs += Data2G::FileTransferEngine::OFFER_EXPIRY_MS;
+        // Far less than the other side's own clock would take.
+        runBoth(a, b, [&]() {
+            return fileState(a.transport, id) == FileState::Expired &&
+                   newestFile(b.transport, false).state == FileState::Expired;
+        }, 300);
+        CHECK(fileState(a.transport, id) == FileState::Expired);
+        CHECK(newestFile(b.transport, false).state == FileState::Expired);
+    }
+}
+
+// A piece written while some of the last is unacknowledged. Before the
+// host reads it, it reports the far end's acknowledgements of the last
+// one, down to 0: those settle only the last piece, not the one unread,
+// and nothing more is written until the host has read it.
+void testCountsBeforeTheHostReadsAWriteSettleNothingOfIt()
+{
+    FakeHostPair hosts;
+    holdSide0(hosts);
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(sessionsReady(hosts, a, b));
+    FileScratch scratch("unread");
+    b.transport.setFileAutoAccept(scratch.dir.string(), {"W1AW"});
+
+    std::string error;
+    std::string source = scratch.write("large.bin", 40000);
+    uint64_t id = a.transport.sendFile("VK3ABC", source, error);
+    runAcking(hosts, a, b, 1500, [&]() { return newestFile(b.transport, false).done >= 4096; });
+    runBoth(a, b, [&]() { return false; }, 20);
+    size_t waiting = hosts.unackedBytes(0);
+    CHECK(waiting > Data2GTransport::FILE_PIECE_LOW_WATER);
+    CHECK(a.transport.status().sessionUnacked == (int64_t)waiting);
+
+    hosts.holdReads(0);
+    hosts.ackSome(0, waiting - 800); // BUFFER 800: the next piece goes
+    runBoth(a, b, [&]() { return hosts.unreadBytes(0) > 0; }, 500);
+    size_t unread = hosts.unreadBytes(0);
+    CHECK(unread > (size_t)Data2G::FILE_PIECE_BYTES);
+    hosts.ackSome(0, 500); // BUFFER 300
+    runBoth(a, b, [&]() { return a.transport.status().sessionUnacked == 300; }, 500);
+    hosts.ackSome(0, 300); // BUFFER 0
+    runBoth(a, b, [&]() { return a.transport.status().sessionUnacked == 0; }, 500);
+    CHECK(a.transport.status().sessionUnacked == 0);
+    runBoth(a, b, [&]() { return false; }, 50);
+    CHECK(hosts.unreadBytes(0) == unread);  // nothing more written
+    CHECK(newestFile(a.transport, true).done == newestFile(b.transport, false).done);
+
+    hosts.releaseReads(0);
+    runAcking(hosts, a, b, 1500, [&]() { return fileState(a.transport, id) == FileState::Delivered; });
+    CHECK(fileState(a.transport, id) == FileState::Delivered);
+    Data2G::FileTransfer got = newestFile(b.transport, false);
+    CHECK(got.state == FileState::Saved && fileContents(got.path) == fileContents(source));
+}
+
 // Without sessions there are no files.
 void testNoFilesWithoutSessions()
 {
@@ -1692,6 +1945,12 @@ int main()
     testChatOvertakesALargeFile();
     testAWriteReadWithAnAckStillMovesOn();
     testAnOfferCrossingADisconnectIsSeen();
+    testAnOlderGlissandoCantTakeTheFile();
+    testLosingTheCommandPortFailsAnOffer();
+    testTwoFilesForOneStationGoInTurn();
+    testAFileThroughAnOlderHost();
+    testAnOfferExpiresOnOneClock();
+    testCountsBeforeTheHostReadsAWriteSettleNothingOfIt();
     testNoFilesWithoutSessions();
 
     if (failures > 0)

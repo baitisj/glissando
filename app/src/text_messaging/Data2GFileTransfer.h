@@ -150,9 +150,11 @@ public:
     void onRecord(const std::string& peer, const FileRecord& record, uint64_t nowMs);
 
     // The session with the station has ended: what was under way in it
-    // failed, an offer of ours still unanswered was not understood, and
-    // a file still waiting its turn waits for the next session.
-    void sessionEnded(const std::string& peer, uint64_t nowMs);
+    // failed, and a file still waiting its turn waits for the next
+    // session. endedThere: the far end ended it (not this side, nor the
+    // loss of data2g-host's ports), so an offer of ours still unanswered
+    // was not understood; otherwise that offer failed too.
+    void sessionEnded(const std::string& peer, uint64_t nowMs, bool endedThere);
 
     // No session could be had with the station: its files fail.
     void noSession(const std::string& peer, const std::string& why);
@@ -185,6 +187,7 @@ private:
         std::ofstream out;          // theirs, once accepted
         std::filesystem::path part; // where out writes, while it does
         uint64_t written = 0;       // ours: bytes of the file written into the session
+        bool awaitingSaved = false; // ours, cancelled with all of it written: a Saved still delivers it
         std::deque<std::pair<uint64_t, uint64_t>> pieceEnds; // stream offset a piece ends at, file bytes to there
     };
 

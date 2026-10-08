@@ -546,8 +546,6 @@ void Data2GTransport::bufferLocked(int64_t count)
     status_.sessionUnacked = count;
     if (sessionAcked_ >= sessionWritten_) return; // nothing of ours outstanding
 
-    if (count > 0) bufferSeen_ = true;
-
     if (bufferExact_ < 0 && count > 0)
     {
         if (count == 1 && lastWriteBytes_ > 1)
@@ -574,9 +572,21 @@ void Data2GTransport::bufferLocked(int64_t count)
         if (sessionRead_ >= (uint64_t)count) sessionAcked_ = std::max(sessionAcked_, sessionRead_ - (uint64_t)count);
     }
 
-    // Nothing unacknowledged after a nonzero count since the last write:
-    // all of it. data2g-host answers every write with a count, which is
-    // never 0 (none of the write can have been acknowledged yet), so this
+    // A count that shows data2g-host has read the last write. Only an
+    // exact host is written to while something is unacknowledged, and
+    // its counts that only take in acknowledgements of what went before,
+    // sent before it read the write, are below the size of the write
+    // whenever that is bigger than what was outstanding (a piece always
+    // is); its answer to the write is never below it.
+    if (count > 0)
+    {
+        bool read = bufferExact_ != 1 || sessionRead_ >= sessionWritten_ || (uint64_t)count >= lastWriteBytes_;
+        if (read) bufferSeen_ = true;
+    }
+
+    // Nothing unacknowledged after such a count since the last write: all
+    // of it. data2g-host answers every write with a count, which is never
+    // 0 (none of the write can have been acknowledged yet), so this
     // also settles a write whose read was answered together with an
     // acknowledgement bigger than it, which the counts above, seeing no
     // rise, leave short.
@@ -708,6 +718,8 @@ void Data2GTransport::run(Settings settings)
             {
                 reportLocked(sessionPeer_, true, KeyingReport::Result::Failed);
                 released_.insert(sessionPeer_);
+                // So do its files: lost here, not refused there.
+                files_.sessionEnded(sessionPeer_, now(), false);
             }
         }
         else
@@ -726,7 +738,7 @@ void Data2GTransport::run(Settings settings)
             if (session_ == SessionState::Connected)
             {
                 reportLocked(sessionPeer_, true, KeyingReport::Result::Failed);
-                files_.sessionEnded(sessionPeer_, now());
+                files_.sessionEnded(sessionPeer_, now(), false);
             }
             session_ = SessionState::None;
             sessionAborted_ = false;
@@ -907,6 +919,7 @@ void Data2GTransport::run(Settings settings)
             case Type::Disconnected:
             {
                 bool wasConnecting = session_ == SessionState::Connecting;
+                bool endedThere = session_ == SessionState::Connected; // not by our DISCONNECT or ABORT
                 std::string peer = sessionPeer_;
                 session_ = SessionState::None;
                 sessionAborted_ = false;
@@ -929,7 +942,7 @@ void Data2GTransport::run(Settings settings)
                                             [](const SessionKeying& k) { return k.written; });
                     reportLocked(peer, true, KeyingReport::Result::Failed);
                     if (lost && log_) log_("Data2G: the session with " + peer + " ended before it acknowledged everything");
-                    files_.sessionEnded(peer, now());
+                    files_.sessionEnded(peer, now(), endedThere);
                 }
                 break;
             }
