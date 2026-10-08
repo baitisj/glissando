@@ -127,12 +127,13 @@ const char* const CAT_TAIL_UP[] = {
     ".XX.XX.XX....",
 };
 
-// Dark glasses of the kind that are lowered onto a face with some
-// ceremony, sized for the cat's eyes; r is the glint.
-const char* const SHADES[] = {
-    "XXXXXXXXXXX",
-    ".XXrX.XXrX.",
-    "..XX...XX..",
+// DORC glasses (the Digital Oddballs Radio Club's): heavy black horn-rims
+// with white tape round the bridge, sized for the cat's eyes; r is the tape.
+const char* const DORC_GLASSES[] = {
+    "XXXXXXrXXXXXX",
+    "XX...XrX...XX",
+    ".X...XrX...X.",
+    "..XXX...XXX..",
 };
 
 const char* const CRAB[] = {
@@ -414,7 +415,7 @@ void GlissandoScope::paintTv(wxGraphicsContext* gc, const wxRect& trace, Tv tv, 
 
     // The scene while Data2G has the chat: invaders marching to and fro
     // across the top, a cat sitting below them, and every so often a pair
-    // of dark glasses lowered onto the cat.
+    // of DORC glasses lowered onto the cat.
     double s = seconds - TV_OFF;
     int fade = (int)std::lround(255.0 * std::min(1.0, s / 1.0));
 
@@ -464,9 +465,9 @@ void GlissandoScope::paintTv(wxGraphicsContext* gc, const wxRect& trace, Tv tv, 
     drawSprite(cat, catX, catY, catPx, phosphor(170), phosphor(90));
 
     // The glasses, once every 12 s: lowered slowly from the top onto the
-    // cat's eyes, worn a while, and whisked away again.
+    // cat's eyes, worn a while with a nod to the club, and whisked away again.
     double cycle = std::fmod(s, 12.0);
-    double eyesY = catY + 3.0 * catPx;
+    double eyesY = catY + 2.0 * catPx;
     if (cycle > 3.0)
     {
         double t = cycle - 3.0;
@@ -478,14 +479,36 @@ void GlissandoScope::paintTv(wxGraphicsContext* gc, const wxRect& trace, Tv tv, 
             y = eyesY;
         else
             y = eyesY - (eyesY - top) * std::min(1.0, (t - 7.5) / 0.4);
-        drawSprite(sprite(SHADES), catX, y, catPx, phosphor(255), wxColour(20, 20, 20, (unsigned char)fade));
+        // Black frames on a black screen: a faint glow round them shows
+        // them coming down. They're wider than the cat's head, as they
+        // should be, so they sit a cell to its left.
+        Sprite glasses = sprite(DORC_GLASSES);
+        double gx = catX - catPx;
+        double glow = 0.3 * catPx;
+        for (int pass = 0; pass < 2; pass++)
+        {
+            for (int row = 0; row < glasses.height; row++)
+            {
+                for (int col = 0; col < glasses.width(); col++)
+                {
+                    char c = glasses.lines[row][col];
+                    if (c == '.') continue;
+                    double grow = pass == 0 ? glow : 0.0;
+                    gc->SetBrush(wxBrush(pass == 0 ? phosphor(120)
+                                         : c == 'r' ? phosphor(255)
+                                                    : wxColour(12, 12, 12, (unsigned char)fade)));
+                    gc->DrawRectangle(gx + col * catPx - grow, y + row * catPx - grow, catPx + 2 * grow,
+                                      catPx + 2 * grow);
+                }
+            }
+        }
         if (t >= 3.0 && t < 7.5)
         {
             gc->SetFont(captionTextFont(), phosphor(220));
-            wxString deal = _("DEAL WITH IT");
+            wxString club = _("DIGITAL ODDBALLS RADIO CLUB");
             double tw = 0, th = 0;
-            gc->GetTextExtent(deal, &tw, &th);
-            gc->DrawText(deal, cx - tw / 2.0, catY - th - 6.0);
+            gc->GetTextExtent(club, &tw, &th);
+            gc->DrawText(club, cx - tw / 2.0, catY - th - 6.0);
         }
     }
 
