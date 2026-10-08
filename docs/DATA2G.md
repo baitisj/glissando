@@ -220,8 +220,10 @@ bytes). Save it?` with **Save as...** and **Decline**, and the console's
 COMMS button flashes as for a message. Save as... opens the system's save
 dialog in the received files folder with the offered name filled in;
 choosing a place accepts the file, and backing out declines it. The file
-is written to `<name>.part` and renamed once all of it has come; the
-chat line counts it in, and has the same Cancel Transfer. Nothing is
+is written to `<name>.part` (`<name>.2.part` and so on if a file of that
+name is there already) and renamed once all of it has come; the chat line
+counts it in, and has the same Cancel Transfer. A name another file is
+being saved under is refused, and the offer stays open. Nothing is
 opened or run after saving.
 
 Preferences, Modem tab, under the Data2G settings: **Save received files
@@ -229,8 +231,9 @@ in** (the folder the save dialog starts in; saving somewhere else makes
 that folder the one used next time) and **Accept files without asking
 from**, a list of callsigns whose files go straight into that folder,
 still through a `.part` file, under the offered name (numbered, `FRED
-(2).TXT`, when one is there already). The chat line says it was saved
-without asking.
+(2).TXT`, when one is there already; with no number free up to 999 the
+operator is asked instead). The chat line says it was saved without
+asking.
 
 How it goes in the session's byte stream, beside the chat frames (`G`, a
 length byte, the frame): `F`, the record's type, a 2-byte big-endian
@@ -258,7 +261,10 @@ much. The app keeps the least data2g-host can have read and the least
 the far end can have acknowledged from the run of `BUFFER` counts (a
 count that rose by n means at least n more were read; acknowledgements
 only lower it), so a message written between pieces is still settled at
-its own end. With an older host that only says 1 for "some", pieces go
+its own end. When the host reads a write in the same step as it takes an
+acknowledgement bigger than it, its one answer falls instead of rising;
+then everything is settled at `BUFFER 0` (data2g-host answers every write
+with a count, never 0), and the next piece waits for that. With an older host that only says 1 for "some", pieces go
 one at a time, each once everything before it is acknowledged.
 
 When things go wrong:
@@ -266,8 +272,9 @@ When things go wrong:
 - An offer waiting for its answer counts as traffic: the 45 s idle close
   doesn't fire, on either side. An offer unanswered for 4 minutes expires
   on both sides (each side's clock, and a Cancel saying so).
-- The session lost mid-file: `failed` on both sides, and the receiver
-  deletes its `.part`. No resume in this version.
+- The session lost mid-file: `failed` on both sides (why is in the
+  status line), and the receiver deletes its `.part`. No resume in this
+  version.
 - The sender cancels: no more pieces, and a Cancel; the receiver deletes
   what it has and drops pieces that still come after it.
 - The receiver cancels: a Cancel back; the sender stops and shows
@@ -338,14 +345,17 @@ messages learn it only from a ping.
   across reads, interleaved with chat frames); and files through a
   session: a 7,000-byte file end to end, declined, cancelled by either
   side, a lost session, an offer expiring, an odd name saved safely
-  without asking, a message overtaking a large file, and deselecting the
-  station mid-file. Clean under ThreadSanitizer.
+  without asking, a message overtaking a large file, a message whose read
+  is answered together with an acknowledgement, an offer crossing the far
+  end's DISCONNECT, and deselecting the station mid-file. Clean under ThreadSanitizer.
 - **Unit** (`fdv_text_messaging_data2g_file_test`): the file engine on
   its own, two engines passing records by hand: safe names, a file end
   to end, an empty file, declined, cancelled each side with late pieces
   dropped, expiry on each side's clock, a lost session, an older
   Glissando, one file at a time, auto-accept numbering a clash, a
-  hostile name, a receiver that can't write, more data than offered, and
+  hostile name, direction controls in a name, a part file of the
+  operator's left alone, two files refused one name, auto-accept never
+  overwriting, a receiver that can't write, more data than offered, and
   releasing the station.
   `TextMessagingProtocolTest` covers the protocol's side against a fake
   link, and its older tests, unchanged, show nothing changes for our own

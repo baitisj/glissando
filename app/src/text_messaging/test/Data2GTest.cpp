@@ -331,6 +331,12 @@ public:
         std::vector<uint8_t> unacked;
         bool exactBuffer = true;
         bool holdAcks = false;
+        // The far end's modem acknowledges this many bytes in the same host
+        // step as the next write is read, so one BUFFER answers both.
+        size_t foldAck = 0;
+        // DISCONNECT is answered but the session goes on until the test
+        // ends it (loseSession), as while data2g-host closes it cleanly.
+        bool holdDisconnect = false;
         Data2G::KissDecoder kiss;
         Data2G::LineSplitter lines;
     };
@@ -420,6 +426,14 @@ public:
     {
         with([&]() {
             deliverPending(side, n);
+            return 0;
+        });
+    }
+
+    void foldNextAck(int side, size_t n)
+    {
+        with([&]() {
+            sides[side].foldAck = n;
             return 0;
         });
     }
@@ -560,7 +574,7 @@ private:
         else if (w[0] == "DISCONNECT" || w[0] == "ABORT")
         {
             say(side, "OK");
-            if (sessionWith >= 0)
+            if (sessionWith >= 0 && !(side.holdDisconnect && w[0] == "DISCONNECT"))
             {
                 say(side, "DISCONNECTED");
                 say(other, "DISCONNECTED");
@@ -615,13 +629,18 @@ private:
         Side& side = sides[s];
         if (sessionWith < 0) return;
         side.unacked.insert(side.unacked.end(), bytes, bytes + length);
+        if (side.foldAck > 0)
+        {
+            deliverPending(s, side.foldAck, false);
+            side.foldAck = 0;
+        }
         sayBuffer(side); // data2g-host answers every write with one
         if (!side.holdAcks) deliverPending(s, side.unacked.size());
     }
 
     // A burst carrying the first n waiting bytes, and the far end's
     // acknowledgement of them.
-    void deliverPending(int s, size_t n)
+    void deliverPending(int s, size_t n, bool answer = true)
     {
         Side& side = sides[s];
         Side& other = sides[1 - s];
@@ -632,7 +651,7 @@ private:
         say(side, "PTT OFF");
         side.unacked.erase(side.unacked.begin(), side.unacked.begin() + (long)n);
         side.sessionBursts++;
-        sayBuffer(side);
+        if (answer) sayBuffer(side);
     }
 
     void run()
@@ -1556,6 +1575,75 @@ void testChatOvertakesALargeFile()
     CHECK(newestFile(b.transport, false).state == FileState::Saved);
 }
 
+// A message written while the tail of a piece is unacknowledged, read by
+// the host in the same step as an acknowledgement bigger than it: the one
+// BUFFER that answers both falls rather than rises. The message and the
+// file still go, rather than waiting on a read that is never seen.
+void testAWriteReadWithAnAckStillMovesOn()
+{
+    FakeHostPair hosts;
+    holdSide0(hosts);
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(sessionsReady(hosts, a, b));
+    FileScratch scratch("folded");
+    b.transport.setFileAutoAccept(scratch.dir.string(), {"W1AW"});
+
+    std::string error;
+    uint64_t id = a.transport.sendFile("VK3ABC", scratch.write("large.bin", 40000), error);
+    runAcking(hosts, a, b, 1500, [&]() { return newestFile(b.transport, false).done >= 4096; });
+    runBoth(a, b, [&]() { return false; }, 20);
+    size_t waiting = hosts.unackedBytes(0);
+    CHECK(waiting > Data2GTransport::FILE_PIECE_LOW_WATER);
+    CHECK(a.transport.status().sessionUnacked == (int64_t)waiting);
+
+    hosts.foldNextAck(0, 300);
+    CHECK(a.protocol.sendMessage("Folded in", "VK3ABC", error));
+    int64_t message = a.observer.lastAddedId();
+    const int64_t folded = (int64_t)(waiting - 300 + 2 + TEXT_FRAME_BYTES);
+    runBoth(a, b, [&]() { return a.transport.status().sessionUnacked == folded; }, 500);
+    CHECK(hosts.with([&]() { return hosts.sides[0].foldAck; }) == 0);
+    CHECK(a.transport.status().sessionUnacked == folded);
+
+    runAcking(hosts, a, b, 1500, [&]() {
+        return fileState(a.transport, id) == FileState::Delivered &&
+               a.observer.statusOf(message) == MessageStatus::Acknowledged;
+    });
+    CHECK(fileState(a.transport, id) == FileState::Delivered);
+    CHECK(a.observer.statusOf(message) == MessageStatus::Acknowledged);
+    CHECK(newestFile(b.transport, false).state == FileState::Saved);
+}
+
+// An offer that crosses the far end's DISCONNECT, closing a quiet session
+// it opened, is still seen there, and fails with the session.
+void testAnOfferCrossingADisconnectIsSeen()
+{
+    FakeHostPair hosts;
+    hosts.with([&]() {
+        hosts.sides[1].holdDisconnect = true;
+        return 0;
+    });
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(sessionsReady(hosts, a, b));
+    CHECK(waitFor([&]() { return hosts.heardCommand(0, "LISTEN ON"); }));
+
+    std::string error;
+    CHECK(b.protocol.sendMessage("Quick hello", "W1AW", error));
+    runBoth(a, b, [&]() { return hosts.heardCommand(1, "DISCONNECT"); });
+    CHECK(hosts.heardCommand(1, "DISCONNECT"));
+
+    FileScratch scratch("crossing");
+    uint64_t id = a.transport.sendFile("VK3ABC", scratch.write("x.bin", 500), error);
+    CHECK(id != 0);
+    runBoth(a, b, [&]() { return newestFile(b.transport, false).state == FileState::Asking; }, 300);
+    CHECK(newestFile(b.transport, false).state == FileState::Asking);
+
+    hosts.loseSession();
+    runBoth(a, b, [&]() { return newestFile(b.transport, false).state == FileState::Failed; });
+    CHECK(newestFile(b.transport, false).state == FileState::Failed);
+}
+
 // Without sessions there are no files.
 void testNoFilesWithoutSessions()
 {
@@ -1602,6 +1690,8 @@ int main()
     testAnUnansweredOfferExpires();
     testAnOddNameIsSavedSafely();
     testChatOvertakesALargeFile();
+    testAWriteReadWithAnAckStillMovesOn();
+    testAnOfferCrossingADisconnectIsSeen();
     testNoFilesWithoutSessions();
 
     if (failures > 0)

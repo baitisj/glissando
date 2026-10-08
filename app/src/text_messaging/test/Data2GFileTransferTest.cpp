@@ -172,6 +172,11 @@ void testSafeNames()
     CHECK(safeFileName("caf\xC3\xA9.txt") == "caf\xC3\xA9.txt");     // UTF-8 kept
     CHECK(safeFileName("bad\xFF\xC3.txt") == "bad.txt");             // not UTF-8: dropped
     CHECK(safeFileName("c1\xC2\x85" "ctl") == "c1ctl");              // NEL, a C1 control
+    // Direction controls, which could show another extension than the real one
+    CHECK(safeFileName("invoice\xE2\x80\xAE" "fdp.exe") == "invoicefdp.exe");      // U+202E
+    CHECK(safeFileName("a\xE2\x80\x8E" "b\xE2\x80\x8F" "c\xE2\x80\xAA.txt") == "abc.txt");
+    CHECK(safeFileName("x\xE2\x81\xA6" "y\xE2\x81\xA9.txt") == "xy.txt");       // isolates
+    CHECK(safeFileName("it\xE2\x80\x99s.txt") == "it\xE2\x80\x99s.txt");        // a quote is kept
     std::string longName(300, 'a');
     CHECK(safeFileName(longName).size() == (size_t)FILE_NAME_BYTES);
     // Cut where a character ends, not in the middle of one.
@@ -404,6 +409,86 @@ void testAutoAcceptNumbersAClash()
     CHECK(last(link.b, false).state == State::Asking && !last(link.b, false).autoAccepted);
 }
 
+FileRecord offerRecord(uint8_t number, uint8_t size, const std::string& name)
+{
+    FileRecord offer;
+    offer.type = (uint8_t)FileRecordType::Offer;
+    offer.body = {number, 0, 0, 0, size};
+    offer.body.insert(offer.body.end(), name.begin(), name.end());
+    return offer;
+}
+
+FileRecord dataRecord(uint8_t number, const std::string& bytes)
+{
+    FileRecord data;
+    data.type = (uint8_t)FileRecordType::Data;
+    data.body = {number};
+    data.body.insert(data.body.end(), bytes.begin(), bytes.end());
+    return data;
+}
+
+// A file of the operator's that happens to have the part file's name is
+// neither written over nor deleted.
+void testAPartFileOfTheOperatorsIsLeftAlone()
+{
+    Scratch scratch("own-part");
+    { std::ofstream(scratch.dir / "notes.part") << "mine"; }
+    FileTransferEngine b;
+    std::string error;
+    b.onRecord("W1AW", offerRecord(1, 3, "notes"), 1000);
+    CHECK(b.accept(last(b, false).id, scratch.path("notes"), error));
+    CHECK(readFile(scratch.path("notes.part")) == "mine");
+    CHECK(b.cancel(last(b, false).id));
+    CHECK(readFile(scratch.path("notes.part")) == "mine");
+    CHECK(!exists(scratch.path("notes.2.part")));
+
+    b.onRecord("W1AW", offerRecord(2, 3, "notes"), 1000);
+    CHECK(b.accept(last(b, false).id, scratch.path("notes"), error));
+    b.onRecord("W1AW", dataRecord(2, "abc"), 1000);
+    CHECK(last(b, false).state == State::Saved);
+    CHECK(readFile(scratch.path("notes")) == "abc");
+    CHECK(readFile(scratch.path("notes.part")) == "mine");
+}
+
+// Two files can't be saved under one name at once: the second is refused
+// and its offer left open.
+void testTwoFilesCantBeSavedAsOne()
+{
+    Scratch scratch("same-name");
+    FileTransferEngine b;
+    std::string error;
+    b.onRecord("W1AW", offerRecord(1, 3, "log.adi"), 1000);
+    uint64_t first = last(b, false).id;
+    b.onRecord("K1ABC", offerRecord(1, 3, "log.adi"), 1000);
+    uint64_t second = last(b, false).id;
+    CHECK(b.accept(first, scratch.path("log.adi"), error));
+    CHECK(!b.accept(second, scratch.path("log.adi"), error) && !error.empty());
+    CHECK(transferOf(b, second).state == State::Asking);
+    CHECK(b.accept(second, scratch.path("log2.adi"), error));
+    b.onRecord("K1ABC", dataRecord(1, "two"), 1000);
+    b.onRecord("W1AW", dataRecord(1, "one"), 1000);
+    CHECK(readFile(scratch.path("log.adi")) == "one" && readFile(scratch.path("log2.adi")) == "two");
+}
+
+// With every numbered name taken, a file from the auto-accept list is
+// asked about rather than written over one.
+void testAutoAcceptNeverOverwrites()
+{
+    Scratch scratch("auto-full");
+    { std::ofstream(scratch.dir / "beacon.txt") << "first"; }
+    for (int n = 2; n < 1000; n++)
+    {
+        std::ofstream(scratch.dir / ("beacon (" + std::to_string(n) + ").txt"));
+    }
+    FileTransferEngine b;
+    b.setAutoAccept(utf8FromPath(scratch.dir), {"W1AW"});
+    b.onRecord("W1AW", offerRecord(1, 3, "beacon.txt"), 1000);
+    FileTransfer got = last(b, false);
+    CHECK(got.state == State::Asking && !got.autoAccepted && !got.error.empty());
+    CHECK(readFile(scratch.path("beacon.txt")) == "first");
+    CHECK(!exists(scratch.path("beacon.txt.part")));
+}
+
 void testAHostileNameIsSavedSafely()
 {
     Scratch scratch("hostile");
@@ -512,6 +597,9 @@ int main()
     testOneFileAtATime();
     testAutoAcceptNumbersAClash();
     testAHostileNameIsSavedSafely();
+    testAPartFileOfTheOperatorsIsLeftAlone();
+    testTwoFilesCantBeSavedAsOne();
+    testAutoAcceptNeverOverwrites();
     testTheReceiverCantWrite();
     testMoreThanOfferedIsRefused();
     testReleasingTheStationCancelsHere();

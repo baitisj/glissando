@@ -1553,7 +1553,12 @@ void TextMessagingDialog::OnMenuClearMessages(wxCommandEvent&)
                                     [&keep](const TextMessage& message)
                                     { return std::find(keep.begin(), keep.end(), message.id) == keep.end(); }),
                      m_messages.end());
-    // Files still going stay too.
+    // Files still going stay too. The transport still lists the finished
+    // ones, so they are remembered as cleared.
+    for (const FileLine& line : m_fileLines)
+    {
+        if (!line.transfer.live()) m_clearedFiles.insert(line.transfer.id);
+    }
     m_fileLines.erase(std::remove_if(m_fileLines.begin(), m_fileLines.end(),
                                      [](const FileLine& line) { return !line.transfer.live(); }),
                       m_fileLines.end());
@@ -1972,10 +1977,7 @@ wxString TextMessagingDialog::fileLineHtml(const FileLine& line, const Palette& 
         case State::Cancelled: state = _("cancelled"); break;
         case State::CancelledThere: state = wxString::Format(_("cancelled by %s"), peer); break;
         case State::Expired: state = _("expired"); break;
-        case State::Failed:
-            state = _("failed");
-            if (!t.error.empty()) state += " (" + wxString::FromUTF8(t.error) + ")";
-            break;
+        case State::Failed: state = _("failed"); break;
         case State::FailedThere: state = wxString::Format(_("failed on %s's side"), peer); break;
         case State::NotSupported: state = _("failed: their Glissando can't take files"); break;
     }
@@ -2017,6 +2019,7 @@ void TextMessagingDialog::updateFileTransfers()
     bool incoming = false;
     for (const Data2G::FileTransfer& t : frame->chatFileTransfers())
     {
+        if (m_clearedFiles.count(t.id) != 0) continue;
         auto line = std::find_if(m_fileLines.begin(), m_fileLines.end(),
                                  [&](const FileLine& l) { return l.transfer.id == t.id; });
         if (line == m_fileLines.end())
@@ -2029,6 +2032,12 @@ void TextMessagingDialog::updateFileTransfers()
         }
         if (line->transfer.state != t.state || line->transfer.done != t.done || line->transfer.path != t.path)
         {
+            // The line says only "failed"; why goes to the status bar.
+            if (t.state == Data2G::FileTransfer::State::Failed && line->transfer.state != t.state && !t.error.empty())
+            {
+                setStatus(wxString::Format(_("%s failed: %s"), wxString::FromUTF8(t.name),
+                                           wxString::FromUTF8(t.error)));
+            }
             line->transfer = t;
             changed = true;
         }
@@ -2078,6 +2087,10 @@ void TextMessagingDialog::updateOfferBox()
     }
     m_offerBox->Show(offer != nullptr);
     Layout();
+    // The plate stretches, so showing the box doesn't resize it, and its
+    // own sizer has to be run to make room for the box.
+    m_offerBox->GetParent()->Layout();
+    m_offerBox->Layout();
 }
 
 // Save as...: the system's save dialog, in the received files folder with

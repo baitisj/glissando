@@ -37,6 +37,7 @@
 
 #include <ctime>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -272,6 +273,7 @@ private:
     std::vector<FileLine> m_fileLines;
     uint64_t m_fileChanges = 0;     // the transport's count when they were last read
     bool m_fileLinesRead = false;
+    std::set<uint64_t> m_clearedFiles; // finished ones Clear Messages took away, not to come back
     uint64_t m_menuTransferId = 0;  // the file line the chat log's menu was opened on; 0 for none
 
     // The box over the chat asking whether to save a file offered to us.

@@ -250,7 +250,6 @@ Data2GTransport::Data2GTransport()
     , sessionAcked_(0)
     , lastWriteBytes_(0)
     , bufferSeen_(false)
-    , bufferRose_(false)
     , bufferExact_(-1)
     , clock_(steadyMs)
     , stopping_(false)
@@ -548,7 +547,6 @@ void Data2GTransport::bufferLocked(int64_t count)
     if (sessionAcked_ >= sessionWritten_) return; // nothing of ours outstanding
 
     if (count > 0) bufferSeen_ = true;
-    if (count > previous) bufferRose_ = true;
 
     if (bufferExact_ < 0 && count > 0)
     {
@@ -574,16 +572,15 @@ void Data2GTransport::bufferLocked(int64_t count)
         read = std::max(read, sessionAcked_ + (uint64_t)count);
         sessionRead_ = std::max(sessionRead_, std::min(read, sessionWritten_));
         if (sessionRead_ >= (uint64_t)count) sessionAcked_ = std::max(sessionAcked_, sessionRead_ - (uint64_t)count);
+    }
 
-        // Nothing unacknowledged after the host was seen reading the last
-        // write: all of it (an acknowledgement that came between our write
-        // and its read leaves the counts short of that).
-        if (count == 0 && bufferRose_) sessionRead_ = sessionAcked_ = sessionWritten_;
-    }
-    else if (count == 0 && bufferSeen_)
-    {
-        sessionRead_ = sessionAcked_ = sessionWritten_;
-    }
+    // Nothing unacknowledged after a nonzero count since the last write:
+    // all of it. data2g-host answers every write with a count, which is
+    // never 0 (none of the write can have been acknowledged yet), so this
+    // also settles a write whose read was answered together with an
+    // acknowledgement bigger than it, which the counts above, seeing no
+    // rise, leave short.
+    if (count == 0 && bufferSeen_) sessionRead_ = sessionAcked_ = sessionWritten_;
 
     settleSessionLocked();
 }
@@ -621,7 +618,6 @@ void Data2GTransport::wroteLocked(uint64_t bytes)
     sessionWritten_ += bytes;
     lastWriteBytes_ = bytes;
     bufferSeen_ = false;
-    bufferRose_ = false;
     sessionActivityMs_ = now();
 }
 
@@ -903,7 +899,6 @@ void Data2GTransport::run(Settings settings)
                 sessionWritten_ = sessionRead_ = sessionAcked_ = 0;
                 lastWriteBytes_ = 0;
                 bufferSeen_ = false;
-                bufferRose_ = false;
                 status_.sessionUnacked = 0;
                 stream.reset();
                 if (log_) log_("Data2G session with " + sessionPeer_ + (weCalled ? " (we called)" : " (they called)"));
@@ -1279,7 +1274,11 @@ void Data2GTransport::run(Settings settings)
                 {
                     std::lock_guard<std::mutex> lock(mutex_);
                     sessionActivityMs_ = now();
-                    if (session_ == SessionState::Connected)
+                    // While we close it too: an offer that crossed our
+                    // DISCONNECT is shown, and fails with the session.
+                    bool open = session_ == SessionState::Connected ||
+                                (session_ == SessionState::Disconnecting && !sessionAborted_ && !sessionPeer_.empty());
+                    if (open)
                     {
                         for (const auto& record : fileRecords) files_.onRecord(sessionPeer_, record, now());
                     }

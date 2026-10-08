@@ -111,8 +111,10 @@ public:
     // if the file can't be sent.
     uint64_t offer(const std::string& peer, const std::string& path, uint64_t nowMs, std::string& error);
 
-    // Answers an offer: the file is written to path plus ".part", and
-    // renamed to path once all of it has come.
+    // Answers an offer: the file is written to path plus ".part" (or a
+    // numbered part file, if that name is taken), and renamed to path once
+    // all of it has come. Refused, the offer left open, if another
+    // transfer is being saved to path.
     bool accept(uint64_t id, const std::string& path, std::string& error);
     bool decline(uint64_t id);
 
@@ -181,6 +183,7 @@ private:
         uint64_t sinceMs = 0;       // Waiting: since queued; Offered and Asking: since offered
         std::ifstream in;           // ours, once accepted
         std::ofstream out;          // theirs, once accepted
+        std::filesystem::path part; // where out writes, while it does
         uint64_t written = 0;       // ours: bytes of the file written into the session
         std::deque<std::pair<uint64_t, uint64_t>> pieceEnds; // stream offset a piece ends at, file bytes to there
     };
@@ -191,6 +194,7 @@ private:
     void queueRecord(const std::string& peer, FileRecordType type, const std::vector<uint8_t>& body);
     void queueCancel(Entry& entry, CancelReason reason);
     void finish(Entry& entry, FileTransfer::State state, const std::string& error = std::string());
+    std::filesystem::path freePart(const std::string& path) const;
     bool openPart(Entry& entry, const std::string& path, std::string& error);
     void receivePiece(Entry& entry, const uint8_t* bytes, size_t length);
     void completeReceive(Entry& entry);

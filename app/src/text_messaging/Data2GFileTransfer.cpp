@@ -74,7 +74,7 @@ std::vector<uint8_t> numbered(uint8_t number)
 }
 
 // A name in the folder that neither a file nor a part file has taken:
-// the name offered, or "name (2).ext" and so on.
+// the name offered, or "name (2).ext" and so on; empty if none is free.
 std::filesystem::path freePath(const std::filesystem::path& folder, const std::string& name)
 {
     std::filesystem::path wanted = folder / pathFromUtf8(name);
@@ -95,7 +95,7 @@ std::filesystem::path freePath(const std::filesystem::path& folder, const std::s
         candidate += extension;
         if (!taken(candidate)) return candidate;
     }
-    return wanted;
+    return std::filesystem::path();
 }
 
 } // namespace
@@ -134,6 +134,15 @@ std::string safeFileName(const std::string& offered)
         bool control = c < 0x20 || c == 0x7F ||
                        (length == 2 && c == 0xC2 && (unsigned char)last[at + 1] < 0xA0); // C1 controls
         bool refused = length == 1 && std::string("<>:\"|?*").find((char)c) != std::string::npos;
+        // Direction marks, embeddings, overrides and isolates, which would
+        // let a name show another extension than it has.
+        if (length == 3 && c == 0xE2)
+        {
+            unsigned char c1 = (unsigned char)last[at + 1], c2 = (unsigned char)last[at + 2];
+            bool marks = c1 == 0x80 && (c2 == 0x8E || c2 == 0x8F || (c2 >= 0xAA && c2 <= 0xAE)); // U+200E-F, U+202A-E
+            bool isolates = c1 == 0x81 && c2 >= 0xA6 && c2 <= 0xA9;                             // U+2066-9
+            refused = refused || marks || isolates;
+        }
         if (!control && !refused) clean.append(last, at, length);
         at += length;
     }
@@ -225,10 +234,9 @@ void FileTransferEngine::finish(Entry& entry, FileTransfer::State state, const s
     {
         entry.out.close();
         std::error_code ec;
-        std::filesystem::path part = pathFromUtf8(t.path);
-        part += ".part";
-        std::filesystem::remove(part, ec);
+        std::filesystem::remove(entry.part, ec);
     }
+    entry.part.clear();
     entry.pieceEnds.clear();
     changed();
 }
@@ -304,17 +312,39 @@ uint64_t FileTransferEngine::offer(const std::string& peer, const std::string& p
     return id;
 }
 
+// "<path>.part", or "<path>.2.part" and so on when a file of that name is
+// there already or another transfer is writing it; empty if none is free.
+std::filesystem::path FileTransferEngine::freePart(const std::string& path) const
+{
+    for (int n = 1; n < 1000; n++)
+    {
+        std::filesystem::path part = pathFromUtf8(path);
+        if (n > 1) part += "." + std::to_string(n);
+        part += ".part";
+        std::error_code ec;
+        bool taken = std::filesystem::exists(part, ec) ||
+                     std::any_of(entries_.begin(), entries_.end(), [&](const Entry& e) { return e.part == part; });
+        if (!taken) return part;
+    }
+    return std::filesystem::path();
+}
+
 bool FileTransferEngine::openPart(Entry& entry, const std::string& path, std::string& error)
 {
     FileTransfer& t = entry.transfer;
-    std::filesystem::path part = pathFromUtf8(path);
-    part += ".part";
+    std::filesystem::path part = freePart(path);
+    if (part.empty())
+    {
+        error = "No part file could be made beside \"" + path + "\".";
+        return false;
+    }
     entry.out.open(part, std::ios::binary | std::ios::trunc);
     if (!entry.out)
     {
         error = "\"" + utf8FromPath(part) + "\" could not be written.";
         return false;
     }
+    entry.part = part;
     t.path = path;
     t.done = 0;
     t.state = FileTransfer::State::Receiving;
@@ -335,6 +365,16 @@ bool FileTransferEngine::accept(uint64_t id, const std::string& path, std::strin
                     ? "The offer has expired."
                     : "The offer is no longer open.";
         return false;
+    }
+    for (const Entry& other : entries_)
+    {
+        const FileTransfer& o = other.transfer;
+        if (&other != entry && !o.outgoing && o.state == FileTransfer::State::Receiving && o.path == path)
+        {
+            // Left open, for another name.
+            error = "Another file is being saved as \"" + path + "\".";
+            return false;
+        }
     }
     if (openPart(*entry, path, error)) return true;
 
@@ -501,9 +541,10 @@ void FileTransferEngine::autoAccept(Entry& entry)
     std::error_code ec;
     std::filesystem::path folder = pathFromUtf8(autoFolder_);
     std::filesystem::create_directories(folder, ec);
-    std::string path = utf8FromPath(freePath(folder, entry.transfer.name));
-    std::string error;
-    if (openPart(entry, path, error))
+    std::filesystem::path chosen = freePath(folder, entry.transfer.name);
+    std::string path = utf8FromPath(chosen);
+    std::string error = "No free name for \"" + entry.transfer.name + "\" in \"" + autoFolder_ + "\".";
+    if (!chosen.empty() && openPart(entry, path, error))
     {
         entry.transfer.autoAccepted = true;
     }
@@ -626,7 +667,7 @@ void FileTransferEngine::receivePiece(Entry& entry, const uint8_t* bytes, size_t
     if (!entry.out)
     {
         queueCancel(entry, CancelReason::ReceiverFailed);
-        finish(entry, FileTransfer::State::Failed, "\"" + t.path + ".part\" could not be written.");
+        finish(entry, FileTransfer::State::Failed, "\"" + utf8FromPath(entry.part) + "\" could not be written.");
         return;
     }
     t.done += length;
@@ -643,8 +684,7 @@ void FileTransferEngine::completeReceive(Entry& entry)
     bool written = !entry.out.fail();
 
     std::filesystem::path final = pathFromUtf8(t.path);
-    std::filesystem::path part = final;
-    part += ".part";
+    std::filesystem::path part = entry.part;
     std::error_code ec;
     if (written)
     {
