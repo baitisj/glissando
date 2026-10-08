@@ -111,6 +111,13 @@ public:
 
     void clear();
 
+    // Whether chat goes through Data2G rather than our own modem. Going
+    // over, the screen switches off like an old television, the picture
+    // squeezing to a line and then a dot, and shows a little scene while
+    // Data2G has the chat; coming back, the waterfall returns warped and
+    // wobbling and settles straight. Only the drawing changes.
+    void setData2G(bool on);
+
     // Smoke seeping out all round the screen, 0 for none to 1 at its
     // thickest: an easter egg for a transmitter kept keyed too long (see
     // SmokeGauge). Even at its thickest it is faint.
@@ -179,8 +186,16 @@ private:
     void renderTrace(wxImage& image);
     void paintHeard(wxGraphicsContext* gc, const wxRect& trace);
 
-    // Lights the fires when smoke starts, lets off puffs while there is
-    // any, forgets the ones gone, and stops its timer once the last has.
+    // The television effects for Data2G (see setData2G()): which one is
+    // showing, and how far into it.
+    enum class Tv { Normal, SwitchingOff, Scene, WarmingUp };
+    Tv tvState(double now, double& seconds) const;
+    void switchOffTrace(wxImage& image, double seconds) const;
+    void warpTrace(wxImage& image, double seconds) const;
+    void paintTv(wxGraphicsContext* gc, const wxRect& trace, Tv tv, double seconds);
+
+    // Lets off puffs of smoke while there is any, forgets the ones gone,
+    // and stops its timer once the last has.
     void tickSmoke();
     void paintSmoke(wxGraphicsContext* gc, const wxRect& trace);
 
@@ -290,6 +305,10 @@ private:
         double driftX = 0.0;        // and how fast it is still drifting from that, pixels a second
         double driftY = 0.0;
     };
+    wxTimer tvTimer_;
+    bool data2g_ = false;
+    double tvSwitchedAt_ = -1e9;    // steady clock seconds, when data2g_ last changed
+
     wxTimer smokeTimer_;
     double smoke_ = 0.0;
     unsigned puffSerial_ = 0;

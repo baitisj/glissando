@@ -66,6 +66,15 @@ constexpr double PUFF_EVERY = 0.09;
 constexpr double PUFF_ALPHA = 60.0;
 constexpr int SMOKE_FRAME_MS = 100;
 
+// The television effects for Data2G: the picture squeezes to a line by
+// TV_LINE seconds, the line to a dot by TV_DOT, and the dot fades by TV_OFF;
+// coming back, the waterfall's wobble dies away over TV_WARM.
+constexpr double TV_LINE = 0.35;
+constexpr double TV_DOT = 0.6;
+constexpr double TV_OFF = 1.4;
+constexpr double TV_WARM = 2.5;
+constexpr int TV_FRAME_MS = 50;
+
 // Frames queued to be sent but still not played this long after we last
 // transmitted were never going to be (the burst was dropped).
 constexpr double SENT_STALE_SECONDS = 20.0;
@@ -85,6 +94,46 @@ const char* const ROCKET[] = {
     "X..XXX..X",
     "...rrr...",
     "....r....",
+};
+
+// A cat, sitting facing us, in two frames for its tail.
+const char* const CAT[] = {
+    "..X.....X....",
+    "..XX...XX....",
+    "..XXXXXXX....",
+    ".XX.XXX.XX...",
+    ".XXXXXXXXX...",
+    ".XXXX.XXXX...",
+    "..XXXXXXX....",
+    "..XXXXXXX..X.",
+    ".XXXXXXXXX.X.",
+    ".XXXXXXXXX..X",
+    ".XXXXXXXXXXX.",
+    ".XX.XX.XX....",
+};
+
+const char* const CAT_TAIL_UP[] = {
+    "..X.....X....",
+    "..XX...XX....",
+    "..XXXXXXX....",
+    ".XX.XXX.XX...",
+    ".XXXXXXXXX...",
+    ".XXXX.XXXX...",
+    "..XXXXXXX...X",
+    "..XXXXXXX...X",
+    ".XXXXXXXXX..X",
+    ".XXXXXXXXX.X.",
+    ".XXXXXXXXXX..",
+    ".XX.XX.XX....",
+};
+
+// DORC glasses (the Digital Oddballs Radio Club's): heavy black horn-rims
+// with white tape round the bridge, sized for the cat's eyes; r is the tape.
+const char* const DORC_GLASSES[] = {
+    "XXXXXXrXXXXXX",
+    "XX...XrX...XX",
+    ".X...XrX...X.",
+    "..XXX...XXX..",
 };
 
 const char* const CRAB[] = {
@@ -153,6 +202,7 @@ GlissandoScope::GlissandoScope(wxWindow* parent, wxWindowID id)
     , rowsSinceStamp_(1 << 20)
     , rowsGathering_(0)
     , shipSerial_(0)
+    , tvTimer_(this)
     , smokeTimer_(this)
 {
     SetBackgroundStyle(wxBG_STYLE_PAINT);
@@ -253,6 +303,221 @@ double GlissandoScope::seepDensity(const Fire& fire, double along, double now)
                0.12 * std::sin(9.7 * along + 0.83 * t + 3.0 * fire.phase);
     d *= 1.0 - along * along * along * along;
     return std::clamp(d, 0.0, 1.0);
+}
+
+void GlissandoScope::setData2G(bool on)
+{
+    if (on == data2g_) return;
+    data2g_ = on;
+    tvSwitchedAt_ = steadySeconds();
+    tvTimer_.Start(TV_FRAME_MS);
+    Refresh(false);
+}
+
+GlissandoScope::Tv GlissandoScope::tvState(double now, double& seconds) const
+{
+    seconds = now - tvSwitchedAt_;
+    if (data2g_) return seconds < TV_OFF ? Tv::SwitchingOff : Tv::Scene;
+    return seconds < TV_WARM ? Tv::WarmingUp : Tv::Normal;
+}
+
+void GlissandoScope::switchOffTrace(wxImage& image, double seconds) const
+{
+    // The picture squeezes to a bright line across the middle as the
+    // deflection collapses; after that the screen is dark but for the line
+    // and dot paintTv() draws.
+    int w = image.GetWidth(), h = image.GetHeight();
+    if (seconds >= TV_LINE || w <= 0 || h <= 0)
+    {
+        image.Clear(0);
+        return;
+    }
+    double p = seconds / TV_LINE;
+    int squeezed = std::max(2, (int)std::lround(h * (1.0 - p) * (1.0 - p)));
+    wxImage small = image.Scale(w, squeezed, wxIMAGE_QUALITY_NORMAL);
+    image.Clear(0);
+    unsigned char* in = small.GetData();
+    unsigned char* out = image.GetData();
+    int top = (h - squeezed) / 2;
+    double brighten = 0.7 * p;
+    for (int y = 0; y < squeezed; y++)
+    {
+        for (int x = 0; x < w; x++)
+        {
+            for (int c = 0; c < 3; c++)
+            {
+                double v = in[(y * w + x) * 3 + c];
+                out[((top + y) * w + x) * 3 + c] = (unsigned char)std::lround(v + (255.0 - v) * brighten);
+            }
+        }
+    }
+}
+
+void GlissandoScope::warpTrace(wxImage& image, double seconds) const
+{
+    // The waterfall coming back on: each row pushed sideways by a wave that
+    // rolls down the screen, wobbling less and less until it is straight.
+    int w = image.GetWidth(), h = image.GetHeight();
+    if (w <= 0 || h <= 0) return;
+    double settle = 1.0 - std::clamp(seconds / TV_WARM, 0.0, 1.0);
+    double amplitude = 22.0 * settle * settle;
+    if (amplitude < 0.5) return;
+    std::vector<unsigned char> row((size_t)w * 3);
+    unsigned char* data = image.GetData();
+    for (int y = 0; y < h; y++)
+    {
+        int shift = (int)std::lround(amplitude * std::sin(0.045 * y - 9.0 * seconds) +
+                                     0.4 * amplitude * std::sin(0.13 * y + 5.0 * seconds));
+        if (shift == 0) continue;
+        unsigned char* line = data + (size_t)y * w * 3;
+        std::copy(line, line + (size_t)w * 3, row.begin());
+        for (int x = 0; x < w; x++)
+        {
+            int from = x - shift;
+            for (int c = 0; c < 3; c++)
+                line[x * 3 + c] = from >= 0 && from < w ? row[(size_t)from * 3 + c] : 0;
+        }
+    }
+}
+
+void GlissandoScope::paintTv(wxGraphicsContext* gc, const wxRect& trace, Tv tv, double seconds)
+{
+    double cx = trace.x + trace.width / 2.0, cy = trace.y + trace.height / 2.0;
+    gc->SetPen(*wxTRANSPARENT_PEN);
+
+    if (tv == Tv::SwitchingOff)
+    {
+        if (seconds < TV_LINE) return;
+        if (seconds < TV_DOT)
+        {
+            // The line shrinks in from both ends to the middle.
+            double q = (seconds - TV_LINE) / (TV_DOT - TV_LINE);
+            double half = std::max(2.0, trace.width / 2.0 * (1.0 - q) * (1.0 - q));
+            gc->SetBrush(gc->CreateLinearGradientBrush(cx, cy - 6, cx, cy, wxColour(255, 255, 255, 0),
+                                                       wxColour(255, 255, 255, 120)));
+            gc->DrawRectangle(cx - half, cy - 6, 2 * half, 6);
+            gc->SetBrush(gc->CreateLinearGradientBrush(cx, cy, cx, cy + 6, wxColour(255, 255, 255, 120),
+                                                       wxColour(255, 255, 255, 0)));
+            gc->DrawRectangle(cx - half, cy, 2 * half, 6);
+            gc->SetBrush(wxBrush(wxColour(255, 255, 255)));
+            gc->DrawRectangle(cx - half, cy - 1, 2 * half, 2);
+            return;
+        }
+        // And the dot glows on a moment, fading as it shrinks.
+        double r = (seconds - TV_DOT) / (TV_OFF - TV_DOT);
+        double radius = 9.0 * (1.0 - r) + 1.0;
+        unsigned char a = (unsigned char)std::lround(255.0 * (1.0 - r));
+        gc->SetBrush(gc->CreateRadialGradientBrush(cx, cy, cx, cy, radius, wxColour(255, 255, 255, a),
+                                                   wxColour(255, 255, 255, 0)));
+        gc->DrawEllipse(cx - radius, cy - radius, 2 * radius, 2 * radius);
+        return;
+    }
+
+    // The scene while Data2G has the chat: invaders marching to and fro
+    // across the top, a cat sitting below them, and every so often a pair
+    // of DORC glasses lowered onto the cat.
+    double s = seconds - TV_OFF;
+    int fade = (int)std::lround(255.0 * std::min(1.0, s / 1.0));
+
+    auto drawSprite = [gc](const Sprite& sp, double x, double y, double px, const wxColour& lit,
+                           const wxColour& dim) {
+        for (int row = 0; row < sp.height; row++)
+        {
+            for (int col = 0; col < sp.width(); col++)
+            {
+                char c = sp.lines[row][col];
+                if (c == '.') continue;
+                gc->SetBrush(wxBrush(c == 'X' ? lit : dim));
+                gc->DrawRectangle(x + col * px, y + row * px, px - 0.5, px - 0.5);
+            }
+        }
+    };
+    auto phosphor = [fade](int a) { return wxColour(225, 232, 228, (unsigned char)(a * fade / 255)); };
+
+    // Scan lines, faintly.
+    gc->SetBrush(wxBrush(wxColour(255, 255, 255, (unsigned char)(6 * fade / 255))));
+    for (int y = trace.y; y < trace.y + trace.height; y += 3) gc->DrawRectangle(trace.x, y, trace.width, 1);
+
+    // The invaders step sideways twice a second, and each time they reach
+    // a side they step down a little, until they start again at the top.
+    double px = std::max(2.0, std::floor(trace.width / 150.0));
+    const int ACROSS = 6;
+    double spacing = 16.0 * px;
+    double swing = std::max(0.0, trace.width - ACROSS * spacing - 4.0 * px);
+    int steps = std::max(1, (int)(swing / (2.0 * px)));
+    int step = (int)std::floor(s * 2.0);
+    int pass = step / steps;
+    int along = step % steps;
+    double offset = (pass % 2 ? steps - along : along) * 2.0 * px;
+    double drop = (pass % 6) * 3.0 * px;
+    for (int i = 0; i < ACROSS; i++)
+    {
+        Sprite sp = (i + step) % 2 ? sprite(CRAB) : sprite(SQUID);
+        drawSprite(sp, trace.x + 2.0 * px + offset + i * spacing + (11 - sp.width()) * px / 2.0,
+                   trace.y + 12.0 + drop, px, phosphor(200), phosphor(110));
+    }
+
+    // The cat, bigger, at the bottom middle, its tail flicking now and then.
+    double catPx = 2.0 * px;
+    Sprite cat = std::fmod(s, 3.0) < 0.4 ? sprite(CAT_TAIL_UP) : sprite(CAT);
+    double catX = cx - cat.width() * catPx / 2.0;
+    double catY = trace.y + trace.height - cat.height * catPx - 14.0;
+    drawSprite(cat, catX, catY, catPx, phosphor(170), phosphor(90));
+
+    // The glasses, once every 12 s: lowered slowly from the top onto the
+    // cat's eyes, worn a while with a nod to the club, and whisked away again.
+    double cycle = std::fmod(s, 12.0);
+    double eyesY = catY + 2.0 * catPx;
+    if (cycle > 3.0)
+    {
+        double t = cycle - 3.0;
+        double top = trace.y - 3.0 * catPx;
+        double y;
+        if (t < 3.0)
+            y = top + (eyesY - top) * (t / 3.0);
+        else if (t < 7.5)
+            y = eyesY;
+        else
+            y = eyesY - (eyesY - top) * std::min(1.0, (t - 7.5) / 0.4);
+        // Black frames on a black screen: a faint glow round them shows
+        // them coming down. They're wider than the cat's head, as they
+        // should be, so they sit a cell to its left.
+        Sprite glasses = sprite(DORC_GLASSES);
+        double gx = catX - catPx;
+        double glow = 0.3 * catPx;
+        for (int pass = 0; pass < 2; pass++)
+        {
+            for (int row = 0; row < glasses.height; row++)
+            {
+                for (int col = 0; col < glasses.width(); col++)
+                {
+                    char c = glasses.lines[row][col];
+                    if (c == '.') continue;
+                    double grow = pass == 0 ? glow : 0.0;
+                    gc->SetBrush(wxBrush(pass == 0 ? phosphor(120)
+                                         : c == 'r' ? phosphor(255)
+                                                    : wxColour(12, 12, 12, (unsigned char)fade)));
+                    gc->DrawRectangle(gx + col * catPx - grow, y + row * catPx - grow, catPx + 2 * grow,
+                                      catPx + 2 * grow);
+                }
+            }
+        }
+        if (t >= 3.0 && t < 7.5)
+        {
+            gc->SetFont(captionTextFont(), phosphor(220));
+            wxString club = _("DIGITAL ODDBALLS RADIO CLUB");
+            double tw = 0, th = 0;
+            gc->GetTextExtent(club, &tw, &th);
+            gc->DrawText(club, cx - tw / 2.0, catY - th - 6.0);
+        }
+    }
+
+    // And who has the chat.
+    gc->SetFont(captionTextFont(), phosphor(150));
+    wxString caption = _("CHAT IS ON DATA2G");
+    double tw = 0, th = 0;
+    gc->GetTextExtent(caption, &tw, &th);
+    gc->DrawText(caption, cx - tw / 2.0, cy - th / 2.0);
 }
 
 void GlissandoScope::setSmoke(double level)
@@ -716,6 +981,13 @@ void GlissandoScope::OnTimer(wxTimerEvent& event)
         tickSmoke();
         return;
     }
+    if (&event.GetTimer() == &tvTimer_)
+    {
+        double seconds = 0.0;
+        if (tvState(steadySeconds(), seconds) == Tv::Normal) tvTimer_.Stop();
+        Refresh(false);
+        return;
+    }
 
     advanceSent(steadySeconds());
     addRow();
@@ -846,13 +1118,21 @@ void GlissandoScope::OnPaint(wxPaintEvent&)
     dc.Clear();
 
     wxRect trace = traceRect();
+    double tvSeconds = 0.0;
+    Tv tv = tvState(steadySeconds(), tvSeconds);
+    bool tvShow = tv == Tv::SwitchingOff || tv == Tv::Scene;
 
     // The trace itself, blitted as an image: phosphor white with a faint
     // blue-grey tint in the dark, like an old cathode ray tube.
     if (traceWidth_ == trace.width && traceHeight_ == trace.height && traceWidth_ > 0 && traceHeight_ > 0)
     {
         wxImage image(traceWidth_, traceHeight_, false);
-        renderTrace(image);
+        if (tv == Tv::Scene)
+            image.Clear(0);
+        else
+            renderTrace(image);
+        if (tv == Tv::SwitchingOff) switchOffTrace(image, tvSeconds);
+        if (tv == Tv::WarmingUp) warpTrace(image, tvSeconds);
         dc.DrawBitmap(wxBitmap(image), trace.x, trace.y);
     }
 
@@ -868,9 +1148,13 @@ void GlissandoScope::OnPaint(wxPaintEvent&)
 
     gc->Clip(trace.x, trace.y, trace.width, trace.height);
 
+    // While Data2G has the chat, the screen is its own: none of the staff,
+    // flare, lens or frames.
+    if (tvShow) paintTv(gc.get(), trace, tv, tvSeconds);
+
     // The staff: the receiver's search band around each note, shaded, and
     // the note itself as a dotted line.
-    for (size_t i = 0; i < notes_.size(); i++)
+    for (size_t i = 0; !tvShow && i < notes_.size(); i++)
     {
         int x0 = hzToX(notes_[i] - searchHalfWidthHz_);
         int x1 = hzToX(notes_[i] + searchHalfWidthHz_);
@@ -885,7 +1169,7 @@ void GlissandoScope::OnPaint(wxPaintEvent&)
 
     // Activity: a band across the top edge, like the screen flaring; white
     // while hearing a frame, red while on the air.
-    if (receiving_ || transmitting_)
+    if (!tvShow && (receiving_ || transmitting_))
     {
         wxColour flare = transmitting_ ? Colour::Alarm : wxColour(255, 255, 255);
         gc->SetPen(*wxTRANSPARENT_PEN);
@@ -898,7 +1182,7 @@ void GlissandoScope::OnPaint(wxPaintEvent&)
 
     // The lens: a sheen of glass over the magnified rows, and its rim
     // where the scale passes one row a pixel and starts to squeeze.
-    if (lens_)
+    if (lens_ && !tvShow)
     {
         double rimAge = lensTau_ * std::sqrt(LENS_MAGNIFICATION * LENS_MAGNIFICATION - 1.0);
         double rim = trace.y + ageToY(rimAge);
@@ -927,9 +1211,9 @@ void GlissandoScope::OnPaint(wxPaintEvent&)
         gc->DrawText(label, x1 - tw - 8, rim - th - 8);
     }
 
-    paintHeard(gc.get(), trace);
+    if (!tvShow) paintHeard(gc.get(), trace);
 
-    if (hoverX_ >= 0)
+    if (hoverX_ >= 0 && !tvShow)
     {
         gc->SetPen(wxPen(wxColour(255, 255, 255, 140), 1));
         gc->StrokeLine(hoverX_, trace.y, hoverX_, trace.y + trace.height);
