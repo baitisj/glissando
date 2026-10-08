@@ -15,7 +15,7 @@ endif()
 set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum OS X deployment version")
 
 set(PROJECT_NAME Glissando)
-set(PROJECT_VERSION 0.5.0)
+set(PROJECT_VERSION 0.6.0)
 set(PROJECT_DESCRIPTION "Chirp text chat for HF amateur radio")
 set(PROJECT_HOMEPAGE_URL "https://github.com/baitisj/glissando")
 
