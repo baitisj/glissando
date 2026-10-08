@@ -618,7 +618,8 @@ void TextMessagingDialog::buildControls()
     m_chkAutoReply->SetChecked(TextMessagingSession::instance().protocol().autoReplyEnabled());
     m_chkAutoReply->SetToolTip(
         _("When lit, this station transmits on its own to confirm messages and answer pings. "
-          "When dark, its messages and pings say so, and other stations send to it once without retrying."));
+          "When dark, its messages and pings say so, and other stations send to it once without retrying. "
+          "In a Data2G session the modem confirms everything itself, so this makes no difference there."));
     bottomSizer->Add(m_chkAutoReply, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 10);
 
     m_txtStatus = new WrappingText(transmitPlate);
@@ -961,9 +962,21 @@ void TextMessagingDialog::updateSelectionControls()
 
     if (callsign != m_mapPick)
     {
+        std::string released = m_mapPick;
         m_mapPick = callsign;
         TextMessagingSession::instance().protocol().setMapSelection(callsign);
         if (uiLogEnabled()) log_info("UI: map follows \"%s\"", callsign.c_str());
+
+        // Letting go of a station ends a Data2G session with it, so the
+        // group is free again, and drops what is still outstanding for it.
+        // Over any other modem this changes nothing.
+        int dropped = released.empty() ? 0 : TextMessagingSession::instance().protocol().releaseStation(released);
+        if (dropped > 0)
+        {
+            setStatus(wxString::Format(wxPLURAL("%d message to %s aborted.", "%d messages to %s aborted.", dropped),
+                                       dropped, wxString::FromUTF8(released)));
+            if (uiLogEnabled()) log_info("UI: %s deselected, %d outstanding dropped", released.c_str(), dropped);
+        }
     }
 
     bool pingable = selected && m_inhibitReason.empty();
@@ -1304,11 +1317,12 @@ void TextMessagingDialog::OnChatContextMenu(wxContextMenuEvent& event)
     {
         menu.Append(ID_MENU_REMOVE_MESSAGE, _("Remove from Queue"));
 
-        // A message with a countdown chip can go out at a tempo of its own.
+        // A message with a countdown chip can go out at a tempo of its own,
+        // unless it goes through a Data2G session, which picks its own speed.
         MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
         int current = frame != nullptr ? frame->chatTransmitGear() : 0;
         auto bar = m_queueBars.find(m_menuMessageId);
-        if (current != 0 && bar != m_queueBars.end())
+        if (current != 0 && bar != m_queueBars.end() && bar->second.gear != 0)
         {
             wxMenu* tempos = new wxMenu;
             for (int gear = Glissando::MIN_GEAR; gear <= Glissando::MAX_GEAR; gear++)
@@ -1585,9 +1599,11 @@ void TextMessagingDialog::updateQueueBars()
                        ? (int)std::lround((double)QUEUE_BAR_WIDTH * (double)bar.remainingMs / (double)bar.totalMs)
                        : 0;
         // The tempo it keys at: its own, or whatever the console or Auto
-        // shift picks by then, shown as it stands now.
-        int gear = current == 0 ? 0 : wait.gear != 0 ? wait.gear : current;
-        bool chosen = current != 0 && wait.gear != 0;
+        // shift picks by then, shown as it stands now. None through a Data2G
+        // session, which picks its own speed.
+        bool tempo = current != 0 && !wait.reliableLink;
+        int gear = !tempo ? 0 : wait.gear != 0 ? wait.gear : current;
+        bool chosen = tempo && wait.gear != 0;
         if (fresh || fill != bar.fillPixels || bar.channelBusy != old->second.channelBusy || gear != bar.gear ||
             chosen != bar.tempoChosen)
         {

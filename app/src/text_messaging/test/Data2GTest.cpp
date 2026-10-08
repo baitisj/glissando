@@ -241,6 +241,14 @@ public:
         std::vector<std::string> commands;      // every command line heard
         std::vector<std::string> burstModes;    // the mode of every GLISS burst sent
         int sessionBursts = 0;
+
+        // Session bytes written to this side and not yet acknowledged by
+        // the far end. With exactBuffer, BUFFER counts them as Data2G does
+        // for a CHAT ON client since its PR #51; without, it says 1 for any,
+        // as before. holdAcks keeps them until the test lets them through.
+        std::vector<uint8_t> unacked;
+        bool exactBuffer = true;
+        bool holdAcks = false;
         Data2G::KissDecoder kiss;
         Data2G::LineSplitter lines;
     };
@@ -320,6 +328,38 @@ public:
             close(sides[side].client[1]);
             sides[side].client[1] = -1;
             closeGroup(sides[side]);
+            return 0;
+        });
+    }
+
+    // The far end's modem takes in and acknowledges the first n bytes
+    // waiting on this side.
+    void ackSome(int side, size_t n)
+    {
+        with([&]() {
+            deliverPending(side, n);
+            return 0;
+        });
+    }
+
+    size_t unackedBytes(int side)
+    {
+        return with([&]() { return sides[side].unacked.size(); });
+    }
+
+    // The link fails: both ends are told, what was unacknowledged is gone,
+    // and the host, listening again, reports an empty buffer.
+    void loseSession()
+    {
+        with([&]() {
+            if (sessionWith < 0) return 0;
+            for (Side& side : sides)
+            {
+                say(side, "DISCONNECTED");
+                side.unacked.clear();
+                say(side, "BUFFER 0");
+            }
+            sessionWith = -1;
             return 0;
         });
     }
@@ -482,17 +522,35 @@ private:
         for (uint16_t tag : tags) sendBytes(side.client[0], Data2G::kissEncodeAckMode(side.groupPort, tag, {}));
     }
 
+    void sayBuffer(Side& side)
+    {
+        size_t n = side.unacked.size();
+        say(side, "BUFFER " + std::to_string(side.exactBuffer ? n : std::min<size_t>(n, 1)));
+    }
+
     void dataIn(int s, const uint8_t* bytes, int length)
     {
         Side& side = sides[s];
-        Side& other = sides[1 - s];
         if (sessionWith < 0) return;
-        say(side, "BUFFER " + std::to_string(length));
+        side.unacked.insert(side.unacked.end(), bytes, bytes + length);
+        sayBuffer(side); // data2g-host answers every write with one
+        if (!side.holdAcks) deliverPending(s, side.unacked.size());
+    }
+
+    // A burst carrying the first n waiting bytes, and the far end's
+    // acknowledgement of them.
+    void deliverPending(int s, size_t n)
+    {
+        Side& side = sides[s];
+        Side& other = sides[1 - s];
+        n = std::min(n, side.unacked.size());
+        if (n == 0 || sessionWith < 0) return;
         say(side, "PTT ON");
-        sendBytes(other.client[2], std::vector<uint8_t>(bytes, bytes + length));
+        sendBytes(other.client[2], std::vector<uint8_t>(side.unacked.begin(), side.unacked.begin() + (long)n));
         say(side, "PTT OFF");
-        say(side, "BUFFER 0");
+        side.unacked.erase(side.unacked.begin(), side.unacked.begin() + (long)n);
         side.sessionBursts++;
+        sayBuffer(side);
     }
 
     void run()
@@ -585,6 +643,33 @@ public:
     }
     void onStationsChanged() override {}
 
+    MessageStatus statusOf(int64_t id)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        MessageStatus status = MessageStatus::Queued;
+        for (const TextMessage& m : updated)
+        {
+            if (m.id == id) status = m.status;
+        }
+        return status;
+    }
+
+    int64_t lastAddedId()
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        return added.empty() ? 0 : added.back().id;
+    }
+
+    bool sawSystemLine(const std::string& text)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        for (const TextMessage& m : added)
+        {
+            if (m.kind == MessageKind::System && m.text.find(text) != std::string::npos) return true;
+        }
+        return false;
+    }
+
     bool sawStatus(MessageStatus status)
     {
         std::lock_guard<std::mutex> lock(mutex);
@@ -624,13 +709,12 @@ struct Station
         protocol.setMyCallsign(callsign);
         protocol.setClocks([this]() { return nowMs.load(); }, []() { return (std::time_t)1750000000; });
         transport.setClock([this]() { return nowMs.load(); });
-        transport.setFrameCallback(
-            [this](const Frame& frame, float snr) { protocol.onFrameReceived(frame, snr); });
+        transport.setFrameCallback([this](const Frame& frame, float snr, bool viaSession)
+                                   { protocol.onFrameReceived(frame, snr, viaSession); });
         transport.setMyCallsign(callsign);
         transport.setGear(gear);
         protocol.setAirTiming(transport.airTiming());
 
-        Data2GTransport::Settings settings;
         settings.kissPort = host.kissPort;
         settings.commandPort = host.commandPort;
         settings.useSessions = useSessions;
@@ -638,6 +722,8 @@ struct Station
     }
 
     ~Station() { transport.stop(); }
+
+    Data2GTransport::Settings settings;
 
     void step(uint64_t ms = 100)
     {
@@ -736,17 +822,232 @@ void testDirectedMessageGoesThroughASession()
     CHECK(got.size() == 1 && got[0].text == "Hello through a session");
     CHECK(hosts.heardCommand(0, "CONNECT W1AW VK3ABC"));
     CHECK(hosts.with([&]() { return hosts.sides[0].sessionBursts; }) == 1);  // the message
-    CHECK(hosts.with([&]() { return hosts.sides[1].sessionBursts; }) == 1);  // its acknowledgement
+    CHECK(hosts.with([&]() { return hosts.sides[1].sessionBursts; }) == 0);  // the modem acknowledged it
     CHECK(hosts.with([&]() { return hosts.sides[0].burstModes.size() + hosts.sides[1].burstModes.size(); }) == 0);
+    CHECK(!a.observer.sawStatus(MessageStatus::AwaitingAck));
+    CHECK(!hosts.heardCommand(0, "BCAST MODE")); // the session picks its own speed
     CHECK(a.transport.status().sessionPeer == "VK3ABC");
     CHECK(b.transport.status().sessionPeer == "W1AW");
+    CHECK(!b.transport.isTransmitting()); // no chat acknowledgement of its own waiting
 
     // Quiet for long enough, the caller closes it.
     runBoth(a, b, [&]() { return hosts.heardCommand(0, "DISCONNECT"); });
     CHECK(hosts.heardCommand(0, "DISCONNECT"));
     CHECK(waitFor([&]() { return a.transport.status().sessionPeer.empty(); }));
     CHECK(!hosts.heardCommand(1, "DISCONNECT")); // the called station leaves it to the caller
+
+    // Nor does one go on the group once the session has gone.
+    runBoth(a, b, [&]() { return false; }, 100);
+    CHECK(hosts.with([&]() { return hosts.sides[1].burstModes.size(); }) == 0);
 }
+
+// Three messages written into the session together are each settled as the
+// far end's modem acknowledges their bytes.
+void testEachMessageIsSettledAsItsBytesAreAcknowledged()
+{
+    FakeHostPair hosts;
+    hosts.with([&]() {
+        hosts.sides[0].holdAcks = true;
+        return 0;
+    });
+    Station a("W1AW", hosts.sides[0], 1);
+    Station b("VK3ABC", hosts.sides[1], 1);
+    CHECK(settled(hosts, a, b));
+    CHECK(waitFor([&]() { return hosts.heardCommand(1, "LISTEN ON"); }));
+
+    std::string error;
+    int64_t ids[3];
+    const char* texts[3] = {"one", "two", "three"};
+    for (int i = 0; i < 3; i++)
+    {
+        CHECK(a.protocol.sendMessage(texts[i], "VK3ABC", error));
+        ids[i] = a.observer.lastAddedId();
+    }
+    const size_t each = 2 + TEXT_FRAME_BYTES; // one frame each, as the session stream carries it
+    runBoth(a, b, [&]() { return hosts.unackedBytes(0) == 3 * each; });
+    CHECK(hosts.unackedBytes(0) == 3 * each);
+    runBoth(a, b, [&]() { return false; }, 20);
+    for (int64_t id : ids) CHECK(a.observer.statusOf(id) == MessageStatus::Transmitting);
+
+    hosts.ackSome(0, each);
+    runBoth(a, b, [&]() { return a.observer.statusOf(ids[0]) == MessageStatus::Acknowledged; });
+    CHECK(a.observer.statusOf(ids[0]) == MessageStatus::Acknowledged);
+    CHECK(a.observer.statusOf(ids[1]) == MessageStatus::Transmitting);
+    CHECK(a.observer.statusOf(ids[2]) == MessageStatus::Transmitting);
+
+    hosts.ackSome(0, 2 * each);
+    runBoth(a, b, [&]() { return a.observer.statusOf(ids[2]) == MessageStatus::Acknowledged; });
+    for (int64_t id : ids) CHECK(a.observer.statusOf(id) == MessageStatus::Acknowledged);
+    CHECK(b.observer.receivedTexts().size() == 3);
+    CHECK(hosts.with([&]() { return hosts.sides[1].sessionBursts; }) == 0);
+}
+
+// A host that only says whether anything is unacknowledged settles the
+// messages written together all at once, when it says nothing is.
+void testAnOlderHostSettlesTheBatchTogether()
+{
+    FakeHostPair hosts;
+    hosts.with([&]() {
+        hosts.sides[0].holdAcks = true;
+        hosts.sides[0].exactBuffer = false;
+        return 0;
+    });
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(settled(hosts, a, b));
+    CHECK(waitFor([&]() { return hosts.heardCommand(1, "LISTEN ON"); }));
+
+    std::string error;
+    CHECK(a.protocol.sendMessage("one", "VK3ABC", error));
+    int64_t first = a.observer.lastAddedId();
+    CHECK(a.protocol.sendMessage("two", "VK3ABC", error));
+    int64_t second = a.observer.lastAddedId();
+    const size_t each = 2 + TEXT_FRAME_BYTES;
+    runBoth(a, b, [&]() { return hosts.unackedBytes(0) == 2 * each; });
+
+    hosts.ackSome(0, each);
+    runBoth(a, b, [&]() { return false; }, 50);
+    CHECK(a.observer.statusOf(first) == MessageStatus::Transmitting);
+
+    hosts.ackSome(0, each);
+    runBoth(a, b, [&]() { return a.observer.statusOf(second) == MessageStatus::Acknowledged; });
+    CHECK(a.observer.statusOf(first) == MessageStatus::Acknowledged);
+    CHECK(a.observer.statusOf(second) == MessageStatus::Acknowledged);
+}
+
+// The session lost before the far end acknowledged the message fails it,
+// even though the host, listening again, then reports an empty buffer.
+void testALostSessionFailsTheMessage()
+{
+    FakeHostPair hosts;
+    hosts.with([&]() {
+        hosts.sides[0].holdAcks = true;
+        return 0;
+    });
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(settled(hosts, a, b));
+    CHECK(waitFor([&]() { return hosts.heardCommand(1, "LISTEN ON"); }));
+
+    std::string error;
+    CHECK(a.protocol.sendMessage("into the static", "VK3ABC", error));
+    int64_t id = a.observer.lastAddedId();
+    runBoth(a, b, [&]() { return hosts.unackedBytes(0) != 0; });
+    CHECK(hosts.unackedBytes(0) != 0);
+
+    hosts.loseSession();
+    runBoth(a, b, [&]() { return a.observer.statusOf(id) == MessageStatus::Failed; });
+    CHECK(a.observer.statusOf(id) == MessageStatus::Failed);
+    CHECK(!a.observer.sawStatus(MessageStatus::Acknowledged));
+    CHECK(!a.observer.sawStatus(MessageStatus::Retrying));
+    CHECK(b.observer.receivedTexts().empty());
+}
+
+// Deselecting the station ends the session at once and drops what is
+// outstanding for it; the group is free again straight after.
+void testDeselectingTheStationEndsTheSession()
+{
+    FakeHostPair hosts;
+    hosts.with([&]() {
+        hosts.sides[0].holdAcks = true;
+        return 0;
+    });
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(settled(hosts, a, b));
+    CHECK(waitFor([&]() { return hosts.heardCommand(1, "LISTEN ON"); }));
+
+    std::string error;
+    CHECK(a.protocol.sendMessage("never mind", "VK3ABC", error));
+    int64_t first = a.observer.lastAddedId();
+    CHECK(a.protocol.sendMessage("this neither", "VK3ABC", error));
+    int64_t second = a.observer.lastAddedId();
+    runBoth(a, b, [&]() { return hosts.unackedBytes(0) != 0; });
+    CHECK(hosts.unackedBytes(0) != 0);
+
+    // Something of ours unacknowledged: ABORT, as DISCONNECT would wait.
+    CHECK(a.protocol.releaseStation("VK3ABC") == 2);
+    CHECK(a.observer.statusOf(first) == MessageStatus::Aborted);
+    CHECK(a.observer.statusOf(second) == MessageStatus::Aborted);
+    runBoth(a, b, [&]() { return hosts.heardCommand(0, "ABORT"); });
+    CHECK(hosts.heardCommand(0, "ABORT"));
+
+    CHECK(a.protocol.sendMessage("back on the group", "", error));
+    runBoth(a, b, [&]() { return !b.observer.receivedTexts().empty(); });
+    std::vector<TextMessage> got = b.observer.receivedTexts();
+    CHECK(got.size() == 1 && got[0].text == "back on the group");
+    CHECK(!a.observer.sawStatus(MessageStatus::Failed));
+    CHECK(!a.observer.sawStatus(MessageStatus::Acknowledged));
+}
+
+// With nothing unacknowledged the session is closed with DISCONNECT, which
+// tells the far end, rather than left to time out.
+void testDeselectingAQuietSessionDisconnects()
+{
+    FakeHostPair hosts;
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(settled(hosts, a, b));
+    CHECK(waitFor([&]() { return hosts.heardCommand(1, "LISTEN ON"); }));
+
+    std::string error;
+    CHECK(a.protocol.sendMessage("all done", "VK3ABC", error));
+    runBoth(a, b, [&]() { return a.observer.sawStatus(MessageStatus::Acknowledged); });
+    CHECK(a.observer.sawStatus(MessageStatus::Acknowledged));
+    CHECK(!hosts.heardCommand(0, "DISCONNECT")); // it would stay open 45 s
+
+    CHECK(a.protocol.releaseStation("VK3ABC") == 0);
+    runBoth(a, b, [&]() { return hosts.heardCommand(0, "DISCONNECT"); });
+    CHECK(hosts.heardCommand(0, "DISCONNECT"));
+    CHECK(!hosts.heardCommand(0, "ABORT"));
+    CHECK(waitFor([&]() { return a.transport.status().sessionPeer.empty(); }));
+}
+
+// A ping through a session is answered by the modem: no pong of our own.
+void testAPingThroughASessionIsAnsweredByTheModem()
+{
+    FakeHostPair hosts;
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(settled(hosts, a, b));
+    CHECK(waitFor([&]() { return hosts.heardCommand(1, "LISTEN ON"); }));
+
+    std::string error;
+    CHECK(a.protocol.sendPing("VK3ABC", error));
+    runBoth(a, b, [&]() { return a.observer.sawSystemLine("PING delivered"); });
+    CHECK(a.observer.sawSystemLine("PING delivered"));
+    CHECK(b.observer.sawSystemLine("PING!"));
+    runBoth(a, b, [&]() { return false; }, 50);
+    CHECK(hosts.with([&]() { return hosts.sides[1].sessionBursts + (int)hosts.sides[1].burstModes.size(); }) == 0);
+    CHECK(!b.transport.isTransmitting()); // no pong waiting for the group
+}
+
+// Restarting the transport (new Data2G settings) ends what its session held:
+// the message is not left showing SENDING for good.
+void testRestartingTheTransportEndsWhatItHeld()
+{
+    FakeHostPair hosts;
+    hosts.with([&]() {
+        hosts.sides[0].holdAcks = true;
+        return 0;
+    });
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(settled(hosts, a, b));
+    CHECK(waitFor([&]() { return hosts.heardCommand(1, "LISTEN ON"); }));
+
+    std::string error;
+    CHECK(a.protocol.sendMessage("caught by a restart", "VK3ABC", error));
+    int64_t id = a.observer.lastAddedId();
+    runBoth(a, b, [&]() { return hosts.unackedBytes(0) != 0; });
+    CHECK(hosts.unackedBytes(0) != 0);
+
+    a.transport.start(a.settings);
+    a.protocol.setTransport(&a.transport);
+    runBoth(a, b, [&]() { return a.observer.statusOf(id) == MessageStatus::Failed; });
+    CHECK(a.observer.statusOf(id) == MessageStatus::Failed);
+}
+
 
 void testAStationWithoutSessionsGetsTheGroup()
 {
@@ -837,6 +1138,13 @@ int main()
     testBroadcastGoesToTheGroupAtAdagio();
     testDuetUsesAFastWideModeOrTheNarrowHostsBest();
     testDirectedMessageGoesThroughASession();
+    testEachMessageIsSettledAsItsBytesAreAcknowledged();
+    testAnOlderHostSettlesTheBatchTogether();
+    testALostSessionFailsTheMessage();
+    testAPingThroughASessionIsAnsweredByTheModem();
+    testDeselectingTheStationEndsTheSession();
+    testDeselectingAQuietSessionDisconnects();
+    testRestartingTheTransportEndsWhatItHeld();
     testAStationWithoutSessionsGetsTheGroup();
     testLosingTheCommandPortClearsBusyAndReopens();
     testACallsignChangeReopensTheGroup();

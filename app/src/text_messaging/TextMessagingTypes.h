@@ -346,6 +346,7 @@ struct QueuedWait
     int64_t waitMs = 0;       // from now until it should key; zero if due
     bool channelBusy = false; // somebody else has the channel: nothing counts down
     int gear = 0;             // the tempo the operator chose for it; 0 for the one set now
+    bool reliableLink = false; // it goes through a link that paces itself, so no tempo or wait applies
 };
 
 enum class MessageDirection
@@ -426,6 +427,21 @@ struct OutgoingBurst
     // segment. Not a burst: nothing counts it, and every other transport and
     // mode ignores it. Set on the last burst of a keying.
     std::vector<uint8_t> duetFiller;
+};
+
+// What became of a keying handed to a link that acknowledges by itself (see
+// ITextMessagingTransport::transmitReliably).
+struct KeyingReport
+{
+    enum class Result
+    {
+        Delivered,   // the far end's modem acknowledged all of it
+        Failed,      // the link gave up on it part way, or lost the far end
+        NotTaken,    // the link never opened, so none of it was sent
+    };
+
+    uint64_t keyingId = 0;
+    Result result = Result::Failed;
 };
 
 // Whether a station's build takes in locator frames, as far as we know: its

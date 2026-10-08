@@ -136,7 +136,18 @@ TextMessagingProtocol::~TextMessagingProtocol()
 void TextMessagingProtocol::setTransport(ITextMessagingTransport* transport)
 {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (transport == transport_) return;
     transport_ = transport;
+
+    // Whatever the old transport's reliable link still had will never be
+    // reported on: it goes again, through whatever the new one offers.
+    for (PendingTransmission& pending : outbox_)
+    {
+        if (pending.state != TransmissionState::Delivering) continue;
+        pending.state = TransmissionState::Queued;
+        pending.keyingId = 0;
+        pending.locatorRode = false;
+    }
 }
 
 void TextMessagingProtocol::setObserver(ITextMessagingObserver* observer)
@@ -465,6 +476,14 @@ void TextMessagingProtocol::dropOutboxLocked(MessageStatus status, bool everythi
     for (auto it = outbox_.begin(); it != outbox_.end();)
     {
         bool drop = everything || it->state == TransmissionState::Queued;
+
+        // One a reliable link holds can be taken back only while the link
+        // has not started on it; after that it is the link's to finish.
+        if (it->state == TransmissionState::Delivering)
+        {
+            drop = transport_ != nullptr && transport_->withdrawReliably(it->keyingId);
+            if (drop && it->locatorRode) locatorPeers_[it->destination].sent = false;
+        }
         if (!drop)
         {
             ++it;
@@ -966,7 +985,7 @@ void TextMessagingProtocol::updateStatusLocked(PendingTransmission& pending, Mes
     events.push_back(event);
 }
 
-void TextMessagingProtocol::onFrameReceived(const Frame& frame, float snr)
+void TextMessagingProtocol::onFrameReceived(const Frame& frame, float snr, bool viaReliableLink)
 {
     std::vector<PendingEvent> events;
 
@@ -977,8 +996,10 @@ void TextMessagingProtocol::onFrameReceived(const Frame& frame, float snr)
         if (!myCallsign_.empty() && frame.originCallsign == myCallsign_) return;
 
         // The station we just heard is turning its receiver back on; keying
-        // straight away talks over it.
-        deferTransmissionLocked(monotonicMs_(), timing_.turnaroundAfterRxMs, 0);
+        // straight away talks over it. A frame from a link that acknowledges
+        // by itself was delivered by that link, which keeps its own turns on
+        // the channel, so it holds nothing of ours up.
+        if (!viaReliableLink) deferTransmissionLocked(monotonicMs_(), timing_.turnaroundAfterRxMs, 0);
 
         // A station we answered is sending, so it is not holding the channel
         // for the rest of our keying, however much of it it lost.
@@ -1004,7 +1025,7 @@ void TextMessagingProtocol::onFrameReceived(const Frame& frame, float snr)
         // Whoever the frame is for, its sender holds the channel for the rest
         // of its keying.
         uint64_t nowMs = monotonicMs_();
-        reserveChannelForKeyingLocked(frame, nowMs);
+        if (!viaReliableLink) reserveChannelForKeyingLocked(frame, nowMs);
 
         // Whoever it is for, a frame keeps its sender's contact going, and a
         // ping or acknowledgement says whether it takes in locators.
@@ -1013,7 +1034,9 @@ void TextMessagingProtocol::onFrameReceived(const Frame& frame, float snr)
 
         // Messages, broadcasts and pings say whether their sender acknowledges
         // by itself. An acknowledgement or a pong to us is that station doing so.
-        switch (frame.type)
+        // Through a link that acknowledges by itself, that link does the
+        // acknowledging whatever the station's own setting says.
+        if (!viaReliableLink) switch (frame.type)
         {
             case FrameType::Message:
             case FrameType::Broadcast:
@@ -1035,10 +1058,10 @@ void TextMessagingProtocol::onFrameReceived(const Frame& frame, float snr)
         switch (frame.type)
         {
             case FrameType::Broadcast:
-                handleIncomingFragmentLocked(frame, snr, events);
+                handleIncomingFragmentLocked(frame, snr, events, viaReliableLink);
                 break;
             case FrameType::Message:
-                if (isAddressedToMeLocked(frame)) handleIncomingFragmentLocked(frame, snr, events);
+                if (isAddressedToMeLocked(frame)) handleIncomingFragmentLocked(frame, snr, events, viaReliableLink);
                 break;
             case FrameType::MessageAck:
                 if (isAddressedToMeLocked(frame)) handleAckLocked(frame, events);
@@ -1047,7 +1070,7 @@ void TextMessagingProtocol::onFrameReceived(const Frame& frame, float snr)
                 if (isAddressedToMeLocked(frame)) handlePartialAckLocked(frame, events);
                 break;
             case FrameType::Ping:
-                if (isAddressedToMeLocked(frame)) handlePingLocked(frame, snr, events);
+                if (isAddressedToMeLocked(frame)) handlePingLocked(frame, snr, events, viaReliableLink);
                 break;
             case FrameType::PingAck:
                 if (isAddressedToMeLocked(frame)) handlePongLocked(frame, snr, events);
@@ -1088,9 +1111,15 @@ void TextMessagingProtocol::reserveChannelForKeyingLocked(const Frame& frame, ui
 }
 
 void TextMessagingProtocol::handleIncomingFragmentLocked(const Frame& frame, float snr,
-                                                         std::vector<PendingEvent>& events)
+                                                         std::vector<PendingEvent>& events,
+                                                         bool viaReliableLink)
 {
     bool broadcast = frame.type == FrameType::Broadcast;
+
+    // A link that acknowledges by itself has told the sender already, and
+    // gets it every fragment or none: we owe no acknowledgement of our own,
+    // nor a report of what is missing.
+    bool acknowledge = !broadcast && autoReplyEnabled_ && !viaReliableLink;
     ReassemblyKey key(frame.originCallsign, frame.airId);
     uint64_t nowMs = monotonicMs_();
 
@@ -1110,7 +1139,7 @@ void TextMessagingProtocol::handleIncomingFragmentLocked(const Frame& frame, flo
 
         if (sameMessage)
         {
-            if (!broadcast && autoReplyEnabled_) queueAckLocked(frame.originCallsign, frame.airId);
+            if (acknowledge) queueAckLocked(frame.originCallsign, frame.airId);
             return;
         }
 
@@ -1130,7 +1159,7 @@ void TextMessagingProtocol::handleIncomingFragmentLocked(const Frame& frame, flo
     reassembly.fragments[frame.fragmentIndex].assign(frame.payload.begin(), frame.payload.end());
     reassembly.receivedMask |= (1u << frame.fragmentIndex);
     reassembly.lastHeardMs = nowMs;
-    reassembly.heardThisKeying = true;
+    reassembly.heardThisKeying = !viaReliableLink;
     reassembly.keyingEndsMs =
         nowMs + (uint64_t)frame.burstsFollowing * (uint64_t)timing_.textFragmentAirMs;
     reassembly.snr = (reassembly.snr + snr) / 2.0f;
@@ -1163,7 +1192,7 @@ void TextMessagingProtocol::handleIncomingFragmentLocked(const Frame& frame, flo
         events.push_back(event);
     }
 
-    if (!broadcast && autoReplyEnabled_) queueAckLocked(frame.originCallsign, frame.airId);
+    if (acknowledge) queueAckLocked(frame.originCallsign, frame.airId);
 }
 
 void TextMessagingProtocol::handleAckLocked(const Frame& frame, std::vector<PendingEvent>& events)
@@ -1215,8 +1244,13 @@ void TextMessagingProtocol::handlePartialAckLocked(const Frame& frame,
         }
 
         // Mid keying the report can only have been meant for an earlier one;
-        // what it confirms is recorded and the keying carries on.
-        if (pending.state == TransmissionState::Transmitting) return;
+        // what it confirms is recorded and the keying carries on. Likewise
+        // for one a reliable link holds, which it settles itself.
+        if (pending.state == TransmissionState::Transmitting ||
+            pending.state == TransmissionState::Delivering)
+        {
+            return;
+        }
 
         if (progress)
         {
@@ -1238,12 +1272,14 @@ void TextMessagingProtocol::handlePartialAckLocked(const Frame& frame,
 }
 
 void TextMessagingProtocol::handlePingLocked(const Frame& frame, float snr,
-                                             std::vector<PendingEvent>& events)
+                                             std::vector<PendingEvent>& events, bool viaReliableLink)
 {
     addSystemMessageLocked(frame.originCallsign + " >> " + myCallsign_ + " : PING!",
                            frame.originCallsign, events);
 
-    if (autoReplyEnabled_) queuePongLocked(frame.originCallsign, snr);
+    // Through a link that acknowledges by itself, its acknowledgement is the
+    // pong.
+    if (autoReplyEnabled_ && !viaReliableLink) queuePongLocked(frame.originCallsign, snr);
 }
 
 void TextMessagingProtocol::handlePongLocked(const Frame& frame, float snr,
@@ -1303,7 +1339,7 @@ AckWait TextMessagingProtocol::ackWait() const
 
     for (const PendingTransmission& pending : outbox_)
     {
-        if (!pending.expectsAck) continue;
+        if (!pending.expectsAck || pending.state == TransmissionState::Delivering) continue;
 
         // Nothing is outstanding until it has actually been sent once. A
         // message still waiting its turn is queued, not awaited, and saying
@@ -1377,6 +1413,18 @@ TextMessagingProtocol::Cancel TextMessagingProtocol::cancelMessage(int64_t messa
             done = cancelForLocked(*it);
             if (done == Cancel::None) break;
 
+            // Already in a reliable link's hands: it will get there or be
+            // reported failed whatever is done here.
+            if (it->state == TransmissionState::Delivering)
+            {
+                if (transport_ == nullptr || !transport_->withdrawReliably(it->keyingId))
+                {
+                    done = Cancel::None;
+                    break;
+                }
+                if (it->locatorRode) locatorPeers_[it->destination].sent = false;
+            }
+
             if (onAirOut != nullptr) *onAirOut = it->state == TransmissionState::Transmitting;
             updateStatusLocked(*it, done == Cancel::Remove ? MessageStatus::NotSent : MessageStatus::Aborted, events);
             outbox_.erase(it);
@@ -1386,6 +1434,34 @@ TextMessagingProtocol::Cancel TextMessagingProtocol::cancelMessage(int64_t messa
 
     deliver(events);
     return done;
+}
+
+int TextMessagingProtocol::releaseStation(const std::string& destination)
+{
+    if (destination.empty()) return 0;
+
+    int dropped = 0;
+    std::vector<PendingEvent> events;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (transport_ == nullptr || !transport_->releaseStation(destination)) return 0;
+
+        for (auto it = outbox_.begin(); it != outbox_.end();)
+        {
+            Cancel cancel = it->destination == destination ? cancelForLocked(*it) : Cancel::None;
+            if (cancel == Cancel::None)
+            {
+                ++it;
+                continue;
+            }
+            updateStatusLocked(*it, cancel == Cancel::Remove ? MessageStatus::NotSent : MessageStatus::Aborted, events);
+            it = outbox_.erase(it);
+            dropped++;
+        }
+    }
+
+    deliver(events);
+    return dropped;
 }
 
 std::vector<int64_t> TextMessagingProtocol::outstandingMessageIds() const
@@ -1458,6 +1534,20 @@ std::vector<QueuedWait> TextMessagingProtocol::queuedWaits() const
     for (const PendingTransmission& pending : outbox_)
     {
         if (pending.state != TransmissionState::Queued) continue;
+
+        // One a link that paces itself will carry goes as soon as it is
+        // queued, and keeps nothing else waiting.
+        if (goesReliablyLocked(pending))
+        {
+            if (!pending.isPing && pending.message.kind == MessageKind::Chat)
+            {
+                QueuedWait wait;
+                wait.messageId = pending.message.id;
+                wait.reliableLink = true;
+                waits.push_back(wait);
+            }
+            continue;
+        }
 
         uint64_t start = std::max(at, pending.notBeforeMs);
         if (!pending.reply && !pending.isPing && pending.message.kind == MessageKind::Chat)
@@ -1601,6 +1691,7 @@ void TextMessagingProtocol::tick()
         uint64_t nowMs = monotonicMs_();
         purgeStaleReassembliesLocked(nowMs);
         requestMissingFragmentsLocked(nowMs);
+        settleReliableKeyingsLocked(events);
 
         // Replies queued as frames arrive, retries whose timers ran out and
         // resends that a partial acknowledgement asked for all land in the
@@ -1629,6 +1720,8 @@ void TextMessagingProtocol::tick()
 void TextMessagingProtocol::serviceOutboxLocked(uint64_t nowMs, bool frozen,
                                                 std::vector<PendingEvent>& events)
 {
+    sendReliablyLocked(nowMs, events);
+
     // Voice always wins the transmitter, and only one burst is on the air at a
     // time. A transmission parked on its acknowledgement timer does not count:
     // the transmitter is idle for the whole of that wait, so the traffic queued
@@ -1702,6 +1795,7 @@ void TextMessagingProtocol::serviceOutboxLocked(uint64_t nowMs, bool frozen,
             {
                 PendingTransmission& next = outbox_[i];
                 if (next.state != TransmissionState::Queued) continue;
+                if (goesReliablyLocked(next)) continue;
                 if (nowMs < next.notBeforeMs) continue;
                 if (nowMs < quietUntilLocked(next.reply)) continue;
 
@@ -1769,6 +1863,97 @@ void TextMessagingProtocol::serviceOutboxLocked(uint64_t nowMs, bool frozen,
     }
 }
 
+// Whether a queued message or ping goes to a link that acknowledges, retries
+// and paces by itself (a Data2G connected session) rather than through our
+// own turn taking. Replies never do: they answer something heard on the
+// channel, and go back the same way.
+bool TextMessagingProtocol::goesReliablyLocked(const PendingTransmission& pending) const
+{
+    if (transport_ == nullptr || pending.reply || pending.destination.empty()) return false;
+    return transport_->deliversReliablyTo(pending.destination);
+}
+
+// Messages and pings for a station such a link reaches go to it as soon as
+// they are queued, each a keying of its own. The link waits its turn on the
+// channel, picks its own speed and says when the far end has the message, so
+// none of our turnarounds, reply windows, tempos or acknowledgement timers
+// apply to them. Only the operator's "Woah!" holds them back.
+void TextMessagingProtocol::sendReliablyLocked(uint64_t nowMs, std::vector<PendingEvent>& events)
+{
+    if (nowMs < operatorHoldUntilMs_) return;
+
+    for (PendingTransmission& pending : outbox_)
+    {
+        if (pending.state != TransmissionState::Queued || !goesReliablyLocked(pending)) continue;
+
+        std::string locatorTo;
+        std::vector<OutgoingBurst> keying = keyingBurstsLocked({&pending}, nowMs, &locatorTo);
+        if (keying.empty()) continue;
+
+        uint64_t keyingId = ++nextKeyingId_;
+        if (!transport_->transmitReliably(keying, keyingId)) continue;
+
+        if (!locatorTo.empty()) locatorPeers_[locatorTo].sent = true;
+        noteMapStationLocked(pending.destination);
+
+        pending.keyingId = keyingId;
+        pending.locatorRode = !locatorTo.empty();
+        pending.state = TransmissionState::Delivering;
+        updateStatusLocked(pending, MessageStatus::Transmitting, events);
+    }
+}
+
+// What the link has made of the keyings it was given: the far end's modem
+// acknowledged one, which is as good as our own acknowledgement; or it gave
+// up, after retrying for longer than we would have; or it never got through
+// to the station, and the message goes again the ordinary way.
+void TextMessagingProtocol::settleReliableKeyingsLocked(std::vector<PendingEvent>& events)
+{
+    if (transport_ == nullptr) return;
+    bool delivering = std::any_of(outbox_.begin(), outbox_.end(), [](const PendingTransmission& pending)
+                                  { return pending.state == TransmissionState::Delivering; });
+    if (!delivering) return;
+
+    for (const KeyingReport& report : transport_->takeKeyingReports())
+    {
+        auto it = std::find_if(outbox_.begin(), outbox_.end(), [&](const PendingTransmission& pending)
+                               { return pending.state == TransmissionState::Delivering &&
+                                        pending.keyingId == report.keyingId; });
+        if (it == outbox_.end()) continue;
+
+        switch (report.result)
+        {
+            case KeyingReport::Result::Delivered:
+                it->confirmed = it->frames.empty() ? 0u : (1u << it->frames.size()) - 1u;
+                if (it->locatorRode) locatorPeers_[it->destination].acknowledged = true;
+                if (it->isPing)
+                {
+                    addSystemMessageLocked(it->destination + " : PING delivered (its modem acknowledged)",
+                                           it->destination, events);
+                }
+                updateStatusLocked(*it, MessageStatus::Acknowledged, events);
+                outbox_.erase(it);
+                break;
+
+            case KeyingReport::Result::Failed:
+                if (it->locatorRode) locatorPeers_[it->destination].sent = false;
+                if (it->isPing) addSystemMessageLocked(it->destination + " : no response to PING", it->destination, events);
+                updateStatusLocked(*it, MessageStatus::Failed, events);
+                outbox_.erase(it);
+                break;
+
+            case KeyingReport::Result::NotTaken:
+                // Nothing went, the locator included: it may ride again.
+                if (it->locatorRode) locatorPeers_[it->destination].sent = false;
+                it->state = TransmissionState::Queued;
+                it->keyingId = 0;
+                it->locatorRode = false;
+                updateStatusLocked(*it, MessageStatus::Queued, events);
+                break;
+        }
+    }
+}
+
 // An attempt that got nothing through. A ping gets one chance; a message gets
 // the retries the operator can see counting up in the chat window, and goes
 // back to the queue to wait its turn like any other transmission. Returns true
@@ -1829,6 +2014,7 @@ TextMessagingProtocol::PendingTransmission* TextMessagingProtocol::riderLocked(s
 
         PendingTransmission& candidate = outbox_[i];
         if (candidate.reply || candidate.state != TransmissionState::Queued) continue;
+        if (goesReliablyLocked(candidate)) continue;
         if (nowMs < candidate.notBeforeMs) continue;
         // A keying has one tempo, the reply's, so a message moved to a
         // tempo of its own keys on its own, and nothing jumps ahead of it.
