@@ -2439,6 +2439,10 @@ wxString TextMessagingDialog::groupLineHtml(const FileLine& line, const Palette&
                 break;
             case State::Incomplete:
                 state = wxString::Format(_("incomplete: %d missing (pieces kept 24 h)"), std::max(0, f.pieces - f.have));
+                if (!f.path.empty())
+                {
+                    state += "; " + wxString::Format(_("saved to %s if it is sent again"), wxString::FromUTF8(f.path));
+                }
                 receive = ignore = true;
                 break;
             case State::Saved:

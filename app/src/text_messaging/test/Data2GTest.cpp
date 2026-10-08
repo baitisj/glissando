@@ -1938,6 +1938,7 @@ public:
         int groupPort = 0;
         std::string groupMode = "qpsk-r1/5";
         bool listening = true;      // false: hears nothing on the group
+        bool holding = false;       // true: keeps what it is given, unsent
         Data2G::KissDecoder kiss;
         Data2G::LineSplitter lines;
     };
@@ -2008,6 +2009,43 @@ public:
     std::vector<Burst> sent()
     {
         return with([&]() { return bursts; });
+    }
+
+    // A side's host keeps its keyings, as when the channel stays busy.
+    void setHolding(int side, bool on)
+    {
+        with([&]() {
+            sides[(size_t)side].holding = on;
+            return 0;
+        });
+    }
+
+    size_t heldCount()
+    {
+        return with([&]() { return held.size(); });
+    }
+
+    // The first keying held is dropped, and the host says so.
+    void dropFirstHeld()
+    {
+        with([&]() {
+            if (held.empty()) return 0;
+            Held h = held.front();
+            held.erase(held.begin());
+            Side& side = sides[(size_t)h.burst.from];
+            say(side, "BCAST " + std::to_string(side.groupPort) + " DROPPED " + std::to_string(h.burst.frames.size()));
+            return 0;
+        });
+    }
+
+    // The rest go, in turn.
+    void releaseHeld()
+    {
+        with([&]() {
+            for (Held& h : held) transmit(h.burst, h.tags);
+            held.clear();
+            return 0;
+        });
     }
 
     // Keyings from a station whose first frame is of this type.
@@ -2102,6 +2140,18 @@ private:
             }
             burst.frames.push_back(data);
         }
+        if (side.holding)
+        {
+            held.push_back({burst, tags});
+            return;
+        }
+        transmit(burst, tags);
+    }
+
+    void transmit(const Burst& burst, const std::vector<uint16_t>& tags)
+    {
+        int s = burst.from;
+        Side& side = sides[(size_t)s];
         bursts.push_back(burst);
 
         say(side, "PTT ON");
@@ -2198,10 +2248,17 @@ private:
         }
     }
 
+    struct Held
+    {
+        Burst burst;
+        std::vector<uint16_t> tags;
+    };
+
     std::mutex mutex;
     std::atomic<bool> stopping{false};
     LossRule loss;
     std::vector<Burst> bursts;
+    std::vector<Held> held;
     std::thread thread;
 };
 
@@ -2475,6 +2532,40 @@ void testGroupFilesNeedTheGroup()
     CHECK(groupFile(group[0], true).state == GroupState::Ended);
 }
 
+// A chat keying given up on while data2g-host still holds it, dropped by
+// the host while a file keying waits behind it: the drop is the chat's,
+// so the file keying is not sent a second time.
+void testAStaleChatDropIsNotTheFiles()
+{
+    FakeGroup hosts(2);
+    GroupStations group(hosts, {"AG7EW", "K7ABC"});
+    FileScratch scratch("group-stale");
+    std::string source = scratch.write("FRED.TXT", 7000);
+    group[1].transport.setGroupFileAutoReceive((scratch.dir / "in").string());
+
+    hosts.setHolding(0, true);
+    std::string why;
+    CHECK(group[0].protocol.sendMessage("held up", "", why));
+    CHECK(group.runUntil([&]() { return hosts.heldCount() == 1; }));
+    // Past the time the chat keying is given up on.
+    group.runUntil([]() { return false; }, 1300);
+    CHECK(hosts.heldCount() == 1);
+
+    std::string error;
+    CHECK(group[0].transport.sendGroupFile(source, error) != 0);
+    CHECK(group.runUntil([&]() { return hosts.heldCount() == 2; }));
+    hosts.dropFirstHeld();
+    group.runUntil([]() { return false; }, 20);
+    hosts.setHolding(0, false);
+    hosts.releaseHeld();
+
+    CHECK(group.runUntil([&]() { return groupFile(group[1], false).state == GroupState::Saved; }));
+    CHECK(group.runUntil([&]() { return groupFile(group[0], true).state == GroupState::Ended; }));
+    CHECK(fileContents(groupFile(group[1], false).path) == fileContents(source));
+    // One before piece 0 and one before piece 24, as on a clear channel.
+    CHECK(hosts.sentOfType(0, Data2G::GroupFileFrame::Announce) == 2);
+}
+
 } // namespace
 
 int main()
@@ -2524,6 +2615,7 @@ int main()
     testAGroupFileDeadline();
     testChatGoesAheadOfTheFile();
     testGroupFilesNeedTheGroup();
+    testAStaleChatDropIsNotTheFiles();
 
     if (failures > 0)
     {

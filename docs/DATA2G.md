@@ -354,12 +354,20 @@ line counts them in (`asking in slot 3 (in 12 s)`, `W1AW first in line;
 4 of your pieces coming`) and says `saved to ...` once the file's hash
 matches. Ignore stops asking and drops the pieces. Pieces of an
 unfinished file are kept for a day (up to 4 files and 4 MB), so the same
-file sent again by the same station, which has the same id, finishes it.
+file sent again by the same station, which has the same id, finishes it,
+even sent at another tempo (what was kept is cut into the new piece
+size). Receive... on a file whose sender has stopped saves it there when
+it is sent again. A file cancelled by its sender, or that could not be
+saved or verified, is taken from the start when sent again. A station
+with all of it but the name saves it as `received-file` once the sender
+stops.
 
 Preferences, Modem tab: **Receive group files automatically** (off by
 default) saves every group file into the received files folder without
 asking, numbering a name already there, but only while the chat window's
-**Auto acknowledge** is lit too. Nothing is opened or run after saving.
+**Auto acknowledge** is lit too. Turning either off returns a file being
+received that way to waiting for Receive..., and nothing more is asked
+for it. Nothing is opened or run after saving.
 
 **Tempo.** The piece size is fixed when the file is announced, from the
 tempo then (106 bytes at Adagio, 220 at Presto, 228 at Duet). Every
@@ -399,7 +407,8 @@ keying within 12 s. An Announce goes before the stream and again every
 
 **Windows.** After the stream, round 0's window has 4 slots; later ones
 `ceil(1.5 x stations that asked) + 1`, kept to 3..8, plus 2 for each
-station data2g-host reports lost on the group, 12 at most. A slot is a
+station data2g-host reports lost on the group and not heard asking, 12
+at most (and the first such station gets slot 0). A slot is a
 one-codeword Request's airtime plus 4 s (20 s at Adagio, 6 s at Duet). A
 listener asks in a random slot, up to 2 s into it, and leaves out pieces
 others asked for in the same window. The sender then picks who is first
@@ -422,7 +431,9 @@ always goes first. After each of our file keyings the app leaves the
 channel for 4 s (2 s more after any busy report), so others can get in;
 chat keeps no such pause. Woah! holds file keyings too. A file keying the
 host doesn't send within 2 minutes (not counting a session) is tried once
-more; lost twice, the transfer fails.
+more; lost twice, the transfer fails. A chat keying given up on that way
+may still be with the host: a drop the host reports is counted against
+it first, not against the file keying behind it.
 
 **When things go wrong.** The hash doesn't match: the listener asks for
 all of it again once, then the line says `failed verification: nothing
@@ -506,14 +517,19 @@ command port lost mid-keying: the keying counts as lost, as above.
   frames both ways (and that chat never takes one), piece lists, piece
   sizes and estimates, and engines on a simulated group with a simulated
   clock: a clean channel, two lossy listeners, a late joiner, the same file
-  sent again, cancel, the deadline, the console's tempo changing
-  mid-transfer, receiving only when told and ignoring, a hash failure
-  (once restarted, twice failed), lost windows answered by a late
-  request, turns going round, stopping serving, and the limits. In
+  sent again (soon, long after, at another tempo, after a cancel or a
+  failed save), cancel, the deadline, the console's tempo changing
+  mid-transfer, receiving only when told and ignoring, Receive after the
+  sender stopped, automatic receiving turned off mid-file, all of it but
+  the name, a hash failure (once restarted, twice failed), lost windows
+  answered by a late request, a lost-request hint outliving a round,
+  turns going round, stopping serving, and the limits (an oversized
+  Announce or Window refused). In
   `fdv_text_messaging_data2g_test`, the same through transports and fake
   data2g-hosts sharing one group: one sender and two lossy listeners, a
   late joiner, the same file again, cancel, the deadline, a chat message
-  going ahead of the file, and no group without the command port. Clean
+  going ahead of the file, a stale chat keying's drop not charged to the
+  file keying, and no group without the command port. Clean
   under ThreadSanitizer.
 - **Unit** (`fdv_text_messaging_sha256_test`): SHA-256 against the FIPS
   180-4 and NIST vectors, whole and in pieces.

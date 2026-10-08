@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <iterator>
 
 #if defined(_WIN32)
 #include <winsock2.h>
@@ -333,6 +334,7 @@ void Data2GTransport::start(const Settings& settings)
         sessionWritten_ = sessionRead_ = sessionAcked_ = 0;
         bufferExact_ = -1;
         fileKeying_ = FileKeying();
+        staleChatTags_.clear();
     }
     stopping_ = false;
     thread_ = std::thread([this, settings]() { run(settings); });
@@ -367,6 +369,7 @@ void Data2GTransport::stop()
     files_.stopAll("Data2G was stopped.");
     groupFiles_.stopAll("Data2G was stopped.");
     fileKeying_ = FileKeying();
+    staleChatTags_.clear();
 }
 
 Data2GTransport::Status Data2GTransport::status() const
@@ -752,6 +755,7 @@ void Data2GTransport::run(Settings settings)
             bufferExact_ = -1;
             if (hasKeying_ && keying_.stage == Keying::Stage::Sent) hasKeying_ = false;
             else if (hasKeying_) keying_.stage = Keying::Stage::Waiting;
+            staleChatTags_.clear();
             if (fileKeying_.active)
             {
                 fileKeying_ = FileKeying();
@@ -906,20 +910,35 @@ void Data2GTransport::run(Settings settings)
                 status_.mode = event.text;
                 break;
             case Type::BcastDropped:
-                // Only one keying is with data2g-host at a time, a file's or
-                // chat's.
-                if (event.number == status_.groupPort && fileKeying_.active)
+            {
+                if (event.number != status_.groupPort) break;
+                // A chat keying given up on but still with data2g-host was
+                // written before anything with it now, so a drop is its
+                // frames first.
+                size_t count = event.count > 0 ? (size_t)event.count : 0;
+                size_t stale = std::min(count, staleChatTags_.size());
+                if (stale > 0)
+                {
+                    staleChatTags_.erase(staleChatTags_.begin(), std::next(staleChatTags_.begin(), (long)stale));
+                    count -= stale;
+                    if (log_) log_("Data2G dropped " + std::to_string(stale) + " chat frame(s) given up on");
+                    if (count == 0) break;
+                }
+                // Otherwise only one keying is with data2g-host at a time, a
+                // file's or chat's.
+                if (fileKeying_.active)
                 {
                     fileKeying_ = FileKeying();
                     groupFiles_.keyingLost(now());
-                    if (log_) log_("Data2G dropped " + std::to_string(event.count) + " file frame(s) unsent");
+                    if (log_) log_("Data2G dropped " + std::to_string(count) + " file frame(s) unsent");
                 }
-                else if (event.number == status_.groupPort && hasKeying_ && keying_.stage == Keying::Stage::Sent)
+                else if (hasKeying_ && keying_.stage == Keying::Stage::Sent)
                 {
                     hasKeying_ = false;
-                    if (log_) log_("Data2G dropped " + std::to_string(event.count) + " chat frame(s) unsent");
+                    if (log_) log_("Data2G dropped " + std::to_string(count) + " chat frame(s) unsent");
                 }
                 break;
+            }
             case Type::BcastHeard:
                 if (event.number == status_.groupPort) heardCall = event.text;
                 break;
@@ -999,6 +1018,7 @@ void Data2GTransport::run(Settings settings)
             if (frame.payload.size() < 2) return;
             uint16_t tag = (uint16_t)((frame.payload[0] << 8) | frame.payload[1]);
             std::lock_guard<std::mutex> lock(mutex_);
+            if (staleChatTags_.erase(tag) != 0) return; // sent after all
             if (hasKeying_ && keying_.stage == Keying::Stage::Sent && keying_.tags.count(tag) != 0)
             {
                 keying_.tags.erase(tag);
@@ -1214,6 +1234,7 @@ void Data2GTransport::run(Settings settings)
                 else if (t - keying_.queuedAtMs >= NOT_SENT_TIMEOUT_MS)
                 {
                     hasKeying_ = false;
+                    staleChatTags_.insert(keying_.tags.begin(), keying_.tags.end());
                     if (log_) log_("Data2G never reported the chat keying sent");
                 }
                 return;

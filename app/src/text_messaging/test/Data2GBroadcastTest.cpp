@@ -115,6 +115,13 @@ void testFramesRoundTrip()
     bytes = encodeGroupAnnounce(a);
     CHECK(!decodeGroupAnnounce(bytes.data(), bytes.size(), a2));
 
+    // Nor is one larger than any sender sends.
+    a.size = (uint32_t)GROUP_FILE_MAX_BYTES + 1;
+    a.pieceBytes = 249;
+    a.pieces = (int)((a.size + 248) / 249);
+    bytes = encodeGroupAnnounce(a);
+    CHECK(!decodeGroupAnnounce(bytes.data(), bytes.size(), a2));
+
     GroupData d;
     d.fileId = 0x3A7F01;
     d.index = 23;
@@ -144,6 +151,12 @@ void testFramesRoundTrip()
     bytes = encodeGroupWindow(w);
     CHECK(bytes.size() == 30 && bytes.size() <= 36); // one Adagio codeword
     CHECK(decodeGroupWindow(bytes.data(), bytes.size(), w2) && w2.priorityCall == "K7ABC" && w2.tempo == 4);
+    GroupWindow huge = w;
+    huge.size = (uint32_t)GROUP_FILE_MAX_BYTES + 1;
+    huge.pieceBytes = 249;
+    huge.pieces = (int)((huge.size + 248) / 249);
+    bytes = encodeGroupWindow(huge);
+    CHECK(!decodeGroupWindow(bytes.data(), bytes.size(), w2));
 
     GroupRequest r;
     r.fileId = 0x3A7F01;
@@ -941,6 +954,254 @@ void testLimits()
     CHECK(engine.dueGear(100000) == 0);
 }
 
+// Cancelled, then sent again: the listener that deleted what came takes
+// the new pass from the start. So does one that could not save it.
+void testSendingAgainAfterACancel()
+{
+    Scratch scratch("cancelagain");
+    std::string source = scratch.write("C.BIN", 8000);
+    Group group;
+    group.add("AG7EW");
+    group.add("K7ABC").engine.setAutoReceive(scratch.folder("k"));
+
+    std::string error;
+    uint64_t id = group[0].engine.send(source, group.nowMs, error);
+    CHECK(group.runUntil([&]() { return group.file(1, false).have >= 8; }));
+    CHECK(group[0].engine.cancel(id));
+    CHECK(group.runUntil([&]() { return group.file(0, true).state == State::Ended; }));
+    CHECK(group.file(1, false).state == State::CancelledThere && group.file(1, false).have == 0);
+    uint32_t firstId = group.file(1, false).fileId;
+
+    CHECK(group[0].engine.send(source, group.nowMs, error) != 0);
+    CHECK(group.runUntil([&]() { return group.file(1, false).state == State::Saved; }));
+    GroupFile got = group.file(1, false);
+    CHECK(got.fileId == firstId && readFile(got.path) == readFile(source));
+
+    // A folder that can't be written to: the save fails; with one that
+    // can, the file sent again is saved.
+    Scratch scratch2("failagain");
+    std::string source2 = scratch2.write("D.BIN", 3000);
+    std::string notAFolder = scratch2.write("not-a-folder", 10);
+    Group other;
+    other.add("AG7EW");
+    other.add("K7ABC").engine.setAutoReceive(notAFolder);
+    CHECK(other[0].engine.send(source2, other.nowMs, error) != 0);
+    CHECK(other.runUntil([&]() { return other.file(0, true).state == State::Ended; }));
+    CHECK(other.file(1, false).state == State::Failed);
+    other[1].engine.setAutoReceive(scratch2.folder("k"));
+    CHECK(other[0].engine.send(source2, other.nowMs, error) != 0);
+    CHECK(other.runUntil([&]() { return other.file(1, false).state == State::Saved; }));
+    CHECK(readFile(other.file(1, false).path) == readFile(source2));
+}
+
+// The same file sent again long after the first pass's service time: the
+// new pass is under way from its first frame, and never taken for over,
+// even with its end of stream lost.
+void testSendingAgainLater()
+{
+    Scratch scratch("later");
+    std::string source = scratch.write("NET.TXT", 4000);
+    Group group;
+    group.add("AG7EW");
+    group.add("K7ABC").engine.setAutoReceive(scratch.folder("k"));
+
+    bool firstTime = true;
+    bool windowLost = false;
+    group.loss = [&](int from, int to, const std::vector<uint8_t>& frame) {
+        if (firstTime) return from == 1 || (isData(frame) && frame[5] % 2 == 0);
+        if (from != 0 || to != 1) return false;
+        if (isType(frame, GroupFileFrame::Window) && !windowLost)
+        {
+            windowLost = true;
+            return true;
+        }
+        return isData(frame, 0) && !windowLost;
+    };
+    std::string error;
+    CHECK(group[0].engine.send(source, group.nowMs, error) != 0);
+    CHECK(group.runUntil([&]() { return group.file(0, true).state == State::Ended; }));
+    CHECK(group.file(1, false).state == State::Incomplete);
+    group.runUntil([]() { return false; }, 30 * 60 * 1000);
+
+    firstTime = false;
+    CHECK(group[0].engine.send(source, group.nowMs, error) != 0);
+    int flaps = 0;
+    State last = group.file(1, false).state;
+    CHECK(group.runUntil([&]() {
+        State now = group.file(1, false).state;
+        if (now == State::Incomplete && last != State::Incomplete) flaps++;
+        last = now;
+        return now == State::Saved;
+    }));
+    CHECK(flaps == 0);
+    CHECK(windowLost && readFile(group.file(1, false).path) == readFile(source));
+}
+
+// Every piece heard and the hash right, but never the name, and the
+// requests for it unheard: once the sender ends, it is saved under a name
+// of its own.
+void testAllOfItButTheName()
+{
+    Scratch scratch("noname");
+    std::string source = scratch.write("N.BIN", 3000);
+    Group group;
+    group.add("AG7EW");
+    group.add("K7ABC").engine.setAutoReceive(scratch.folder("k"));
+    group.loss = [&](int from, int, const std::vector<uint8_t>& frame) {
+        return from == 1 || isType(frame, GroupFileFrame::Announce);
+    };
+    std::string error;
+    CHECK(group[0].engine.send(source, group.nowMs, error) != 0);
+    CHECK(group.runUntil([&]() { return group.file(0, true).state == State::Ended; }));
+    CHECK(group.runUntil([&]() { return !group.file(1, false).live(); }));
+    GroupFile got = group.file(1, false);
+    CHECK(got.state == State::Saved && got.autoReceived);
+    CHECK(fs::path(pathFromUtf8(got.path)).filename() == "received-file");
+    CHECK(readFile(got.path) == readFile(source));
+}
+
+// Sent again at another tempo, so in pieces of another size: what the
+// listener kept is cut the new way, and it finishes the file with pieces
+// it never heard in that size.
+void testSendingAgainAtAnotherTempo()
+{
+    Scratch scratch("retempo");
+    std::string source = scratch.write("T.BIN", 7000);
+    Group group;
+    group.add("AG7EW", 4); // Presto: 32 pieces of 220
+    group.add("K7ABC").engine.setAutoReceive(scratch.folder("k"));
+
+    // Never heard asking. The first time it has bytes 0 to 3519; the
+    // second, at Duet (31 pieces of 228), it loses the pieces those cover.
+    bool firstTime = true;
+    group.loss = [&](int from, int, const std::vector<uint8_t>& frame) {
+        GroupData d;
+        if (from == 1) return true;
+        if (!decodeGroupData(frame.data(), frame.size(), d)) return false;
+        return firstTime ? d.index >= 16 : d.index < 15;
+    };
+    std::string error;
+    CHECK(group[0].engine.send(source, group.nowMs, error) != 0);
+    CHECK(group.runUntil([&]() { return group.file(0, true).state == State::Ended; }));
+    GroupFile kept = group.file(1, false);
+    CHECK(kept.state == State::Incomplete && kept.pieces == 32 && kept.have == 16);
+
+    firstTime = false;
+    group[0].engine.setGear(5);
+    CHECK(group[0].engine.send(source, group.nowMs, error) != 0);
+    CHECK(group.runUntil([&]() { return group.file(1, false).pieces == 31; }));
+    CHECK(group.file(1, false).have >= 15);
+    CHECK(group.runUntil([&]() { return group.file(1, false).state == State::Saved; }));
+    GroupFile got = group.file(1, false);
+    CHECK(got.fileId == kept.fileId && readFile(got.path) == readFile(source));
+}
+
+// Receiving without asking turned off while a file comes: it waits for
+// the operator again, and nothing more is asked or saved.
+void testAutoReceiveTurnedOff()
+{
+    Scratch scratch("autooff");
+    std::string source = scratch.write("A.BIN", 3000);
+    Group group;
+    group.add("AG7EW");
+    group.add("K7ABC").engine.setAutoReceive(scratch.folder("k"));
+    group.loss = [&](int from, int, const std::vector<uint8_t>& frame) { return from == 0 && isData(frame, 2); };
+
+    std::string error;
+    CHECK(group[0].engine.send(source, group.nowMs, error) != 0);
+    // Waiting for its slot in the first window.
+    CHECK(group.runUntil([&]() { return group.file(1, false).slot >= 0; }));
+    CHECK(group.file(1, false).state == State::Receiving && group.file(1, false).autoReceived);
+    group[1].engine.setAutoReceive("");
+    GroupFile heard = group.file(1, false);
+    CHECK(heard.state == State::Heard && !heard.autoReceived && heard.slot < 0);
+
+    CHECK(group.runUntil([&]() { return group.file(0, true).state == State::Ended; }));
+    CHECK(group[1].keyings == 0);
+    CHECK(group.file(1, false).state == State::Incomplete);
+    CHECK(fs::is_empty(scratch.dir / "k"));
+}
+
+// Receive on a file whose sender has stopped: it waits, and is saved there
+// when it is sent again.
+void testReceiveAfterItEnded()
+{
+    Scratch scratch("receivelater");
+    std::string source = scratch.write("L.TXT", 4000);
+    Group group;
+    group.add("AG7EW");
+    group.add("K7ABC");
+    bool firstTime = true;
+    group.loss = [&](int from, int, const std::vector<uint8_t>& frame) {
+        return firstTime && from == 0 && isData(frame) && frame[5] % 2 == 0;
+    };
+    std::string error;
+    CHECK(group[0].engine.send(source, group.nowMs, error) != 0);
+    CHECK(group.runUntil([&]() { return group.file(0, true).state == State::Ended; }));
+    GroupFile kept = group.file(1, false);
+    CHECK(kept.state == State::Incomplete);
+
+    std::string saveAs = scratch.path("mine.txt");
+    CHECK(group[1].engine.receive(kept.id, saveAs, group.nowMs, error));
+    GroupFile waiting = group.file(1, false);
+    CHECK(waiting.state == State::Incomplete && waiting.path == saveAs && !waiting.live());
+
+    firstTime = false;
+    CHECK(group[0].engine.send(source, group.nowMs, error) != 0);
+    CHECK(group.runUntil([&]() { return group.file(1, false).state == State::Saved; }));
+    CHECK(group.file(1, false).path == saveAs && readFile(saveAs) == readFile(source));
+}
+
+// A station heard asking and one heard only as a burst with codewords
+// lost, in the same window: after the resend, the next Window still has
+// room for the second, and gives it slot 0.
+void testHintsOutliveTheRound()
+{
+    Scratch scratch("hints");
+    std::string source = scratch.write("H.BIN", 1000);
+    GroupFileEngine sender;
+    sender.setMyCallsign("AG7EW");
+    sender.setGear(5);
+    sender.setRandomSeed(1);
+    uint64_t now = 1000;
+    std::string error;
+    CHECK(sender.send(source, now, error) != 0);
+
+    GroupWindow window;
+    auto nextWindow = [&]() {
+        std::vector<std::vector<uint8_t>> frames;
+        for (int i = 0; i < 2000; i++)
+        {
+            now += 100;
+            sender.tick(now, false, false);
+            if (!sender.takeKeying(now, frames)) continue;
+            sender.keyingSent(now);
+            for (const auto& f : frames)
+            {
+                if (decodeGroupWindow(f.data(), f.size(), window)) return true;
+            }
+        }
+        return false;
+    };
+    CHECK(nextWindow() && window.round == 0);
+
+    GroupRequest request;
+    request.fileId = window.fileId;
+    request.round = 0;
+    request.missingTotal = 1;
+    request.call = "K7ABC";
+    request.pieces = {1};
+    size_t listed = 0;
+    std::vector<uint8_t> bytes = encodeGroupRequest(request, 64, listed);
+    sender.onFrame(bytes.data(), bytes.size(), now);
+    sender.onHeardLost("VK3XYZ", 2, now);
+
+    CHECK(nextWindow());
+    CHECK(window.round == 1 && window.priorityCall == "VK3XYZ");
+    // Three for one station that asked, and two for the one unheard.
+    CHECK(window.slots == 5);
+}
+
 } // namespace
 
 int main()
@@ -962,6 +1223,13 @@ int main()
     testTurnsGoRound();
     testStopServing();
     testLimits();
+    testSendingAgainAfterACancel();
+    testSendingAgainLater();
+    testAllOfItButTheName();
+    testSendingAgainAtAnotherTempo();
+    testAutoReceiveTurnedOff();
+    testReceiveAfterItEnded();
+    testHintsOutliveTheRound();
 
     if (failures > 0)
     {

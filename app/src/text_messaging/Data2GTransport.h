@@ -296,6 +296,9 @@ private:
         uint64_t heldSinceMs = 0;   // NOT_SENT_TIMEOUT runs from here
         std::set<uint16_t> tags;
     } fileKeying_;
+    // A chat keying's ACKMODE tags given up on while data2g-host may still
+    // hold them: a drop it reports is theirs before it is a file keying's.
+    std::set<uint16_t> staleChatTags_;
 
     FrameCallback frameCallback_;
     LogFunction log_;

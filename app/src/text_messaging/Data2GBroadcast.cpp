@@ -287,6 +287,8 @@ bool decodeGroupAnnounce(const uint8_t* bytes, size_t length, GroupAnnounce& out
     a.name.assign((const char*)bytes + at, nameLength);
     if (a.version < 1 || a.pieceBytes < 1 || a.pieceBytes > MAX_PIECE_BYTES || a.tempo > 4) return false;
     if (a.size == 0 || a.pieces != (int)((a.size + (uint32_t)a.pieceBytes - 1) / (uint32_t)a.pieceBytes)) return false;
+    // No sender sends more, so no listener keeps more.
+    if (a.size > GROUP_FILE_MAX_BYTES) return false;
     out = a;
     return true;
 }
@@ -349,6 +351,7 @@ bool decodeGroupWindow(const uint8_t* bytes, size_t length, GroupWindow& out)
     w.tempo = at < length && bytes[at] <= 4 ? bytes[at] : -1;
     if (w.slots < 1 || w.slotHalfSeconds < 1 || w.pieceBytes < 1 || w.pieceBytes > MAX_PIECE_BYTES) return false;
     if (w.size == 0 || w.pieces != (int)((w.size + (uint32_t)w.pieceBytes - 1) / (uint32_t)w.pieceBytes)) return false;
+    if (w.size > GROUP_FILE_MAX_BYTES) return false;
     out = w;
     return true;
 }
@@ -617,6 +620,19 @@ void GroupFileEngine::setRandomSeed(uint32_t seed)
 void GroupFileEngine::setAutoReceive(const std::string& folder)
 {
     autoFolder_ = folder;
+    if (!folder.empty()) return;
+
+    // Turned off: what was being received without asking waits for the
+    // operator's Receive again, and asks for nothing until then.
+    for (Incoming& in : incoming_)
+    {
+        if (!in.autoReceive || in.state != GroupFile::State::Receiving) continue;
+        in.autoReceive = false;
+        in.state = GroupFile::State::Heard;
+        in.pending = false;
+        in.lateAtMs = 0;
+        changed();
+    }
 }
 
 ModeInfo GroupFileEngine::modeFor(int gear) const
@@ -828,9 +844,11 @@ bool GroupFileEngine::receive(uint64_t id, const std::string& path, uint64_t now
     }
     in->path = path;
     in->autoReceive = false;
-    in->state = State::Receiving;
     in->error.clear();
     changed();
+    // Over for now: it is received there when it is sent again.
+    if (in->state == State::Incomplete) return true;
+    in->state = State::Receiving;
 
     if (in->verified)
     {
@@ -965,7 +983,50 @@ GroupFileEngine::Incoming& GroupFileEngine::incomingFor(uint32_t fileId, uint64_
 
 void GroupFileEngine::learnGeometry(Incoming& in, uint32_t size, int pieceBytes, int pieces, const Hash8& hash)
 {
-    if (in.geometry) return;
+    if (in.geometry && in.size == size && in.pieceBytes == pieceBytes && in.hash == hash) return;
+    if (in.geometry)
+    {
+        // Sent again at another tempo, so cut into pieces of another size:
+        // what is known of the file is cut again the new way. Another file
+        // under the same id starts over.
+        bool sameFile = in.size == size && in.hash == hash;
+        std::map<int, std::vector<uint8_t>> spool;
+        if (sameFile)
+        {
+            std::vector<uint8_t> content(size);
+            std::vector<bool> known(size, false);
+            for (const auto& [index, bytes] : in.spool)
+            {
+                size_t from = (size_t)index * (size_t)in.pieceBytes;
+                std::copy(bytes.begin(), bytes.end(), content.begin() + (long)from);
+                std::fill(known.begin() + (long)from, known.begin() + (long)(from + bytes.size()), true);
+            }
+            for (int i = 0; i < pieces; i++)
+            {
+                size_t from = (size_t)i * (size_t)pieceBytes;
+                size_t to = std::min((size_t)size, from + (size_t)pieceBytes);
+                if (std::all_of(known.begin() + (long)from, known.begin() + (long)to, [](bool k) { return k; }))
+                {
+                    spool[i].assign(content.begin() + (long)from, content.begin() + (long)to);
+                }
+            }
+        }
+        else
+        {
+            in.verified = false;
+            in.hashFailures = 0;
+            in.restart = false;
+        }
+        in.spool = std::move(spool);
+        in.size = size;
+        in.pieceBytes = pieceBytes;
+        in.pieces = pieces;
+        in.hash = hash;
+        in.askedByOthers.clear();
+        in.coming = 0;
+        changed();
+        return;
+    }
     in.geometry = true;
     in.size = size;
     in.pieceBytes = pieceBytes;
@@ -1067,7 +1128,17 @@ bool GroupFileEngine::save(Incoming& in)
     std::filesystem::path final;
     if (in.autoReceive)
     {
-        std::filesystem::path folder = pathFromUtf8(autoFolder_.empty() ? in.path : autoFolder_);
+        if (autoFolder_.empty())
+        {
+            // No longer received without asking: the operator says where.
+            in.autoReceive = false;
+            in.state = GroupFile::State::Heard;
+            in.pending = false;
+            in.lateAtMs = 0;
+            changed();
+            return false;
+        }
+        std::filesystem::path folder = pathFromUtf8(autoFolder_);
         std::filesystem::create_directories(folder, ec);
         final = freeSavePath(folder, in.name.empty() ? std::string("received-file") : in.name);
     }
@@ -1177,10 +1248,37 @@ void GroupFileEngine::onFrame(const uint8_t* bytes, size_t length, uint64_t nowM
     auto ours = [this](uint32_t fileId) {
         return std::any_of(outgoing_.begin(), outgoing_.end(), [&](const Outgoing& o) { return o.fileId == fileId; });
     };
-    // A transfer heard again after it ended (sent anew) is under way again.
-    auto revive = [this](Incoming& in) {
+    // Cancelled, or not saved or verified, and the sender's pass over: the
+    // same file sent again is taken from the start.
+    auto overForGood = [](const Incoming& in) {
+        return in.ended &&
+               (in.state == State::CancelledThere || in.state == State::Failed || in.state == State::FailedVerification);
+    };
+    // A transfer heard again after it ended (sent anew) is under way again,
+    // with nothing of the last pass's windows.
+    auto revive = [this, overForGood](Incoming& in) {
         if (in.state != State::Incomplete && !in.ended) return;
+        if (overForGood(in))
+        {
+            in.spool.clear();
+            in.verified = false;
+            in.hashFailures = 0;
+            in.restart = false;
+            in.path.clear();
+            in.error.clear();
+            in.state = State::Incomplete;
+        }
         in.ended = false;
+        in.stopAtMs = 0;
+        in.windowLengthMs = 0;
+        in.round = -1;
+        in.asked = false;
+        in.pending = false;
+        in.lateSent = false;
+        in.lateAtMs = 0;
+        in.askedByOthers.clear();
+        in.firstInLine.clear();
+        in.coming = 0;
         if (in.state == State::Incomplete)
         {
             in.autoReceive = in.path.empty() && !autoFolder_.empty();
@@ -1195,8 +1293,9 @@ void GroupFileEngine::onFrame(const uint8_t* bytes, size_t length, uint64_t nowM
         in.autoReceive = true;
         changed();
     };
-    auto taking = [](const Incoming& in) {
-        return in.state == State::Heard || in.state == State::Receiving || in.state == State::Incomplete;
+    auto taking = [overForGood](const Incoming& in) {
+        return in.state == State::Heard || in.state == State::Receiving || in.state == State::Incomplete ||
+               overForGood(in);
     };
 
     switch ((GroupFileFrame)bytes[0])
@@ -1316,15 +1415,26 @@ void GroupFileEngine::onFrame(const uint8_t* bytes, size_t length, uint64_t nowM
             GroupEnd e;
             if (!decodeGroupEnd(bytes, length, e) || ours(e.fileId)) return;
             Incoming* in = findIncoming(e.fileId);
-            if (in == nullptr || !taking(*in)) return;
+            if (in == nullptr) return;
+            if (in->state == State::Failed || in->state == State::FailedVerification || in->state == State::CancelledThere)
+            {
+                in->ended = true; // so the next time it is sent is taken afresh
+                return;
+            }
+            if (!taking(*in)) return;
             in->heardMs = nowMs;
+            in->ended = true;
             if (e.reason == GroupFileEnd::Cancelled)
             {
                 endIncoming(*in, State::CancelledThere);
                 return;
             }
-            in->ended = true;
             if (!in->verified) endIncoming(*in, State::Incomplete);
+            else if (in->state == State::Receiving)
+            {
+                // All of it, and no name coming now: saved under one of its own.
+                save(*in);
+            }
             else
             {
                 in->pending = false;
@@ -1626,7 +1736,7 @@ void GroupFileEngine::elect(Outgoing& out)
     out.lastNamed = first.call;
     out.lastStations = (int)order.size();
     out.asks.clear();
-    out.lostHints.clear();
+    // The hints stay for the next Window: its extra slots, and slot 0.
 }
 
 bool GroupFileEngine::takeSenderKeying(Outgoing& out, uint64_t nowMs, Taken& taken)
@@ -1986,6 +2096,14 @@ void GroupFileEngine::tick(uint64_t nowMs, bool busy, bool held)
             in.spool.clear();
             changed();
         }
+        // The sender gone quiet for good, or its service time over.
+        uint64_t window = in.windowLengthMs != 0 ? in.windowLengthMs : 30000;
+        uint64_t idle = std::max<uint64_t>(10 * 60 * 1000, 2 * (window + (uint64_t)(RESEND_CAP_SECONDS * 1000)));
+        bool stalled = nowMs - in.heardMs >= idle || (in.stopAtMs != 0 && nowMs >= in.stopAtMs);
+
+        // Not saved or verified, and that pass is over: sent again, it is
+        // taken afresh.
+        if ((in.state == State::Failed || in.state == State::FailedVerification) && stalled) in.ended = true;
         if (in.state != State::Heard && in.state != State::Receiving) continue;
 
         // A slot gone by unused: withdrawn, to ask again next round.
@@ -2007,14 +2125,15 @@ void GroupFileEngine::tick(uint64_t nowMs, bool busy, bool held)
             if (nowMs - in.heardMs >= quiet) in.lateAtMs = nowMs + random_() % (LATE_REQUEST_SPREAD_MS + 1);
         }
 
-        // The sender gone quiet for good, or its service time over.
-        uint64_t window = in.windowLengthMs != 0 ? in.windowLengthMs : 30000;
-        uint64_t idle = std::max<uint64_t>(10 * 60 * 1000, 2 * (window + (uint64_t)(RESEND_CAP_SECONDS * 1000)));
-        bool stalled = nowMs - in.heardMs >= idle || (in.stopAtMs != 0 && nowMs >= in.stopAtMs);
         if (stalled && !in.ended)
         {
             in.ended = true;
             if (!in.verified) endIncoming(in, State::Incomplete);
+            else if (in.state == State::Receiving)
+            {
+                // All of it, and no name coming now: saved under one of its own.
+                save(in);
+            }
             else
             {
                 in.pending = false;
