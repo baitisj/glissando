@@ -68,11 +68,12 @@ constexpr int SMOKE_FRAME_MS = 100;
 
 // The television effects for Data2G: the picture squeezes to a line by
 // TV_LINE seconds, the line to a dot by TV_DOT, and the dot fades by TV_OFF;
-// coming back, the waterfall's wobble dies away over TV_WARM.
+// coming back, the set warms up over TV_WARM: dot, line, a bouncing picture
+// that bobs and wobbles, brightening as it straightens.
 constexpr double TV_LINE = 0.35;
 constexpr double TV_DOT = 0.6;
 constexpr double TV_OFF = 1.4;
-constexpr double TV_WARM = 2.5;
+constexpr double TV_WARM = 3.0;
 constexpr int TV_FRAME_MS = 50;
 
 // Frames queued to be sent but still not played this long after we last
@@ -353,29 +354,59 @@ void GlissandoScope::switchOffTrace(wxImage& image, double seconds) const
     }
 }
 
-void GlissandoScope::warpTrace(wxImage& image, double seconds) const
+void GlissandoScope::switchOnTrace(wxImage& image, double seconds) const
 {
-    // The waterfall coming back on: each row pushed sideways by a wave that
-    // rolls down the screen, wobbling less and less until it is straight.
+    // The waterfall coming back on like an old set warming up: a dot that
+    // stretches to a line across the middle, the line opening out to the
+    // picture with a bounce, the picture bobbing up and down and each row
+    // pushed sideways by a wave rolling down the screen, all dying away as
+    // the tube brightens from dim to full.
     int w = image.GetWidth(), h = image.GetHeight();
     if (w <= 0 || h <= 0) return;
     double settle = 1.0 - std::clamp(seconds / TV_WARM, 0.0, 1.0);
+    double across = 1.0 - std::exp(-seconds * 20.0);
+    double tall = 1.0 - std::exp(-seconds * 8.0) * std::cos(seconds * 12.0);
+    double bob = h * 0.06 * std::exp(-seconds * 1.5) * std::sin(seconds * 7.0);
     double amplitude = 22.0 * settle * settle;
-    if (amplitude < 0.5) return;
-    std::vector<unsigned char> row((size_t)w * 3);
-    unsigned char* data = image.GetData();
+    double t = std::clamp(seconds / (0.85 * TV_WARM), 0.0, 1.0);
+    double bright = 0.3 + 0.7 * t * t * (3.0 - 2.0 * t);
+    double flash = 0.9 * std::exp(-seconds * 12.0);
+    if (across > 0.999 && std::abs(tall - 1.0) < 0.002 && std::abs(bob) < 0.5 && amplitude < 0.5 && bright > 0.999 &&
+        flash < 0.004)
+        return;
+
+    wxImage source = image.Copy();
+    const unsigned char* in = source.GetData();
+    unsigned char* out = image.GetData();
+    double cx = w / 2.0, cy = h / 2.0;
+    double halfTall = std::max(1.0, h * tall / 2.0);
+    double halfWide = std::max(1.0, w * across / 2.0);
     for (int y = 0; y < h; y++)
     {
-        int shift = (int)std::lround(amplitude * std::sin(0.045 * y - 9.0 * seconds) +
-                                     0.4 * amplitude * std::sin(0.13 * y + 5.0 * seconds));
-        if (shift == 0) continue;
-        unsigned char* line = data + (size_t)y * w * 3;
-        std::copy(line, line + (size_t)w * 3, row.begin());
+        unsigned char* line = out + (size_t)y * w * 3;
+        double dy = y + 0.5 - cy - bob;
+        if (std::abs(dy) > halfTall)
+        {
+            std::fill(line, line + (size_t)w * 3, 0);
+            continue;
+        }
+        int sy = std::clamp((int)std::floor(cy + dy * h / (2.0 * halfTall)), 0, h - 1);
+        double shift = amplitude * std::sin(0.045 * y - 9.0 * seconds) +
+                       0.4 * amplitude * std::sin(0.13 * y + 5.0 * seconds);
         for (int x = 0; x < w; x++)
         {
-            int from = x - shift;
+            double dx = x + 0.5 - cx - shift;
+            if (std::abs(dx) > halfWide)
+            {
+                line[x * 3] = line[x * 3 + 1] = line[x * 3 + 2] = 0;
+                continue;
+            }
+            int sx = std::clamp((int)std::floor(cx + dx * w / (2.0 * halfWide)), 0, w - 1);
             for (int c = 0; c < 3; c++)
-                line[x * 3 + c] = from >= 0 && from < w ? row[(size_t)from * 3 + c] : 0;
+            {
+                double v = in[((size_t)sy * w + sx) * 3 + c] * bright;
+                line[x * 3 + c] = (unsigned char)std::lround(std::min(255.0, v + (255.0 - v) * flash));
+            }
         }
     }
 }
@@ -1132,7 +1163,7 @@ void GlissandoScope::OnPaint(wxPaintEvent&)
         else
             renderTrace(image);
         if (tv == Tv::SwitchingOff) switchOffTrace(image, tvSeconds);
-        if (tv == Tv::WarmingUp) warpTrace(image, tvSeconds);
+        if (tv == Tv::WarmingUp) switchOnTrace(image, tvSeconds);
         dc.DrawBitmap(wxBitmap(image), trace.x, trace.y);
     }
 

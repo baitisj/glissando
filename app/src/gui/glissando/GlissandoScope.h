@@ -191,7 +191,7 @@ private:
     enum class Tv { Normal, SwitchingOff, Scene, WarmingUp };
     Tv tvState(double now, double& seconds) const;
     void switchOffTrace(wxImage& image, double seconds) const;
-    void warpTrace(wxImage& image, double seconds) const;
+    void switchOnTrace(wxImage& image, double seconds) const;
     void paintTv(wxGraphicsContext* gc, const wxRect& trace, Tv tv, double seconds);
 
     // Lets off puffs of smoke while there is any, forgets the ones gone,
