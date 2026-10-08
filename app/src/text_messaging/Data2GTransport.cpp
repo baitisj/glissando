@@ -331,6 +331,7 @@ void Data2GTransport::start(const Settings& settings)
         useSessions_ = settings.useSessions;
         dataConnected_ = false;
         released_.clear();
+        farewellPeer_.clear();
         sessionWritten_ = sessionRead_ = sessionAcked_ = 0;
         bufferExact_ = -1;
         fileKeying_ = FileKeying();
@@ -511,8 +512,9 @@ bool Data2GTransport::releaseStation(const std::string& destination)
         it = sessionKeyings_.erase(it);
     }
 
-    // Files with it are cancelled here; the far end finds the session gone.
-    files_.release(peer);
+    // Files with it are cancelled here. Those offered in a session with it
+    // are cancelled there too, by records written before the session ends.
+    files_.release(peer, session_ == SessionState::Connected && sessionPeer_ == peer);
 
     if (hasKeying_ && keying_.stage == Keying::Stage::Waiting && soleDestination(keying_.bursts) == peer)
     {
@@ -954,6 +956,7 @@ void Data2GTransport::run(Settings settings)
                 sessionPeer_ = weCalled ? event.peer : event.text;
                 sessionOurs_ = weCalled;
                 session_ = SessionState::Connected;
+                farewellPeer_.clear();
                 noSessionUntil_.erase(sessionPeer_);
                 sessionActivityMs_ = now();
                 sessionWritten_ = sessionRead_ = sessionAcked_ = 0;
@@ -1068,6 +1071,20 @@ void Data2GTransport::run(Settings settings)
             if (session_ != SessionState::None && released.count(sessionPeer_) != 0 && !sessionAborted_)
             {
                 bool clean = session_ == SessionState::Connected && status_.sessionUnacked == 0;
+                if (clean && data.fd >= 0 && sessionWritableLocked() && files_.hasRecords(sessionPeer_))
+                {
+                    // The far end hears first what became of the files
+                    // offered in it (a Cancel each); then DISCONNECT, below,
+                    // once data2g-host has read them.
+                    std::vector<uint8_t> bytes = files_.takeRecords(sessionPeer_, t);
+                    farewellPeer_ = sessionPeer_;
+                    farewellAtMs_ = t;
+                    wroteLocked(bytes.size());
+                    if (log_) log_("Data2G: station deselected; ending the session with " + sessionPeer_);
+                    lock.unlock();
+                    if (!sendBytes(data, bytes)) closeSocket_(data, "write failed");
+                    return;
+                }
                 if (session_ != SessionState::Disconnecting || !clean)
                 {
                     session_ = SessionState::Disconnecting;
@@ -1077,6 +1094,26 @@ void Data2GTransport::run(Settings settings)
                 }
             }
         }
+
+        // Its last records written, a session let go of ends: cleanly once
+        // data2g-host has read them (it then waits only for the far end to
+        // acknowledge those few bytes), or with ABORT if it never does.
+        if (!farewellPeer_.empty())
+        {
+            bool read = sessionWritableLocked();
+            if (session_ != SessionState::Connected || sessionPeer_ != farewellPeer_)
+            {
+                farewellPeer_.clear();
+            }
+            else if (read || t - farewellAtMs_ >= FAREWELL_WAIT_MS)
+            {
+                farewellPeer_.clear();
+                session_ = SessionState::Disconnecting;
+                sessionAborted_ = !read;
+                queueCommand(Command::Kind::Disconnect, read ? "DISCONNECT" : "ABORT");
+            }
+        }
+        bool farewell = !farewellPeer_.empty();
 
         // A session keying that has waited too long for its session (the
         // channel held by sessions of other stations) goes to the group.
@@ -1116,7 +1153,7 @@ void Data2GTransport::run(Settings settings)
                                { return !k.written && (others ? k.peer != peer : k.peer == peer); });
         };
 
-        if (session_ == SessionState::Connected)
+        if (session_ == SessionState::Connected && !farewell)
         {
             // Into the session, once data2g-host has taken in what went
             // before: the file records waiting (an offer first of all),
@@ -1561,10 +1598,11 @@ void Data2GTransport::setGroupFileAutoReceive(const std::string& folder)
     groupFiles_.setAutoReceive(folder);
 }
 
-void Data2GTransport::setGroupFilesInhibited(bool inhibited)
+void Data2GTransport::setFilesInhibited(bool inhibited)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     groupFiles_.setInhibited(inhibited);
+    files_.setInhibited(inhibited);
 }
 
 void Data2GTransport::holdGroupFiles(uint64_t holdMs)

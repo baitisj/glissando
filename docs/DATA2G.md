@@ -289,7 +289,13 @@ When things go wrong:
 - The receiver cancels: a Cancel back; the sender stops and shows
   `cancelled by W1AW`.
 - Deselecting the station ends the session at once, as before, and its
-  files are cancelled on our side; the far end sees the session gone.
+  files are cancelled on our side. With nothing of ours unacknowledged,
+  a Cancel for each file offered in the session goes first, and the
+  `DISCONNECT` once data2g-host has read it, so the far end shows
+  `cancelled by VK3ABC` (an offer it made, still unanswered, included);
+  otherwise `ABORT`, and the far end sees the session gone. Clicking a
+  line in the chat log that would choose another station asks first
+  while files are going to or from the one chosen now.
 - A station running an older Glissando takes the `F` for a stream that
   isn't chat and closes the session. A session the far end ends while our
   offer is unanswered so shows `failed: their Glissando can't take
@@ -308,7 +314,12 @@ When things go wrong:
   can't get its session (no answer, data2g-host busy, or ten minutes of
   waiting) fails.
 - Sending is off while the station is receive only (outside the US data
-  segments).
+  segments). Becoming receive only mid-file ends every file either way
+  (`failed`, sending not allowed here), with a Cancel in the session so
+  the far end shows `failed on W1AW's side`; a file waiting for its
+  session fails without the station being called, and an offer arriving
+  meanwhile is refused the same way, even from a station on the
+  auto-accept list.
 
 Known limit: locators. A station learns that another takes locator
 frames from its pings and acknowledgements. In a session there are no

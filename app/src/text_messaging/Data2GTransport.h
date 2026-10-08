@@ -153,8 +153,10 @@ public:
     bool ignoreGroupFile(uint64_t id);
     // Received without asking into folder; empty: not.
     void setGroupFileAutoReceive(const std::string& folder);
-    // Sending not allowed here: no file keyings at all.
-    void setGroupFilesInhibited(bool inhibited);
+    // Sending not allowed here: no file keyings on the group, and every
+    // file through a session ends, the far end told in it; nothing new
+    // is offered or accepted, and no session is called for a file.
+    void setFilesInhibited(bool inhibited);
     // "Woah!": no file keying for this long.
     void holdGroupFiles(uint64_t holdMs);
     std::vector<Data2G::GroupFile> groupFiles() const;
@@ -178,6 +180,9 @@ public:
     // long and nothing of ours is waiting on it, so the group can be heard
     // again: long enough for the far end to answer in the same session.
     static constexpr uint64_t SESSION_IDLE_MS = 45000;
+    // How long a session let go of waits for data2g-host to read its last
+    // records before it is aborted instead.
+    static constexpr uint64_t FAREWELL_WAIT_MS = 10000;
 
     // A station that would not take a session is sent to through the group
     // for this long before a session is tried again.
@@ -263,6 +268,10 @@ private:
     bool dataConnected_;
     std::set<std::string> released_;    // stations whose session is to end at once
     bool sessionAborted_;               // ABORT sent for the session now ending
+    // A station let go of whose files were cancelled in its session: the
+    // session ends once data2g-host has read the records saying so.
+    std::string farewellPeer_;
+    uint64_t farewellAtMs_ = 0;
 
     // Session keyings in the order given, and what has become of them.
     std::deque<SessionKeying> sessionKeyings_;

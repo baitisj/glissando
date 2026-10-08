@@ -179,6 +179,8 @@ private:
     wxString fileLineHtml(const FileLine& line, const Palette& colors) const;
     wxString groupLineHtml(const FileLine& line, const Palette& colors) const;
     void sendFileTo(const std::string& callsign);
+    // Files going to or from the station, which letting go of it cancels.
+    int liveFilesWith(const std::string& callsign) const;
     void sendFileToGroup();
     void receiveGroupFile(uint64_t id);
     void ignoreGroupFile(uint64_t id);

@@ -1533,6 +1533,68 @@ void testDeselectingTheStationCancelsTheFile()
     CHECK(hosts.heardCommand(0, "ABORT"));
 }
 
+// The receiver lets go of the station while the offer is up: the sender
+// hears it cancelled (not that the receiver can't take files), and the
+// session then ends cleanly.
+void testDeselectingWhileAnOfferIsUp()
+{
+    FakeHostPair hosts;
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(sessionsReady(hosts, a, b));
+    FileScratch scratch("deselect-offer");
+
+    std::string error;
+    uint64_t id = a.transport.sendFile("VK3ABC", scratch.write("FRED.TXT", 500), error);
+    runBoth(a, b, [&]() { return newestFile(b.transport, false).state == FileState::Asking; });
+    CHECK(fileState(a.transport, id) == FileState::Offered);
+    b.protocol.releaseStation("W1AW");
+    CHECK(newestFile(b.transport, false).state == FileState::Cancelled);
+    runBoth(a, b, [&]() { return fileState(a.transport, id) != FileState::Offered; });
+    CHECK(fileState(a.transport, id) == FileState::CancelledThere);
+    runBoth(a, b, [&]() { return hosts.heardCommand(1, "DISCONNECT"); });
+    CHECK(hosts.heardCommand(1, "DISCONNECT"));
+    CHECK(!hosts.heardCommand(1, "ABORT"));
+}
+
+// Sending stops being allowed mid-file (out of the data segments): no more
+// pieces, the far end told, and a file waiting for another station fails
+// rather than call it.
+void testInhibitedStopsSessionFiles()
+{
+    FakeHostPair hosts;
+    holdSide0(hosts);
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(sessionsReady(hosts, a, b));
+    FileScratch scratch("inhibit");
+    b.transport.setFileAutoAccept(scratch.dir.string(), {"W1AW"});
+
+    std::string error;
+    uint64_t id = a.transport.sendFile("VK3ABC", scratch.write("big.bin", 60000), error);
+    uint64_t waiting = a.transport.sendFile("K7ABC", scratch.write("next.bin", 100), error);
+    CHECK(id != 0 && waiting != 0);
+    runAcking(hosts, a, b, 1500, [&]() { return newestFile(b.transport, false).done >= 4096; });
+    CHECK(fileState(a.transport, id) == FileState::Sending);
+
+    a.transport.setFilesInhibited(true);
+    CHECK(fileState(a.transport, id) == FileState::Failed);
+    CHECK(fileState(a.transport, waiting) == FileState::Failed);
+    CHECK(a.transport.sendFile("K7ABC", scratch.write("more.bin", 100), error) == 0);
+    runAcking(hosts, a, b, 100000,
+              [&]() { return newestFile(b.transport, false).state == FileState::FailedThere; });
+    CHECK(newestFile(b.transport, false).state == FileState::FailedThere);
+    CHECK(newestFile(b.transport, false).done < 60000);
+    for (int i = 0; i < 200; i++)
+    {
+        hosts.ackSome(0, 100000);
+        a.step();
+        b.step();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(!hosts.heardCommand(0, "CONNECT W1AW K7ABC"));
+}
+
 void testAnUnansweredOfferExpires()
 {
     FakeHostPair hosts;
@@ -2523,10 +2585,10 @@ void testGroupFilesNeedTheGroup()
     GroupStations group(hosts, {"AG7EW"});
     FileScratch scratch("group-inhibit");
     std::string source = scratch.write("A.BIN", 500);
-    group[0].transport.setGroupFilesInhibited(true);
+    group[0].transport.setFilesInhibited(true);
     std::string error;
     CHECK(group[0].transport.sendGroupFile(source, error) == 0 && !error.empty());
-    group[0].transport.setGroupFilesInhibited(false);
+    group[0].transport.setFilesInhibited(false);
     CHECK(group[0].transport.sendGroupFile(source, error) != 0);
     group[0].transport.stop();
     CHECK(groupFile(group[0], true).state == GroupState::Ended);
@@ -2596,6 +2658,8 @@ int main()
     testTheReceiverCancelsAFile();
     testALostSessionFailsTheFile();
     testDeselectingTheStationCancelsTheFile();
+    testDeselectingWhileAnOfferIsUp();
+    testInhibitedStopsSessionFiles();
     testAnUnansweredOfferExpires();
     testAnOddNameIsSavedSafely();
     testChatOvertakesALargeFile();

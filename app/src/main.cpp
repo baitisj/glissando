@@ -1068,7 +1068,7 @@ void MainFrame::applyChatModem_()
     while (calls.HasMoreTokens()) autoAccept.push_back(calls.GetNextToken().ToStdString());
     m_data2gTransport->setFileAutoAccept(std::string(chatReceivedFilesFolder().utf8_str()), autoAccept);
     chatApplyGroupFileAutoReceive();
-    m_data2gTransport->setGroupFilesInhibited(!protocol.transmitInhibitedReason().empty());
+    m_data2gTransport->setFilesInhibited(!protocol.transmitInhibitedReason().empty());
 
     if (config.data2gEnabled)
     {
@@ -1419,8 +1419,9 @@ void MainFrame::updateTextChatTransmitPermission_()
 
     protocol.setTransmitInhibited(reason);
 
-    // Files on the GLISS group key the transmitter outside the protocol.
-    if (m_data2gTransport != nullptr) m_data2gTransport->setGroupFilesInhibited(!reason.empty());
+    // Files, on the GLISS group and through sessions, key the transmitter
+    // outside the protocol.
+    if (m_data2gTransport != nullptr) m_data2gTransport->setFilesInhibited(!reason.empty());
 }
 
 //-------------------------------------------------------------------------

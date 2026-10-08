@@ -654,12 +654,113 @@ void testReleasingTheStationCancelsHere()
     std::string saveAs = scratch.path("x.got");
     CHECK(link.b.accept(last(link.b, false).id, saveAs, error));
     link.turn();
-    link.a.release("VK3ABC");
-    link.b.release("W1AW");
+
+    // With no session up, nothing is said.
+    link.a.release("VK3ABC", false);
+    link.b.release("W1AW", false);
     CHECK(transferOf(link.a, id).state == State::Cancelled);
     CHECK(last(link.b, false).state == State::Cancelled);
     CHECK(!exists(saveAs + ".part"));
-    CHECK(link.a.takeRecords("VK3ABC", link.nowMs).empty()); // the session is ending: nothing to say
+    CHECK(link.a.takeRecords("VK3ABC", link.nowMs).empty());
+    CHECK(link.b.takeRecords("W1AW", link.nowMs).empty());
+}
+
+// Letting go of the station while its offer is up, in the session: the
+// sender hears it cancelled, not that this Glissando can't take files.
+void testReleasingTheStationInASessionCancelsThere()
+{
+    Scratch scratch("release-offer");
+    Link link;
+    std::string error;
+    uint64_t id = link.a.offer("VK3ABC", scratch.write("x.bin", 9000), link.nowMs, error);
+    link.turn();
+    CHECK(last(link.b, false).state == State::Asking);
+    link.b.release("W1AW", true);
+    CHECK(last(link.b, false).state == State::Cancelled);
+    CHECK(link.b.hasRecords("W1AW"));
+    link.turn();
+    CHECK(transferOf(link.a, id).state == State::CancelledThere);
+    CHECK(!link.b.hasRecords("W1AW"));
+
+    // And the other way, mid-file.
+    uint64_t second = link.a.offer("VK3ABC", scratch.write("y.bin", 20000), link.nowMs, error);
+    link.turn();
+    std::string saveAs = scratch.path("y.got");
+    CHECK(link.b.accept(last(link.b, false).id, saveAs, error));
+    link.turns(2);
+    CHECK(transferOf(link.a, second).state == State::Sending);
+    link.a.release("VK3ABC", true);
+    link.turn();
+    CHECK(transferOf(link.a, second).state == State::Cancelled);
+    CHECK(last(link.b, false).state == State::CancelledThere);
+    CHECK(!exists(saveAs + ".part") && !exists(saveAs));
+}
+
+// Sending not allowed here: a file going either way ends, the far end
+// told; nothing new is offered, sent, accepted or asked a session for.
+void testInhibitedSendsNothingMore()
+{
+    Scratch scratch("inhibit");
+    Link link;
+    std::string error;
+    uint64_t id = link.a.offer("VK3ABC", scratch.write("big.bin", 30000), link.nowMs, error);
+    uint64_t waiting = link.a.offer("VK3ABC", scratch.write("next.bin", 100), link.nowMs, error);
+    link.turn();
+    std::string saveAs = scratch.path("big.got");
+    CHECK(link.b.accept(last(link.b, false).id, saveAs, error));
+    link.turns(2);
+    CHECK(transferOf(link.a, id).state == State::Sending);
+
+    link.a.setInhibited(true);
+    CHECK(transferOf(link.a, id).state == State::Failed && !transferOf(link.a, id).error.empty());
+    CHECK(transferOf(link.a, waiting).state == State::Failed);
+    int pieces = link.pieces;
+    link.turns(3);
+    CHECK(link.pieces == pieces);
+    CHECK(last(link.b, false).state == State::FailedThere);
+    CHECK(!exists(saveAs + ".part"));
+
+    std::string peer;
+    uint64_t since = 0;
+    error.clear();
+    CHECK(link.a.offer("VK3ABC", scratch.write("more.bin", 10), link.nowMs, error) == 0 && !error.empty());
+    CHECK(!link.a.wantsSession(peer, since));
+    CHECK(!link.a.busyWith("VK3ABC"));
+
+    // An offer to the inhibited side, even from a station it takes files
+    // from without asking, is refused at once.
+    link.a.setAutoAccept(scratch.dir.string(), {"VK3ABC"});
+    uint64_t theirs = link.b.offer("W1AW", scratch.write("in.bin", 10), link.nowMs, error);
+    link.turns(2);
+    CHECK(last(link.a, false).state == State::Failed && !last(link.a, false).autoAccepted);
+    CHECK(transferOf(link.b, theirs).state == State::FailedThere);
+
+    // Allowed again: files go as before.
+    link.a.setInhibited(false);
+    uint64_t again = link.a.offer("VK3ABC", scratch.write("again.bin", 100), link.nowMs, error);
+    CHECK(again != 0 && link.a.wantsSession(peer, since));
+    link.turn();
+    CHECK(link.b.accept(last(link.b, false).id, scratch.path("again.got"), error));
+    link.turns(3);
+    CHECK(transferOf(link.a, again).state == State::Delivered);
+}
+
+// An offer up when sending stops being allowed is declined in effect, and
+// one arriving meanwhile can't be accepted.
+void testInhibitedReceiverEndsTheOffer()
+{
+    Scratch scratch("inhibit-offer");
+    Link link;
+    std::string error;
+    uint64_t id = link.a.offer("VK3ABC", scratch.write("x.bin", 10), link.nowMs, error);
+    link.turn();
+    uint64_t asking = last(link.b, false).id;
+    CHECK(last(link.b, false).state == State::Asking);
+    link.b.setInhibited(true);
+    CHECK(!link.b.accept(asking, scratch.path("x.got"), error));
+    CHECK(transferOf(link.b, asking).state == State::Failed);
+    link.turn();
+    CHECK(transferOf(link.a, id).state == State::FailedThere);
 }
 
 void testOfferRefusesWhatCantBeSent()
@@ -697,6 +798,9 @@ int main()
     testTheReceiverCantWrite();
     testMoreThanOfferedIsRefused();
     testReleasingTheStationCancelsHere();
+    testReleasingTheStationInASessionCancelsThere();
+    testInhibitedSendsNothingMore();
+    testInhibitedReceiverEndsTheOffer();
     testOfferRefusesWhatCantBeSent();
 
     if (failures > 0)

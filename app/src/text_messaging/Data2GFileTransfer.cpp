@@ -25,6 +25,8 @@ constexpr size_t FINISHED_KEPT = 64;
 
 const char* const FALLBACK_NAME = "received-file";
 
+const char* const NOT_ALLOWED = "Sending is not allowed here.";
+
 // The length of the UTF-8 sequence starting at text[at], or 0 when it is
 // not a whole, valid one.
 size_t utf8Length(const std::string& text, size_t at)
@@ -271,6 +273,11 @@ uint64_t FileTransferEngine::offer(const std::string& peer, const std::string& p
         error = "No station to send the file to.";
         return 0;
     }
+    if (inhibited_)
+    {
+        error = NOT_ALLOWED;
+        return 0;
+    }
 
     std::filesystem::path file = pathFromUtf8(path);
     std::error_code ec;
@@ -368,6 +375,11 @@ bool FileTransferEngine::accept(uint64_t id, const std::string& path, std::strin
         error = entry != nullptr && entry->transfer.state == FileTransfer::State::Expired
                     ? "The offer has expired."
                     : "The offer is no longer open.";
+        return false;
+    }
+    if (inhibited_)
+    {
+        error = NOT_ALLOWED;
         return false;
     }
     for (const Entry& other : entries_)
@@ -468,7 +480,7 @@ std::vector<uint8_t> FileTransferEngine::takeRecords(const std::string& peer, ui
         return e.transfer.outgoing && e.transfer.peer == peer &&
                (e.transfer.state == FileTransfer::State::Offered || e.transfer.state == FileTransfer::State::Sending);
     });
-    if (going) return out;
+    if (going || inhibited_) return out;
 
     for (Entry& entry : entries_)
     {
@@ -493,6 +505,7 @@ std::vector<uint8_t> FileTransferEngine::takeRecords(const std::string& peer, ui
 
 bool FileTransferEngine::takePiece(const std::string& peer, uint64_t streamOffset, std::vector<uint8_t>& out)
 {
+    if (inhibited_) return false;
     for (Entry& entry : entries_)
     {
         FileTransfer& t = entry.transfer;
@@ -544,7 +557,7 @@ void FileTransferEngine::acknowledged(const std::string& peer, uint64_t streamAc
 
 void FileTransferEngine::autoAccept(Entry& entry)
 {
-    if (autoFolder_.empty() || autoCalls_.count(entry.transfer.peer) == 0) return;
+    if (inhibited_ || autoFolder_.empty() || autoCalls_.count(entry.transfer.peer) == 0) return;
 
     std::error_code ec;
     std::filesystem::path folder = pathFromUtf8(autoFolder_);
@@ -588,7 +601,16 @@ void FileTransferEngine::onRecord(const std::string& peer, const FileRecord& rec
             entry.number = number;
             entry.sinceMs = nowMs;
             changed();
-            autoAccept(entry);
+            if (inhibited_)
+            {
+                // It could not be answered: the far end hears so at once.
+                queueCancel(entry, CancelReason::ReceiverFailed);
+                finish(entry, State::Failed, NOT_ALLOWED);
+            }
+            else
+            {
+                autoAccept(entry);
+            }
             prune();
             break;
         }
@@ -792,13 +814,24 @@ void FileTransferEngine::noSession(const std::string& peer, const std::string& w
     }
 }
 
-void FileTransferEngine::release(const std::string& peer)
+void FileTransferEngine::release(const std::string& peer, bool inSession)
 {
-    pending_.erase(peer);
+    using State = FileTransfer::State;
+    if (!inSession) pending_.erase(peer);
     for (Entry& entry : entries_)
     {
-        if (entry.transfer.peer == peer) entry.awaitingSaved = false;
-        if (entry.transfer.peer == peer && entry.transfer.live()) finish(entry, FileTransfer::State::Cancelled);
+        FileTransfer& t = entry.transfer;
+        if (t.peer == peer) entry.awaitingSaved = false;
+        if (t.peer != peer || !t.live()) continue;
+
+        // One offered in the session is cancelled there too, so the far
+        // end doesn't take the session's end for a Glissando that can't
+        // take files.
+        if (inSession && t.state != State::Waiting)
+        {
+            queueCancel(entry, t.outgoing ? CancelReason::SenderStopped : CancelReason::ReceiverStopped);
+        }
+        finish(entry, State::Cancelled);
     }
 }
 
@@ -827,8 +860,36 @@ void FileTransferEngine::tick(uint64_t nowMs)
     }
 }
 
+void FileTransferEngine::setInhibited(bool inhibited)
+{
+    if (inhibited == inhibited_) return;
+    inhibited_ = inhibited;
+    if (!inhibited) return;
+
+    using State = FileTransfer::State;
+    for (Entry& entry : entries_)
+    {
+        FileTransfer& t = entry.transfer;
+        if (!t.live()) continue;
+        if (t.state != State::Waiting)
+        {
+            // As for a cancel: one written in full may be saved there already.
+            entry.awaitingSaved = t.state == State::Sending && entry.written >= t.size;
+            queueCancel(entry, t.outgoing ? CancelReason::SenderFailed : CancelReason::ReceiverFailed);
+        }
+        finish(entry, State::Failed, NOT_ALLOWED);
+    }
+}
+
+bool FileTransferEngine::hasRecords(const std::string& peer) const
+{
+    auto pending = pending_.find(peer);
+    return pending != pending_.end() && !pending->second.empty();
+}
+
 bool FileTransferEngine::wantsSession(std::string& peer, uint64_t& sinceMs) const
 {
+    if (inhibited_) return false;
     bool found = false;
     for (const Entry& entry : entries_)
     {
@@ -846,8 +907,7 @@ bool FileTransferEngine::wantsSession(std::string& peer, uint64_t& sinceMs) cons
 
 bool FileTransferEngine::busyWith(const std::string& peer) const
 {
-    auto pending = pending_.find(peer);
-    if (pending != pending_.end() && !pending->second.empty()) return true;
+    if (hasRecords(peer)) return true;
     return std::any_of(entries_.begin(), entries_.end(),
                        [&](const Entry& e) { return e.transfer.peer == peer && e.transfer.live(); });
 }

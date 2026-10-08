@@ -1399,7 +1399,45 @@ void TextMessagingDialog::OnChatLeftUp(wxMouseEvent& event)
     // the group is with nobody, and its links are clicked instead.
     const ChatRow& line = m_rows[(size_t)row];
     if (line.file && m_fileLines[line.index].group) return;
-    selectStation(line.file ? m_fileLines[line.index].transfer.peer : stationOf(m_messages[line.index]), true);
+    std::string callsign = line.file ? m_fileLines[line.index].transfer.peer : stationOf(m_messages[line.index]);
+    if (callsign.empty()) return;
+
+    // Choosing another station lets go of this one, cancelling the files
+    // going to or from it: not on a stray click without asking.
+    std::string before = selectedCallsign();
+    int live = before.empty() || before == callsign ? 0 : liveFilesWith(before);
+    if (live == 0)
+    {
+        selectStation(callsign, true);
+        return;
+    }
+    // Asked once the click is over.
+    CallAfter([this, callsign, before, live]() {
+        if (selectedCallsign() != before) return; // chosen otherwise meanwhile
+        wxMessageDialog confirm(
+            this,
+            wxString::Format(wxPLURAL("%d file is going to or from %s. Choosing %s lets go of %s, which "
+                                      "cancels it. Go ahead?",
+                                      "%d files are going to or from %s. Choosing %s lets go of %s, which "
+                                      "cancels them. Go ahead?",
+                                      live),
+                             live, wxString::FromUTF8(before), wxString::FromUTF8(callsign),
+                             wxString::FromUTF8(before)),
+            _("Choose Station"), wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
+        if (confirm.ShowModal() == wxID_YES) selectStation(callsign, true);
+    });
+}
+
+int TextMessagingDialog::liveFilesWith(const std::string& callsign) const
+{
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    if (frame == nullptr) return 0;
+    int live = 0;
+    for (const Data2G::FileTransfer& t : frame->chatFileTransfers())
+    {
+        if (t.peer == callsign && t.live()) live++;
+    }
+    return live;
 }
 
 void TextMessagingDialog::OnChatContextMenu(wxContextMenuEvent& event)
@@ -2268,11 +2306,7 @@ void TextMessagingDialog::sendFileTo(const std::string& callsign)
     std::string before = selectedCallsign();
     if (!before.empty() && before != callsign)
     {
-        int live = 0;
-        for (const Data2G::FileTransfer& t : frame->chatFileTransfers())
-        {
-            if (t.peer == before && t.live()) live++;
-        }
+        int live = liveFilesWith(before);
         if (live > 0)
         {
             wxMessageDialog confirm(
@@ -2509,7 +2543,14 @@ void TextMessagingDialog::updateGroupFiles(bool& added, bool& changed, bool& inc
 
     for (const Data2G::GroupFile& f : frame->chatGroupFiles())
     {
-        if (m_clearedGroupFiles.count(f.id) != 0) continue;
+        // A cleared line stays gone, unless the engine brings the file back
+        // to life (sent again, it carries on where it was left): then it
+        // has a line again.
+        if (m_clearedGroupFiles.count(f.id) != 0)
+        {
+            if (!f.live()) continue;
+            m_clearedGroupFiles.erase(f.id);
+        }
         auto line = std::find_if(m_fileLines.begin(), m_fileLines.end(),
                                  [&](const FileLine& l) { return l.group && l.groupFile.id == f.id; });
         if (line == m_fileLines.end())

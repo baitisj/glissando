@@ -165,14 +165,26 @@ public:
     void noSession(const std::string& peer, const std::string& why);
 
     // The operator let go of the station: everything with it is cancelled
-    // here, with nothing sent, as the session ends at once.
-    void release(const std::string& peer);
+    // here. inSession: a session with it is up, so the far end is told what
+    // became of the files offered in it, by records the transport writes
+    // before it ends the session; otherwise nothing is sent.
+    void release(const std::string& peer, bool inSession);
 
     // The transport stopped: everything still going failed.
     void stopAll(const std::string& why);
 
     // Expires offers left unanswered.
     void tick(uint64_t nowMs);
+
+    // Sending is not allowed here (chat's transmit inhibit): every file
+    // going either way fails, the far end of one already offered told so
+    // in the session, and nothing new is offered, accepted or sent until
+    // it is allowed again. Only records that end a transfer still go.
+    void setInhibited(bool inhibited);
+    bool inhibited() const { return inhibited_; }
+
+    // Records are waiting to be written to the station.
+    bool hasRecords(const std::string& peer) const;
 
     // The station a file of ours waits for a session with, the one
     // waiting longest, and since when.
@@ -217,6 +229,7 @@ private:
     uint64_t changes_ = 0;
     std::string autoFolder_;
     std::set<std::string> autoCalls_;
+    bool inhibited_ = false;
 };
 
 } // namespace Data2G
