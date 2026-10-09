@@ -26,6 +26,8 @@ consonant. It shifts gears (tempo) to match the HF path.
   [docs/HOW_IT_HEARS.md](docs/HOW_IT_HEARS.md)
 - The chord that opens and closes each transmission, and why it is for
   the ear and not the receiver: [docs/CHORDS.md](docs/CHORDS.md)
+- Transmitting Glissando from a microcontroller (ESP8266, Si5351):
+  [docs/ESP.md](docs/ESP.md)
 - Listen: [samples/](samples/) (8 kHz WAV; `g3-allegro-moderate-hf-minus10db.wav`
   is what it sounds like through a fading HF path at -10 dB SNR)
 - Modes: see [Scales](#scales) below for the pentatonic default and the
