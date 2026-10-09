@@ -1317,17 +1317,14 @@ void TextMessagingDialog::updateSelectionControls()
     // A change nothing here asked about (the keyboard, say) that would let
     // go of a station in a session, or with files going: the selection is
     // put back, and the operator asked.
-    if (callsign != m_mapPick && !m_lettingGo && !m_mapPick.empty() && needsAskingToLetGo(m_mapPick))
+    // Put back only once the list has finished: put back from in here,
+    // wxGTK's list goes on to light the row it moved to as well, and two
+    // rows show selected.
+    if (callsign != m_mapPick && !m_lettingGo && !m_mapPick.empty() && needsAskingToLetGo(m_mapPick) &&
+        stationItem(m_mapPick) >= 0)
     {
-        long item = stationItem(m_mapPick);
-        if (item >= 0)
-        {
-            m_restoringSelection = true;
-            m_stationList->SetItemState(item, wxLIST_STATE_SELECTED, wxLIST_STATE_SELECTED);
-            m_restoringSelection = false;
-            askToLetGoLater(m_mapPick, callsign);
-            return;
-        }
+        askToLetGoLater(m_mapPick, callsign, true);
+        return;
     }
 
     if (callsign != m_mapPick)
@@ -1759,14 +1756,53 @@ bool TextMessagingDialog::askToLetGo(const std::string& before, const std::strin
     return yes;
 }
 
-void TextMessagingDialog::askToLetGoLater(const std::string& before, const std::string& wanted)
+void TextMessagingDialog::askToLetGoLater(const std::string& before, const std::string& wanted, bool putBack)
 {
+    // One question at a time; a click while it is on its way says what
+    // the operator wants.
+    if (!putBack)
+    {
+        m_letGoClicked = true;
+        m_letGoWanted = wanted;
+    }
     if (m_letGoAsked) return;
     m_letGoAsked = true;
-    CallAfter([this, before, wanted]() {
+    CallAfter([this, before]() {
         m_letGoAsked = false;
-        if (selectedCallsign() != before) return; // chosen otherwise meanwhile
-        if (askToLetGo(before, wanted, _("Choose Station"))) chooseStation(before, wanted);
+        bool clicked = m_letGoClicked;
+        std::string chosen = m_letGoWanted;
+        m_letGoClicked = false;
+        m_letGoWanted.clear();
+
+        long keep = stationItem(before);
+        if (keep < 0 || m_mapPick != before)
+        {
+            // Gone from the list, or let go of meanwhile.
+            updateSelectionControls();
+            return;
+        }
+
+        // Whatever the list moved the selection to is put back, and that is
+        // the station the question is about.
+        bool moved = false;
+        m_restoringSelection = true;
+        for (long item = 0; item < m_stationList->GetItemCount(); item++)
+        {
+            if (item == keep || m_stationList->GetItemState(item, wxLIST_STATE_SELECTED) == 0) continue;
+            if (!moved) chosen = m_stationList->GetItemText(item).ToStdString();
+            moved = true;
+            m_stationList->SetItemState(item, 0, wxLIST_STATE_SELECTED);
+        }
+        if (m_stationList->GetItemState(keep, wxLIST_STATE_SELECTED) == 0)
+        {
+            if (!moved) chosen.clear();
+            moved = true;
+            m_stationList->SetItemState(keep, wxLIST_STATE_SELECTED, wxLIST_STATE_SELECTED);
+        }
+        m_restoringSelection = false;
+        if (!moved && !clicked) return; // the list came back by itself
+
+        if (askToLetGo(before, chosen, _("Choose Station"))) chooseStation(before, chosen);
     });
 }
 

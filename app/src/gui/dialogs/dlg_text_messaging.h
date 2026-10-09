@@ -147,8 +147,11 @@ private:
     bool needsAskingToLetGo(const std::string& before) const;
     bool askToLetGo(const std::string& before, const std::string& wanted, const wxString& title);
     // The same, asked once the event that wanted it is over, and the
-    // selection then changed if the operator agrees.
-    void askToLetGoLater(const std::string& before, const std::string& wanted);
+    // selection then changed if the operator agrees. putBack: the list
+    // has moved the selection by itself (the keyboard, say); it is put
+    // back first, once the list has finished, and the question is about
+    // where it went.
+    void askToLetGoLater(const std::string& before, const std::string& wanted, bool putBack = false);
     void chooseStation(const std::string& before, const std::string& wanted);
 
     // The Data2G session's far end as the station list names it, or as
@@ -330,6 +333,8 @@ private:
     // The selection is being put back while the operator is asked.
     bool m_restoringSelection = false;
     bool m_letGoAsked = false;      // a question is on its way
+    bool m_letGoClicked = false;    // and the operator asked for it, for m_letGoWanted
+    std::string m_letGoWanted;
 
     // The message the chat log's menu was opened on, by store id; 0 when it
     // offered nothing to remove or abort.

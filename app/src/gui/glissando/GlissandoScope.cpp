@@ -684,6 +684,19 @@ void GlissandoScope::setFiles(const std::vector<GlissandoScopeFile>& files)
         }
     }
 
+    // Keys of files the engines have let go of: their ids never come back
+    // this run, so they need not be remembered, and the list stays as long
+    // as the engines' (an empty list says nothing, and forgets nothing).
+    if (!files.empty())
+    {
+        shelved_.erase(std::remove_if(shelved_.begin(), shelved_.end(),
+                                      [&](uint64_t key) {
+                                          return std::none_of(files.begin(), files.end(),
+                                                              [key](const GlissandoScopeFile& f) { return f.key == key; });
+                                      }),
+                       shelved_.end());
+    }
+
     // A floppy for each piece moved since last time, a few at most, one
     // after another; none for what had moved before the scene saw it.
     if (moving != nullptr)
@@ -811,7 +824,7 @@ void GlissandoScope::stepFilesScene(double now, double width, double invaderBott
                 break;
             }
             // fx holds where a standing invader was last drawn.
-            double tx = std::clamp(invaders_[(size_t)catTarget_].fx, 4.0, width - catWidth - 4.0);
+            double tx = std::clamp(invaders_[(size_t)catTarget_].fx, 4.0, std::max(4.0, width - catWidth - 4.0));
             catDir_ = tx > catX_ ? 1 : -1;
             double move = std::min(std::fabs(tx - catX_), 3.0 * walk * dt);
             catX_ += catDir_ * move;

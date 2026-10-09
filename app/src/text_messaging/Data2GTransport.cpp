@@ -1331,7 +1331,9 @@ void Data2GTransport::run(Settings settings)
 
             // The GLISS group, in the tempo's mode, once a file keying has
             // gone. During a session too: data2g-host holds it until the
-            // session idles or ends, and the chip says so meanwhile.
+            // session idles or ends, and the chip says so meanwhile. BCAST
+            // MODE only sets the group port's mode, which a session's
+            // bursts don't use, so it needn't wait for the session either.
             if (status_.groupPort == 0 || kiss.fd < 0) return;
             if (fileKeying_.active) return;
 

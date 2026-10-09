@@ -1035,7 +1035,10 @@ void testDirectedMessageGoesThroughASession()
 
     std::string error;
     CHECK(a.protocol.sendMessage("Hello through a session", "VK3ABC", error));
-    runBoth(a, b, [&]() { return a.observer.sawStatus(MessageStatus::Acknowledged); });
+    // The far end's modem acknowledges before VK3ABC's chat has read it.
+    runBoth(a, b, [&]() {
+        return a.observer.sawStatus(MessageStatus::Acknowledged) && !b.observer.receivedTexts().empty();
+    });
 
     CHECK(a.observer.sawStatus(MessageStatus::Acknowledged));
     std::vector<TextMessage> got = b.observer.receivedTexts();
@@ -1234,7 +1237,7 @@ void testAPingThroughASessionIsAnsweredByTheModem()
 
     std::string error;
     CHECK(a.protocol.sendPing("VK3ABC", error));
-    runBoth(a, b, [&]() { return a.observer.sawSystemLine("PING delivered"); });
+    runBoth(a, b, [&]() { return a.observer.sawSystemLine("PING delivered") && b.observer.sawSystemLine("PING!"); });
     CHECK(a.observer.sawSystemLine("PING delivered"));
     CHECK(b.observer.sawSystemLine("PING!"));
     runBoth(a, b, [&]() { return false; }, 50);
