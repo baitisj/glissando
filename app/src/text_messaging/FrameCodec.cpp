@@ -443,6 +443,28 @@ std::vector<uint8_t> FrameCodec::encode(const Frame& frame, int frameBytes)
     return out;
 }
 
+static bool sameFrame(const Frame& a, const Frame& b)
+{
+    return a.type == b.type && a.destinationCrc == b.destinationCrc && a.originCallsign == b.originCallsign &&
+           a.airId == b.airId && a.fragmentIndex == b.fragmentIndex && a.fragmentCount == b.fragmentCount &&
+           a.burstsFollowing == b.burstsFollowing && a.senderAutoAck == b.senderAutoAck && a.payload == b.payload &&
+           a.features == b.features && a.locator == b.locator;
+}
+
+void FrameCodec::trimPadding(std::vector<uint8_t>& bytes)
+{
+    Frame full;
+    if (!decode(bytes.data(), (int)bytes.size(), full)) return;
+    size_t keep = bytes.size();
+    while (keep > 1 && bytes[keep - 1] == 0)
+    {
+        Frame shorter;
+        if (!decode(bytes.data(), (int)keep - 1, shorter) || !sameFrame(full, shorter)) break;
+        keep--;
+    }
+    bytes.resize(keep);
+}
+
 bool FrameCodec::isShortLocatorCode(uint8_t code)
 {
     return code == CODE_SHORT_LOCATOR;

@@ -843,6 +843,19 @@ public:
     std::vector<TextMessage> updated;
 };
 
+// What one single-fragment message of this text costs in a session stream:
+// the length prefix and the frame with its padding trimmed.
+size_t wireBytes(const std::string& from, const std::string& text)
+{
+    Frame frame;
+    frame.type = FrameType::Message;
+    frame.originCallsign = from;
+    frame.payload.assign(text.begin(), text.end());
+    std::vector<uint8_t> bytes = FrameCodec::encode(frame, TEXT_FRAME_BYTES);
+    FrameCodec::trimPadding(bytes);
+    return 2 + bytes.size();
+}
+
 // A chat station on a Data2GTransport, with a clock the test runs fast so
 // the protocol's turnarounds pass in a blink.
 struct Station
@@ -1012,19 +1025,20 @@ void testEachMessageIsSettledAsItsBytesAreAcknowledged()
         CHECK(a.protocol.sendMessage(texts[i], "VK3ABC", error));
         ids[i] = a.observer.lastAddedId();
     }
-    const size_t each = 2 + TEXT_FRAME_BYTES; // one frame each, as the session stream carries it
-    runBoth(a, b, [&]() { return hosts.unackedBytes(0) == 3 * each; });
-    CHECK(hosts.unackedBytes(0) == 3 * each);
+    // one frame each, as the session stream carries it
+    const size_t total = wireBytes("W1AW", "one") + wireBytes("W1AW", "two") + wireBytes("W1AW", "three");
+    runBoth(a, b, [&]() { return hosts.unackedBytes(0) == total; });
+    CHECK(hosts.unackedBytes(0) == total);
     runBoth(a, b, [&]() { return false; }, 20);
     for (int64_t id : ids) CHECK(a.observer.statusOf(id) == MessageStatus::Transmitting);
 
-    hosts.ackSome(0, each);
+    hosts.ackSome(0, wireBytes("W1AW", "one"));
     runBoth(a, b, [&]() { return a.observer.statusOf(ids[0]) == MessageStatus::Acknowledged; });
     CHECK(a.observer.statusOf(ids[0]) == MessageStatus::Acknowledged);
     CHECK(a.observer.statusOf(ids[1]) == MessageStatus::Transmitting);
     CHECK(a.observer.statusOf(ids[2]) == MessageStatus::Transmitting);
 
-    hosts.ackSome(0, 2 * each);
+    hosts.ackSome(0, wireBytes("W1AW", "two") + wireBytes("W1AW", "three"));
     runBoth(a, b, [&]() { return a.observer.statusOf(ids[2]) == MessageStatus::Acknowledged; });
     for (int64_t id : ids) CHECK(a.observer.statusOf(id) == MessageStatus::Acknowledged);
     CHECK(b.observer.receivedTexts().size() == 3);
@@ -1051,14 +1065,15 @@ void testAnOlderHostSettlesTheBatchTogether()
     int64_t first = a.observer.lastAddedId();
     CHECK(a.protocol.sendMessage("two", "VK3ABC", error));
     int64_t second = a.observer.lastAddedId();
-    const size_t each = 2 + TEXT_FRAME_BYTES;
-    runBoth(a, b, [&]() { return hosts.unackedBytes(0) == 2 * each; });
+    const size_t eachOne = wireBytes("W1AW", "one");
+    const size_t eachTwo = wireBytes("W1AW", "two");
+    runBoth(a, b, [&]() { return hosts.unackedBytes(0) == eachOne + eachTwo; });
 
-    hosts.ackSome(0, each);
+    hosts.ackSome(0, eachOne);
     runBoth(a, b, [&]() { return false; }, 50);
     CHECK(a.observer.statusOf(first) == MessageStatus::Transmitting);
 
-    hosts.ackSome(0, each);
+    hosts.ackSome(0, eachTwo);
     runBoth(a, b, [&]() { return a.observer.statusOf(second) == MessageStatus::Acknowledged; });
     CHECK(a.observer.statusOf(first) == MessageStatus::Acknowledged);
     CHECK(a.observer.statusOf(second) == MessageStatus::Acknowledged);
@@ -1706,7 +1721,7 @@ void testAWriteReadWithAnAckStillMovesOn()
     hosts.foldNextAck(0, 300);
     CHECK(a.protocol.sendMessage("Folded in", "VK3ABC", error));
     int64_t message = a.observer.lastAddedId();
-    const int64_t folded = (int64_t)(waiting - 300 + 2 + TEXT_FRAME_BYTES);
+    const int64_t folded = (int64_t)(waiting - 300 + wireBytes("W1AW", "Folded in"));
     runBoth(a, b, [&]() { return a.transport.status().sessionUnacked == folded; }, 500);
     CHECK(hosts.with([&]() { return hosts.sides[0].foldAck; }) == 0);
     CHECK(a.transport.status().sessionUnacked == folded);
