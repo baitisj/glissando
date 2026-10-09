@@ -4,6 +4,7 @@
 //                  examples and NIST's), fed whole and in odd pieces.
 //=========================================================================
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <vector>
