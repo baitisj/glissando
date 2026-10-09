@@ -239,6 +239,7 @@ Data2GTransport::Data2GTransport()
     , pttOn_(false)
     , busy_(false)
     , hasKeying_(false)
+    , keyingLost_(false)
     , callsignChanged_(false)
     , session_(SessionState::None)
     , sessionOurs_(false)
@@ -349,7 +350,8 @@ void Data2GTransport::stop()
 
     std::lock_guard<std::mutex> lock(mutex_);
     status_ = Status();
-    hasKeying_ = false;
+    // A group keying not all sent goes with the connection: NOT SENT.
+    if (hasKeying_) loseKeyingLocked();
     pttOn_ = false;
     busy_ = false;
     session_ = SessionState::None;
@@ -424,7 +426,34 @@ bool Data2GTransport::transmit(const std::vector<OutgoingBurst>& bursts)
     keying_.queuedAtMs = now();
     keying_.heldSinceMs = keying_.queuedAtMs;
     hasKeying_ = true;
+    keyingLost_ = false;
     return true;
+}
+
+// The group keying is with data2g-host, none of it on the air yet, while a
+// session is up: the host holds it until the session idles (Data2G's PR #59)
+// or ends.
+std::string Data2GTransport::keyingHeldBy() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    bool untouched = keying_.tags.size() == keying_.bursts.size();
+    if (!hasKeying_ || keying_.stage != Keying::Stage::Sent || !untouched) return std::string();
+    return session_ != SessionState::None ? sessionPeer_ : std::string();
+}
+
+bool Data2GTransport::takeKeyingLost()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    bool lost = keyingLost_ && !hasKeying_;
+    if (lost) keyingLost_ = false;
+    return lost;
+}
+
+// The group keying ends without data2g-host having reported all of it sent.
+void Data2GTransport::loseKeyingLocked()
+{
+    hasKeying_ = false;
+    keyingLost_ = true;
 }
 
 // Sessions on, data2g-host's command and data ports up, a callsign to call
@@ -642,8 +671,8 @@ void Data2GTransport::wroteLocked(uint64_t bytes)
     sessionActivityMs_ = now();
 }
 
-// The group keying, while it waits for its mode, a clear channel or the end
-// of a session: nothing of it is with data2g-host yet.
+// The group keying, while it waits for its mode or a file keying of ours to
+// go: nothing of it is with data2g-host yet.
 bool Data2GTransport::withdrawKeying()
 {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -755,7 +784,8 @@ void Data2GTransport::run(Settings settings)
             session_ = SessionState::None;
             sessionAborted_ = false;
             bufferExact_ = -1;
-            if (hasKeying_ && keying_.stage == Keying::Stage::Sent) hasKeying_ = false;
+            // data2g-host throws away what it had not sent of our keying.
+            if (hasKeying_ && keying_.stage == Keying::Stage::Sent) loseKeyingLocked();
             else if (hasKeying_) keying_.stage = Keying::Stage::Waiting;
             staleChatTags_.clear();
             if (fileKeying_.active)
@@ -936,7 +966,7 @@ void Data2GTransport::run(Settings settings)
                 }
                 else if (hasKeying_ && keying_.stage == Keying::Stage::Sent)
                 {
-                    hasKeying_ = false;
+                    loseKeyingLocked();
                     if (log_) log_("Data2G dropped " + std::to_string(count) + " chat frame(s) unsent");
                 }
                 break;
@@ -1147,7 +1177,10 @@ void Data2GTransport::run(Settings settings)
         }
         bool fileWaiting = files_.wantsSession(filePeer, fileSince);
 
-        bool groupWaiting = hasKeying_ && keying_.stage == Keying::Stage::Waiting;
+        // The group keying not on the air yet: still with us, or with
+        // data2g-host and none of it reported sent.
+        bool groupWaiting = hasKeying_ && (keying_.stage == Keying::Stage::Waiting ||
+                                           keying_.tags.size() == keying_.bursts.size());
         auto unwrittenFor = [&](const std::string& peer, bool others) {
             return std::any_of(sessionKeyings_.begin(), sessionKeyings_.end(), [&](const SessionKeying& k)
                                { return !k.written && (others ? k.peer != peer : k.peer == peer); });
@@ -1192,8 +1225,9 @@ void Data2GTransport::run(Settings settings)
 
             // Nothing of ours left in it: one we opened closes once it has
             // been quiet a while, or at once if something else is waiting
-            // (the group gets nothing out during a session); one the far end
-            // opened is left to it, unless something else has waited a while.
+            // (data2g-host holds the group during a session, all of it or
+            // until the session idles); one the far end opened is left to
+            // it, unless something else has waited a while.
             // A file under way with the station, or an offer waiting for an
             // answer either way, keeps it open.
             bool forPeer = std::any_of(sessionKeyings_.begin(), sessionKeyings_.end(),
@@ -1249,7 +1283,9 @@ void Data2GTransport::run(Settings settings)
         }
 
         // Files on the group: their timers, and the keying of theirs with
-        // data2g-host, which a session holds back as it does chat's.
+        // data2g-host. We keep a file keying back during a session ourselves:
+        // it is long, and would hold up the session's own traffic for the
+        // whole of it once data2g-host let it go in a lull.
         bool held = session_ != SessionState::None;
         groupFiles_.tick(t, busy_, held);
         if (fileKeying_.active)
@@ -1265,34 +1301,41 @@ void Data2GTransport::run(Settings settings)
 
         if (hasKeying_)
         {
+            // The chat keying's not-sent time runs from the last moment
+            // anything else had the group: while a session is up data2g-host
+            // holds it there (it goes when the session idles or ends), and a
+            // file keying with the host goes first. The same in either stage,
+            // so a keying the host holds through a long session is not given
+            // up the moment the session ends. One given up on is NOT SENT.
+            if (held || fileKeying_.active) keying_.heldSinceMs = t;
+            bool late = t - keying_.heldSinceMs >= NOT_SENT_TIMEOUT_MS;
+
             if (keying_.stage == Keying::Stage::Sent)
             {
                 if (keying_.tags.empty()) hasKeying_ = false;
-                else if (t - keying_.queuedAtMs >= NOT_SENT_TIMEOUT_MS)
+                else if (late)
                 {
-                    hasKeying_ = false;
+                    loseKeyingLocked();
                     staleChatTags_.insert(keying_.tags.begin(), keying_.tags.end());
                     if (log_) log_("Data2G never reported the chat keying sent");
                 }
                 return;
             }
 
-            // A session holds the group back for as long as it takes, and a
-            // file keying with the host for one burst, so the time they do
-            // is not counted against the keying.
-            if (held || fileKeying_.active) keying_.heldSinceMs = t;
-            if (t - keying_.heldSinceMs >= NOT_SENT_TIMEOUT_MS)
+            if (late)
             {
-                hasKeying_ = false;
+                loseKeyingLocked();
                 if (log_) log_("Data2G: the chat keying could not be sent in time");
                 return;
             }
 
-            // The GLISS group, in the tempo's mode, once no session is open
-            // (data2g-host sends no broadcasts during one) and a file keying
-            // has gone.
+            // The GLISS group, in the tempo's mode, once a file keying has
+            // gone. During a session too: data2g-host holds it until the
+            // session idles or ends, and the chip says so meanwhile. BCAST
+            // MODE only sets the group port's mode, which a session's
+            // bursts don't use, so it needn't wait for the session either.
             if (status_.groupPort == 0 || kiss.fd < 0) return;
-            if (held || fileKeying_.active) return;
+            if (fileKeying_.active) return;
 
             Data2G::ModeInfo mode = Data2G::modeForGear(keying_.gear, modes_);
             if (mode.valid() && mode.name != status_.groupMode && mode.name != triedMode)
@@ -1524,7 +1567,7 @@ void Data2GTransport::setFileAutoAccept(const std::string& folder, const std::ve
 std::vector<Data2G::FileTransfer> Data2GTransport::fileTransfers() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    return files_.transfers();
+    return files_.transfers(now());
 }
 
 uint64_t Data2GTransport::fileTransferChanges() const

@@ -58,11 +58,17 @@ public:
 
     virtual bool AcceptsFocus() const override { return false; }
 
+    // What it paints behind itself: the plate colour unless it sits on
+    // something else.
+    void SetBackdrop(const wxColour& colour) { backdrop_ = colour; Refresh(); }
+
 protected:
     virtual void paint(wxGraphicsContext* gc, const wxSize& size) = 0;
 
 private:
     void OnPaint(wxPaintEvent& event);
+
+    wxColour backdrop_;
 };
 
 // A bakelite push button with a chrome rim. As a toggle it stays lit while
@@ -188,10 +194,26 @@ private:
 class Lamp : public Control
 {
 public:
+    // What colour it lights: white, or red or amber for what wants the
+    // operator.
+    enum class Tint
+    {
+        White,
+        Red,
+        Amber,
+    };
+
     Lamp(wxWindow* parent, const wxString& caption, const wxSize& size = wxSize(120, 22));
 
     void SetLit(bool lit);
     void SetCaption(const wxString& caption);
+    void SetTint(Tint tint);
+
+    // A small bar after the caption, filled from 0 to 1; negative for none.
+    void SetProgress(double fraction);
+
+    // Clickable, it sends wxEVT_BUTTON when clicked.
+    void SetClickable(bool clickable);
 
 protected:
     virtual void paint(wxGraphicsContext* gc, const wxSize& size) override;
@@ -199,6 +221,9 @@ protected:
 private:
     wxString caption_;
     bool lit_;
+    Tint tint_ = Tint::White;
+    double progress_ = -1.0;
+    bool clickable_ = false;
 };
 
 // A moving needle meter under glass.

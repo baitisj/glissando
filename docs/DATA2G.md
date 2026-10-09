@@ -54,10 +54,27 @@ signal report (the chat window shows a dash).
 
 Each frame is written as a KISS ACKMODE frame with a tag. The host answers
 with the tag once the burst carrying it has gone out, which is how the app
-knows the keying is over and the acknowledgement timer can start. A keying
-the host never sends (it holds broadcasts during a session, and while the
-channel is busy) is given up after two minutes, not counting time a
-session holds the group back.
+knows the keying is over and the acknowledgement timer can start.
+
+**Held by a session.** data2g-host holds group bursts while an ARQ session
+is up: until it ends, or, since Data2G's PR #59, until the session goes
+idle. The app writes a chat keying to the host whether or not a session is
+up, and lets the host decide. While the host holds it (a session is up and
+none of the keying's tags have come back), the message's chip reads
+**HELD · session with K7ABC**, not SENDING; it goes back to SENDING, then
+SENT, once the host sends it. Before this the app held the keying back
+itself for the whole session, so with PR #59 it would still have waited
+for the session to end, and the chip said SENDING meanwhile.
+
+**Not sent.** A keying the host never sends is given up after two minutes
+and ends **NOT SENT**, never SENT. The two minutes run only while no
+session is up and no file keying of ours is with the host, in either stage
+(still with the app, or written to the host). So a keying held through a
+long session is never given up while the session lasts; it goes when the
+session idles or ends, and only a channel that then stays busy for two
+minutes gives it up. A keying also ends NOT SENT when the host reports it
+dropped, when the command port closes before it is sent, and when Data2G
+is restarted.
 
 On the group too, data2g-host takes its own turns: it waits for a clear
 channel and for any session to end. So the app keeps none of its own
@@ -66,10 +83,12 @@ reply windows, no channel-busy hold and no retry backoff, and the chat
 window shows no countdown on a queued message. Only "Woah!" holds it.
 The app still hands over one keying at a time, the next as soon as the
 host reports the last one sent, so whatever waits behind it stays in the
-app's queue, where it can be cancelled. A keying the host has been given
-but not yet sent (waiting for its mode, a clear channel or the end of a
-session) can be cancelled too, and is dropped when sending is inhibited;
-one that has started goes out. A directed message on the group still
+app's queue, where it can be cancelled. A keying handed over but still
+with the app (waiting for its mode, or for a file keying of ours to go) can
+be cancelled too, and is dropped when sending is inhibited. Once it is
+written to the host it is the host's: it goes out, or ends NOT SENT as
+above. A HELD keying can't be cancelled for that reason; Disconnect, on the
+station plate, ends the session that holds it. A directed message on the group still
 waits for the far end's chat acknowledgement, since the group has no
 acknowledgement of its own.
 
@@ -174,9 +193,10 @@ How the session itself runs:
   apart and the session dropped.
 - A session the app opened is closed once nothing of ours is waiting on
   it and nothing has gone either way for 45 s, or straight away when
-  something for another station, or for the group, is waiting. Data2G
-  sends no broadcasts during a session. A session the far end opened is
-  left to it, unless something else has waited 45 s.
+  something for another station, or for the group, is waiting (a group
+  keying the host holds counts). data2g-host sends no broadcasts during a
+  session, or since PR #59 only while it is idle. A session the far end
+  opened is left to it, unless something else has waited 45 s.
 - Deselecting the station in the call roster (clicking it again, picking
   another station, or removing it) ends the session with it at once and
   aborts every message and ping still outstanding for it, so the group is
@@ -185,6 +205,23 @@ How the session itself runs:
   since `DISCONNECT` would wait for the acknowledgements, and the far end
   then finds the session gone when it stops hearing us. Over Glissando's
   own modem deselecting changes nothing, as before.
+- **Harder to drop by accident** (Jeff, 2026-10-09). While a session is
+  connected with the selected station, anything that would change or
+  clear the selection asks first, **End the session with W1AW?**, with No
+  the default: clicking the selected station again, picking another,
+  Deselect Station or Remove in its menu, Send File to another station,
+  a double click on another station's line in the chat, or the keyboard.
+  The same question covers files going to or from the station (it says
+  they are cancelled); with files but no session it asks only about the
+  files, as before. A single click on a chat line no longer selects its
+  station; a double click does.
+- While a session is connected, the station plate shows a lit
+  **CONNECTED** lamp, "Session with W1AW" under it, and **Disconnect**,
+  which ends the session at once without asking (it lets go of the station
+  if it is selected, and otherwise releases it directly). The far end of a
+  session is never aged off the heard-station list while the session
+  lasts. With Data2G off there is never a session, so none of this
+  shows.
 - With `LISTEN ON`, the host takes sessions other Glissando stations open
   to us, and frames arriving in them go to the chat protocol.
 - If the station doesn't answer (`DISCONNECTED` while connecting; Data2G
@@ -209,21 +246,25 @@ message. A file over 100 kB asks first, and so does selecting the station
 when a file is still going to or from the one selected before, as letting
 go of that one cancels it. The session opens as for a message, and the
 offer is the first thing written into it. One file goes to a station at
-a time; another waits its turn. The chat shows a line for it that
-follows it: `FRED.TXT, 7,000 bytes: offered`, then `sending 3,200 of
-7,000` (bytes the far end's modem has acknowledged), then `delivered`,
-`declined`, `cancelled`, `cancelled by W1AW`, `failed`, `expired`,
-`failed: their Glissando can't take files` or `failed on W1AW's side`.
-Right-click the line for **Cancel Transfer**.
+a time; another waits its turn. The chat shows a line when it starts,
+`FRED.TXT to W1AW, 7,000 bytes`, and another when it ends: `FRED.TXT:
+delivered`, `declined`, `cancelled`, `cancelled by W1AW`, `failed` (with
+the reason when this side knows it), `expired`, `failed: their Glissando
+can't take files` or `failed on W1AW's side`. How it is getting on is in
+the status area at the top of COMMS (below). Right-click either line,
+while the file is going, for **Cancel Transfer**.
 
-**Receiving.** A box over the chat asks `W1AW offers FRED.TXT (7,000
-bytes). Save it?` with **Save as...** and **Decline**, and the console's
-COMMS button flashes as for a message. Save as... opens the system's save
+**Receiving.** A red box over the chat asks `W1AW offers FRED.TXT (7,000
+bytes). Save it?` with **Save as...** and **Decline**, its border flashing
+on the console's blink and a countdown under it, `expires in 3:12`, to the
+offer's 4-minute expiry. COMMS opens itself and comes to the front for
+each new offer, and the console's FILE lamp flashes red until it is
+answered. Save as... opens the system's save
 dialog in the received files folder with the offered name filled in;
 choosing a place accepts the file, and backing out declines it. The file
 is written to `<name>.part` (`<name>.2.part` and so on if a file of that
-name is there already) and renamed once all of it has come; the chat line
-counts it in, and has the same Cancel Transfer. A name another file is
+name is there already) and renamed once all of it has come; the status
+area counts it in, and the chat lines have the same Cancel Transfer. A name another file is
 being saved under is refused, and the offer stays open. Nothing is
 opened or run after saving.
 
@@ -236,8 +277,8 @@ still through a `.part` file, under the offered name (numbered, `FRED
 operator is asked instead). A file that turns up under that name while
 the transfer runs is not replaced either: the file takes the next free
 number when it is renamed. Only a name chosen in the save dialog, which
-asks, replaces a file. The chat line says it was saved without
-asking.
+asks, replaces a file. The chat line it ends with says it was saved
+without asking.
 
 How it goes in the session's byte stream, beside the chat frames (`G`, a
 length byte, the frame): `F`, the record's type, a 2-byte big-endian
@@ -293,9 +334,9 @@ When things go wrong:
   a Cancel for each file offered in the session goes first, and the
   `DISCONNECT` once data2g-host has read it, so the far end shows
   `cancelled by VK3ABC` (an offer it made, still unanswered, included);
-  otherwise `ABORT`, and the far end sees the session gone. Clicking a
-  line in the chat log that would choose another station asks first
-  while files are going to or from the one chosen now.
+  otherwise `ABORT`, and the far end sees the session gone. Anything that
+  would choose another station asks first while files are going to or
+  from the one chosen now, in the same question as a session's (above).
 - A station running an older Glissando takes the `F` for a stream that
   isn't chat and closes the session. A session the far end ends while our
   offer is unanswered so shows `failed: their Glissando can't take
@@ -346,25 +387,29 @@ that this holds the group for a long time, names the faster tempos with
 their times, and defaults to No. Above an hour it refuses, naming the
 faster tempos. One file goes to the group at a time.
 
-The chat line follows it: `announced`, `sending 12 of 32`, `repairs
-open, round 1 (14 s left)`, `round 2: resending 5 pieces, W1AW first in
-line (+1 others)`, `idle; the next window in 40 s`, and at the end
+The status area follows it: `announced`, `streaming`, `repairs open,
+round 1 (14 s left)`, `repairs, round 2, W1AW first in line`, `idle; the
+next window in 40 s`, with the pieces sent, the tempo, how long it serves
+repairs and how many stations have asked. The chat has a line when it
+starts, `FRED.TXT to the group, 7,000 bytes`, and one when it ends:
 `ended: no more requests`, `ended: repair time over`, `ended: stopped
-serving repairs`, `cancelled` or `failed`. Under it, who asked and when,
-and the reminder that silence says nothing. Right-click it for **Stop
-Serving Repairs** (the stream, if still going, finishes, then an End) and
-**Cancel Transfer** (an End that tells listeners to delete what they
-have).
+serving repairs`, `cancelled` or `failed`, with who asked and when under
+it, and the reminder that silence says nothing. Right-click either for
+**Stop Serving Repairs** (the stream, if still going, finishes, then an
+End) and **Cancel Transfer** (an End that tells listeners to delete what
+they have).
 
 **Receiving.** A file heard on the group gets a line on the left, `W1AW
-is sending FRED.TXT, 7,000 bytes: have 12 of 32`, with **Receive...** and
-**Ignore** as links on it (and in its right-click menu). Pieces are kept
+is sending FRED.TXT to the group, 7,000 bytes`, with **Receive...** and
+**Ignore** as links on it (and in its right-click menu, and as buttons
+in the status area, which counts the pieces in). The console's FILE lamp
+is amber until one is pressed. Pieces are kept
 in memory whatever the operator says, so a file heard whole can be saved
 at once; Receive... opens the save dialog in the received files folder,
 and the missing pieces are then asked for in the sender's windows. The
-line counts them in (`asking in slot 3 (in 12 s)`, `W1AW first in line;
-4 of your pieces coming`) and says `saved to ...` once the file's hash
-matches. Ignore stops asking and drops the pieces. Pieces of an
+status area counts them in (`asking in slot 3 (in 12 s)`, `repairs,
+round 2, W1AW first in line`), and the chat's second line says `saved to
+...` once the file's hash matches. Ignore stops asking and drops the pieces. Pieces of an
 unfinished file are kept for a day (up to 4 files and 4 MB), so the same
 file sent again by the same station, which has the same id, finishes it,
 even sent at another tempo (what was kept is cut into the new piece
@@ -373,7 +418,8 @@ it is sent again. A file cancelled by its sender, or that could not be
 saved or verified, is taken from the start when sent again. A station
 with all of it but the name saves it as `received-file` once the sender
 stops. Data2G turned off ends every file still coming the same way: its
-line says incomplete, and its pieces are kept.
+last line says incomplete, and its pieces are kept; the links to
+Receive... or Ignore it move to that line.
 
 Preferences, Modem tab: **Receive group files automatically** (off by
 default) saves every group file into the received files folder without
@@ -442,7 +488,10 @@ long, or 2 minutes after the sender's time left runs out.
 each once the host acknowledges the last (ACKMODE), and a chat keying
 always goes first. After each of our file keyings the app leaves the
 channel for 4 s (2 s more after any busy report), so others can get in;
-chat keeps no such pause. Woah! holds file keyings too. A file keying the
+chat keeps no such pause. Woah! holds file keyings too. Unlike a chat
+keying, the app keeps a file keying back itself during a session: it is
+long, and once data2g-host let it go in a lull it would hold up the
+session's own traffic for the whole of it. A file keying the
 host doesn't send within 2 minutes (not counting a session) is tried once
 more; lost twice, the transfer fails. A chat keying given up on that way
 may still be with the host: a drop the host reports is counted against
@@ -455,6 +504,62 @@ saved`. The sender cancels: listeners delete what they have
 ends without an End (`failed`), and listeners time out; listening goes on,
 but no Requests go. Chat moved off Data2G: our transfer fails. The
 command port lost mid-keying: the keying counts as lost, as above.
+
+## Watching files
+
+Three places show files, all of them only with Data2G as the chat modem;
+with it off none of this is asked for or drawn, and the FILE lamp stays
+dark.
+
+**The FILE lamp**, on the visi-scope plate under ENGAGED, RECEIVING and
+TRANSMITTING, in the same style. It flashes red, on the console's shared
+half-second blink, while a station offers a file and the operator has not
+answered; it is amber and steady while a group file is on the air and
+nobody has pressed Receive... or Ignore (the stream does not wait for an
+answer); and it is white, with a small bar beside it showing how far it
+has got, while a file moves. An offer outranks a group file heard, which
+outranks a file moving. Clicking it opens COMMS, whose top shows the
+offer or the transfer.
+
+**The status area** at the top of COMMS, under the offer box, shows the
+one transfer under way: the newest still going (an offer to us is left
+to the offer box), with `+2 more` when others are. A line of who and
+what (`→ W1AW  FRED.TXT`, `← AG7EW to GLISS  FRED.TXT`) with what it is
+doing beside it; a bar drawn the console's way; the figures under it;
+and **Cancel** (**Ignore** for a group file coming in, with
+**Receive...** beside it until answered). A session's bar has two
+shades: grey for what has been handed to the modem, bone for what the
+far end's modem has acknowledged (received, for what has been written).
+Its figures are the bytes, the rate since bytes began to move, and the
+time left at that rate. A group file's bar has a segment per piece: lit
+when held (or, ours, sent), dark red where one was missed (passed by in
+the stream, or still lacking once a window opens; ours, the pieces the
+round's Grant resends), dark where none has come yet. Its figures are
+the pieces, the tempo, and until when the sender serves repairs. A
+finished transfer stays there for 30 seconds saying how it ended, then
+the area goes.
+
+The chat keeps only two lines for each file, one when it starts and one
+when it ends, so it doesn't scroll with progress.
+
+**The visi-scope.** While Data2G has the chat the screen shows its scene.
+Once a file has come or gone this run, the scene becomes the files' own:
+across the top a history, one line per finished file, newest at the
+bottom: the time it ended, `←` or `→`, the station (`GLISS` for one of
+ours to the group), the name, the size, and `SAVED`, `DELIVERED`, `SENT`,
+`DECLINED`, `CANCELLED`, `EXPIRED`, `IGNORED`, `INCOMPLETE` or `FAILED`.
+Once there are more than fit in the top half, the oldest roll up into
+`… 12 earlier files`. The file moving has a segmented bar under the last
+line, and a little floppy flies in from the right for each piece received
+(a session's file in twentieths), or the cat tosses one off to the right
+for each piece sent. The invaders sit just under the history and creep
+down a little each time they reach a side, so a long history pushes them
+down. The DORC cat walks to and fro along the bottom in its glasses;
+when the invaders come within its reach, it goes to the nearest, hops,
+and paws it off the screen with a BONK, then the next, until a new wave
+comes in at the top. The history is this run's only. Until a file has
+come or gone, the scene is the one it was: invaders marching, the cat
+sitting, the glasses lowered now and then.
 
 ## What was built
 
@@ -501,7 +606,11 @@ command port lost mid-keying: the keying counts as lost, as above.
   failing a message, a ping through a session, deselecting the station
   ending its session (ABORT with messages outstanding, DISCONNECT without), a station without sessions
   getting the group instead, a lost command port, and a callsign change
-  reopening the group; the `F` records (every type, odd lengths, split
+  reopening the group; a broadcast held by a session (the fake host holds
+  group bursts during a session, as data2g-host does): HELD naming the
+  far end, not given up past the not-sent timeout, SENT when the host
+  lets it go in a lull or when the session ends, and NOT SENT, never
+  SENT, when the host never sends it; the `F` records (every type, odd lengths, split
   across reads, interleaved with chat frames); and files through a
   session: a 7,000-byte file end to end, declined, cancelled by either
   side, a lost session, an offer expiring, an odd name saved safely
@@ -522,10 +631,13 @@ command port lost mid-keying: the keying counts as lost, as above.
   hostile name, direction controls in a name, a part file of the
   operator's left alone, two files refused one name, auto-accept never
   overwriting, a receiver that can't write, more data than offered, and
-  releasing the station.
+  releasing the station; and what the chat window shows besides the
+  state, how long an offer has left and how much of a file has been
+  handed to the modem.
   `TextMessagingProtocolTest` covers the protocol's side against a fake
-  link, and its older tests, unchanged, show nothing changes for our own
-  modem.
+  link (a held keying's chip, a lost keying ending NOT SENT), and its
+  older tests, unchanged, show nothing changes for our own modem.
+  `MessageStoreTest` checks a session's far end is kept on the heard list.
 - **Unit** (`fdv_text_messaging_data2g_broadcast_test`): the group file
   frames both ways (and that chat never takes one), piece lists, piece
   sizes and estimates, and engines on a simulated group with a simulated
@@ -536,8 +648,9 @@ command port lost mid-keying: the keying counts as lost, as above.
   sender stopped, automatic receiving turned off mid-file, all of it but
   the name, a hash failure (once restarted, twice failed), lost windows
   answered by a late request, a lost-request hint outliving a round,
-  turns going round, stopping serving, and the limits (an oversized
-  Announce or Window refused). In
+  turns going round, stopping serving, the limits (an oversized
+  Announce or Window refused), and the piece maps the status area draws
+  (missed while streaming, resent, all held once saved). In
   `fdv_text_messaging_data2g_test`, the same through transports and fake
   data2g-hosts sharing one group: one sender and two lossy listeners, a
   late joiner, the same file again, cancel, the deadline, a chat message

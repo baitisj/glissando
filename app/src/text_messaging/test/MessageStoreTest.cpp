@@ -297,6 +297,9 @@ void testHeardStationList()
     CHECK(stations[0].lastHeard == NOW + 20);
 
     CHECK(list.prune(NOW + 100) == 0);
+    // The far end of a session stays however long it has been quiet.
+    CHECK(list.prune(NOW + 615, "VK3ABC") == 0);
+    CHECK(list.contains("VK3ABC"));
     CHECK(list.prune(NOW + 615) == 1); // VK3ABC last heard at NOW + 10
     CHECK(!list.contains("VK3ABC"));
     CHECK(list.contains("W1AW"));

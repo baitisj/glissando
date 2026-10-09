@@ -777,6 +777,42 @@ void testOfferRefusesWhatCantBeSent()
 
 } // namespace
 
+// What the chat window shows besides the state: how long an offer has
+// left, and how much of a file has been handed to the modem ahead of what
+// the far end has acknowledged.
+void testTheWindowSeesExpiryAndBytesHanded()
+{
+    Scratch scratch("shown");
+    Link link;
+    std::string error;
+    uint64_t id = link.a.offer("VK3ABC", scratch.write("FRED.TXT", 7000), link.nowMs, error);
+    link.turn();
+    uint64_t later = link.nowMs + 60 * 1000;
+    for (const FileTransfer& t : link.a.transfers(later))
+    {
+        CHECK(t.state == State::Offered && t.expiresInMs == FileTransferEngine::OFFER_EXPIRY_MS - 60 * 1000);
+    }
+    for (const FileTransfer& t : link.b.transfers(later))
+    {
+        CHECK(t.state == State::Asking && t.expiresInMs == FileTransferEngine::OFFER_EXPIRY_MS - 60 * 1000);
+    }
+    CHECK(last(link.b, false).expiresInMs == 0); // no clock given
+    for (const FileTransfer& t : link.b.transfers(link.nowMs + FileTransferEngine::OFFER_EXPIRY_MS + 1))
+    {
+        CHECK(t.expiresInMs == 0);
+    }
+
+    CHECK(link.b.accept(last(link.b, false).id, scratch.path("saved.txt"), error));
+    link.turn(); // the Accept reaches A
+    // Its first piece is handed over, and not yet acknowledged.
+    std::vector<uint8_t> piece;
+    CHECK(link.a.takePiece("VK3ABC", link.writtenByA, piece));
+    FileTransfer sending = transferOf(link.a, id);
+    CHECK(sending.state == State::Sending && sending.done == 0 && sending.handed == 4096);
+    CHECK(sending.expiresInMs == 0);
+    CHECK(last(link.b, false).handed == last(link.b, false).done);
+}
+
 int main()
 {
     testSafeNames();
@@ -803,6 +839,7 @@ int main()
     testInhibitedSendsNothingMore();
     testInhibitedReceiverEndsTheOffer();
     testOfferRefusesWhatCantBeSent();
+    testTheWindowSeesExpiryAndBytesHanded();
 
     if (failures > 0)
     {

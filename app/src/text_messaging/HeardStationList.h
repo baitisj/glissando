@@ -80,9 +80,11 @@ public:
     // SNR and last heard time.
     void restore(const std::vector<HeardStation>& stations, std::time_t now);
 
-    // Drops unpinned entries last heard before now - maxAgeSeconds. Returns
-    // the number removed so a caller can skip a redraw when nothing changed.
-    int prune(std::time_t now);
+    // Drops unpinned entries last heard before now - maxAgeSeconds, except
+    // keep, a station that must stay however long it has been quiet (the
+    // far end of a Data2G session). Returns the number removed so a caller
+    // can skip a redraw when nothing changed.
+    int prune(std::time_t now, const std::string& keep = std::string());
 
     // Most recently heard first; pinned stations never heard come last.
     std::vector<HeardStation> stations() const;

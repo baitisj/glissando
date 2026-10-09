@@ -11,6 +11,7 @@
 #include <cstring>
 #include <memory>
 
+#include <wx/datetime.h>
 #include <wx/dcbuffer.h>
 #include <wx/geometry.h>
 #include <wx/graphics.h>
@@ -137,6 +138,55 @@ const char* const DORC_GLASSES[] = {
     "..XXX...XXX..",
 };
 
+// The cat walking along the bottom of the files scene, still looking at
+// us, in two frames for its legs.
+const char* const CAT_WALK_A[] = {
+    "..X.....X....",
+    "..XX...XX....",
+    "..XXXXXXX....",
+    ".XX.XXX.XX...",
+    ".XXXXXXXXX...",
+    ".XXXX.XXXX...",
+    "..XXXXXXX....",
+    "..XXXXXXX..X.",
+    ".XXXXXXXXX.X.",
+    ".XXXXXXXXX..X",
+    ".XXXXXXXXXXX.",
+    "..XX...XX....",
+};
+
+const char* const CAT_WALK_B[] = {
+    "..X.....X....",
+    "..XX...XX....",
+    "..XXXXXXX....",
+    ".XX.XXX.XX...",
+    ".XXXXXXXXX...",
+    ".XXXX.XXXX...",
+    "..XXXXXXX....",
+    "..XXXXXXX..X.",
+    ".XXXXXXXXX.X.",
+    ".XXXXXXXXX..X",
+    ".XXXXXXXXXXX.",
+    ".XX.....XX...",
+};
+
+// Its paw, raised over its head to smack an invader.
+const char* const PAW[] = {
+    ".X.X.",
+    "XXXXX",
+    "XXXXX",
+    ".XXX.",
+};
+
+// A floppy disk: a piece of a file; r is its shutter, dark.
+const char* const FLOPPY[] = {
+    "XXXXX",
+    "XrrrX",
+    "XrrrX",
+    "XXXXX",
+    "XX.XX",
+};
+
 const char* const CRAB[] = {
     "..X.....X..",
     "...X...X...",
@@ -172,6 +222,77 @@ wxFont captionTextFont()
 {
     return wxFont(wxFontInfo(9).Family(wxFONTFAMILY_TELETYPE).Bold());
 }
+
+// Pixel art, one cell at a time: X lit, any other letter dim, mirrored
+// left to right when flip is set.
+void drawSprite(wxGraphicsContext* gc, const Sprite& sp, double x, double y, double px, const wxColour& lit,
+                const wxColour& dim, bool flip = false)
+{
+    int width = sp.width();
+    for (int row = 0; row < sp.height; row++)
+    {
+        for (int col = 0; col < width; col++)
+        {
+            char c = sp.lines[row][flip ? width - 1 - col : col];
+            if (c == '.') continue;
+            gc->SetBrush(wxBrush(c == 'X' ? lit : dim));
+            gc->DrawRectangle(x + col * px, y + row * px, px - 0.5, px - 0.5);
+        }
+    }
+}
+
+// The DORC glasses: black frames on a black screen, so a faint glow round
+// them shows them, and the white tape bright.
+void drawGlasses(wxGraphicsContext* gc, double x, double y, double px, const wxColour& glow,
+                 const wxColour& tape, unsigned char alpha)
+{
+    Sprite glasses = sprite(DORC_GLASSES);
+    for (int pass = 0; pass < 2; pass++)
+    {
+        for (int row = 0; row < glasses.height; row++)
+        {
+            for (int col = 0; col < glasses.width(); col++)
+            {
+                char c = glasses.lines[row][col];
+                if (c == '.') continue;
+                double grow = pass == 0 ? 0.3 * px : 0.0;
+                gc->SetBrush(wxBrush(pass == 0 ? glow : c == 'r' ? tape : wxColour(12, 12, 12, alpha)));
+                gc->DrawRectangle(x + col * px - grow, y + row * px - grow, px + 2 * grow, px + 2 * grow);
+            }
+        }
+    }
+}
+
+// A size the way the history shows it: "7,000 B" up to 99,999, then
+// "512 KB", "3.4 MB".
+wxString shelfSize(uint64_t bytes)
+{
+    if (bytes < 100000)
+    {
+        wxString digits = wxString::Format("%llu", (unsigned long long)bytes);
+        for (int at = (int)digits.length() - 3; at > 0; at -= 3) digits.insert((size_t)at, ",");
+        return digits + " B";
+    }
+    if (bytes < 10 * 1000 * 1000) return wxString::Format("%llu KB", (unsigned long long)((bytes + 512) / 1024));
+    return wxString::Format("%.1f MB", bytes / (1024.0 * 1024.0));
+}
+
+// Cut to so many characters, with an ellipsis where it was cut.
+wxString shorten(const wxString& text, size_t chars)
+{
+    if (text.length() <= chars) return text;
+    if (chars <= 1) return text.Left(chars);
+    return text.Left(chars - 1) + wxString::FromUTF8("\xE2\x80\xA6");
+}
+
+// Finished files kept on the history at most, however long the run.
+constexpr size_t SHELF_KEPT = 500;
+
+constexpr double PI = 3.14159265358979323846;
+
+// How close the invaders may come, in the cat's cells over its head,
+// before it goes for them.
+constexpr double CAT_REACH_CELLS = 12.0;
 
 } // namespace
 
@@ -450,24 +571,18 @@ void GlissandoScope::paintTv(wxGraphicsContext* gc, const wxRect& trace, Tv tv, 
     double s = seconds - TV_OFF;
     int fade = (int)std::lround(255.0 * std::min(1.0, s / 1.0));
 
-    auto drawSprite = [gc](const Sprite& sp, double x, double y, double px, const wxColour& lit,
-                           const wxColour& dim) {
-        for (int row = 0; row < sp.height; row++)
-        {
-            for (int col = 0; col < sp.width(); col++)
-            {
-                char c = sp.lines[row][col];
-                if (c == '.') continue;
-                gc->SetBrush(wxBrush(c == 'X' ? lit : dim));
-                gc->DrawRectangle(x + col * px, y + row * px, px - 0.5, px - 0.5);
-            }
-        }
-    };
     auto phosphor = [fade](int a) { return wxColour(225, 232, 228, (unsigned char)(a * fade / 255)); };
 
     // Scan lines, faintly.
     gc->SetBrush(wxBrush(wxColour(255, 255, 255, (unsigned char)(6 * fade / 255))));
     for (int y = trace.y; y < trace.y + trace.height; y += 3) gc->DrawRectangle(trace.x, y, trace.width, 1);
+
+    // Once files have come or gone this run, the scene is theirs.
+    if (!shelf_.empty() || haveCurrent_)
+    {
+        paintFilesScene(gc, trace, fade);
+        return;
+    }
 
     // The invaders step sideways twice a second, and each time they reach
     // a side they step down a little, until they start again at the top.
@@ -484,7 +599,7 @@ void GlissandoScope::paintTv(wxGraphicsContext* gc, const wxRect& trace, Tv tv, 
     for (int i = 0; i < ACROSS; i++)
     {
         Sprite sp = (i + step) % 2 ? sprite(CRAB) : sprite(SQUID);
-        drawSprite(sp, trace.x + 2.0 * px + offset + i * spacing + (11 - sp.width()) * px / 2.0,
+        drawSprite(gc, sp, trace.x + 2.0 * px + offset + i * spacing + (11 - sp.width()) * px / 2.0,
                    trace.y + 12.0 + drop, px, phosphor(200), phosphor(110));
     }
 
@@ -493,7 +608,7 @@ void GlissandoScope::paintTv(wxGraphicsContext* gc, const wxRect& trace, Tv tv, 
     Sprite cat = std::fmod(s, 3.0) < 0.4 ? sprite(CAT_TAIL_UP) : sprite(CAT);
     double catX = cx - cat.width() * catPx / 2.0;
     double catY = trace.y + trace.height - cat.height * catPx - 14.0;
-    drawSprite(cat, catX, catY, catPx, phosphor(170), phosphor(90));
+    drawSprite(gc, cat, catX, catY, catPx, phosphor(170), phosphor(90));
 
     // The glasses, once every 12 s: lowered slowly from the top onto the
     // cat's eyes, worn a while with a nod to the club, and whisked away again.
@@ -510,29 +625,9 @@ void GlissandoScope::paintTv(wxGraphicsContext* gc, const wxRect& trace, Tv tv, 
             y = eyesY;
         else
             y = eyesY - (eyesY - top) * std::min(1.0, (t - 7.5) / 0.4);
-        // Black frames on a black screen: a faint glow round them shows
-        // them coming down. They're wider than the cat's head, as they
-        // should be, so they sit a cell to its left.
-        Sprite glasses = sprite(DORC_GLASSES);
-        double gx = catX - catPx;
-        double glow = 0.3 * catPx;
-        for (int pass = 0; pass < 2; pass++)
-        {
-            for (int row = 0; row < glasses.height; row++)
-            {
-                for (int col = 0; col < glasses.width(); col++)
-                {
-                    char c = glasses.lines[row][col];
-                    if (c == '.') continue;
-                    double grow = pass == 0 ? glow : 0.0;
-                    gc->SetBrush(wxBrush(pass == 0 ? phosphor(120)
-                                         : c == 'r' ? phosphor(255)
-                                                    : wxColour(12, 12, 12, (unsigned char)fade)));
-                    gc->DrawRectangle(gx + col * catPx - grow, y + row * catPx - grow, catPx + 2 * grow,
-                                      catPx + 2 * grow);
-                }
-            }
-        }
+        // They're wider than the cat's head, as they should be, so they
+        // sit a cell to its left.
+        drawGlasses(gc, catX - catPx, y, catPx, phosphor(120), phosphor(255), (unsigned char)fade);
         if (t >= 3.0 && t < 7.5)
         {
             gc->SetFont(captionTextFont(), phosphor(220));
@@ -549,6 +644,425 @@ void GlissandoScope::paintTv(wxGraphicsContext* gc, const wxRect& trace, Tv tv, 
     double tw = 0, th = 0;
     gc->GetTextExtent(caption, &tw, &th);
     gc->DrawText(caption, cx - tw / 2.0, cy - th / 2.0);
+}
+
+//-------------------------------------------------------------------------
+// The files scene
+//-------------------------------------------------------------------------
+
+void GlissandoScope::setFiles(const std::vector<GlissandoScopeFile>& files)
+{
+    double now = steadySeconds();
+    const GlissandoScopeFile* moving = nullptr;
+    for (const GlissandoScopeFile& f : files)
+    {
+        auto shelved = std::find(shelved_.begin(), shelved_.end(), f.key);
+        if (f.live)
+        {
+            // Back to life (a group file sent again): it goes on the
+            // history again when it ends.
+            if (shelved != shelved_.end()) shelved_.erase(shelved);
+            if (f.moving && moving == nullptr) moving = &f;
+            continue;
+        }
+        if (shelved != shelved_.end()) continue;
+
+        ShelfLine line;
+        line.key = f.key;
+        line.time = wxDateTime::Now().Format("%H:%M");
+        line.outgoing = f.outgoing;
+        line.station = f.station;
+        line.name = f.name;
+        line.size = f.size;
+        line.result = f.result;
+        shelf_.push_back(line);
+        shelved_.push_back(f.key);
+        if (shelf_.size() > SHELF_KEPT)
+        {
+            shelf_.erase(shelf_.begin());
+            shelfDropped_++;
+        }
+    }
+
+    // Keys of files the engines have let go of: their ids never come back
+    // this run, so they need not be remembered, and the list stays as long
+    // as the engines' (an empty list says nothing, and forgets nothing).
+    if (!files.empty())
+    {
+        shelved_.erase(std::remove_if(shelved_.begin(), shelved_.end(),
+                                      [&](uint64_t key) {
+                                          return std::none_of(files.begin(), files.end(),
+                                                              [key](const GlissandoScopeFile& f) { return f.key == key; });
+                                      }),
+                       shelved_.end());
+    }
+
+    // A floppy for each piece moved since last time, a few at most, one
+    // after another; none for what had moved before the scene saw it.
+    if (moving != nullptr)
+    {
+        if (!haveCurrent_ || current_.key != moving->key) currentMoved_ = moving->moved;
+        int fresh = std::min(4, moving->moved - currentMoved_);
+        for (int i = 0; i < fresh; i++)
+        {
+            floppies_.push_back({now + i * 0.2, moving->outgoing, 0.12 + 0.3 * sceneRandomUnit()});
+        }
+        currentMoved_ = moving->moved;
+        current_ = *moving;
+        haveCurrent_ = true;
+    }
+    else
+    {
+        haveCurrent_ = false;
+    }
+    while (!floppies_.empty() && floppies_.front().born < now - 3.0) floppies_.pop_front();
+}
+
+double GlissandoScope::sceneRandomUnit()
+{
+    // Its own little generator, so the scene is the same every run.
+    sceneRandom_ = sceneRandom_ * 1103515245u + 12345u;
+    return ((sceneRandom_ >> 8) & 0xFFFF) / 65536.0;
+}
+
+// Plays the scene forward: the invaders creep down, the cat walks, and
+// once they are within its reach it goes to the nearest, hops, and paws it
+// off the screen, then the next, until a new wave comes in. Pixels are
+// the trace's; scale is the invaders' pixel, which sets every speed.
+void GlissandoScope::stepFilesScene(double now, double width, double invaderBottom, double catTop, double catWidth,
+                                    double scale)
+{
+    double dt = std::clamp(now - sceneLast_, 0.0, 0.1);
+    sceneLast_ = now;
+    sceneClock_ += dt;
+
+    // The ones pawed off tumble away under gravity, and are gone once off
+    // the screen.
+    for (Invader& invader : invaders_)
+    {
+        if (!invader.flying) continue;
+        invader.fx += invader.vx * dt;
+        invader.fy += invader.vy * dt;
+        invader.vy += 90.0 * scale * dt;
+        invader.angle += invader.spin * dt;
+    }
+    double catBottom = catTop + 12.0 * scale * 2.0;
+    int targetSlot = catTarget_ >= 0 && catTarget_ < (int)invaders_.size() ? invaders_[(size_t)catTarget_].slot : -1;
+    invaders_.erase(std::remove_if(invaders_.begin(), invaders_.end(),
+                                   [&](const Invader& i) {
+                                       return i.flying && (i.fy > catBottom + 200.0 || i.fx < -80.0 ||
+                                                           i.fx > width + 80.0);
+                                   }),
+                    invaders_.end());
+    catTarget_ = -1;
+    for (size_t i = 0; i < invaders_.size(); i++)
+    {
+        if (invaders_[i].slot == targetSlot) catTarget_ = (int)i;
+    }
+
+    // A new wave a moment after the last has gone.
+    if (invaders_.empty())
+    {
+        if (waveGoneAt_ < 0.0) waveGoneAt_ = sceneClock_;
+        if (sceneClock_ - waveGoneAt_ > 1.5 || sceneClock_ < 0.2)
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                Invader invader;
+                invader.slot = i;
+                invader.kind = (i + (int)(waveStart_ * 7.0)) % 2;
+                invaders_.push_back(invader);
+            }
+            waveStart_ = sceneClock_;
+            waveGoneAt_ = -1.0;
+            invaderDrop_ = 0.0;
+            catMode_ = CatMode::Walk;
+            catTarget_ = -1;
+        }
+    }
+
+    if (catX_ < 0.0) catX_ = (width - catWidth) / 2.0;
+    catX_ = std::clamp(catX_, 4.0, std::max(4.0, width - catWidth - 4.0));
+
+    // Within reach: the gap between them and the cat's head is less than it
+    // can jump.
+    bool close = invaderBottom > catTop - CAT_REACH_CELLS * scale * 2.0;
+    double walk = 9.0 * scale;
+    switch (catMode_)
+    {
+        case CatMode::Walk:
+        {
+            int nearest = -1;
+            double best = 1e9;
+            for (size_t i = 0; close && i < invaders_.size(); i++)
+            {
+                if (invaders_[i].flying) continue;
+                double d = std::fabs(invaders_[i].fx - catX_);
+                if (d < best)
+                {
+                    best = d;
+                    nearest = (int)i;
+                }
+            }
+            if (nearest >= 0)
+            {
+                catTarget_ = nearest;
+                catMode_ = CatMode::ToSmack;
+                break;
+            }
+            catX_ += catDir_ * walk * dt;
+            catStep_ += dt * 6.0;
+            if (catX_ > width - catWidth - 4.0) catDir_ = -1;
+            if (catX_ < 4.0) catDir_ = 1;
+            break;
+        }
+        case CatMode::ToSmack:
+        {
+            if (catTarget_ < 0 || invaders_[(size_t)catTarget_].flying)
+            {
+                catMode_ = CatMode::Walk;
+                break;
+            }
+            // fx holds where a standing invader was last drawn.
+            double tx = std::clamp(invaders_[(size_t)catTarget_].fx, 4.0, std::max(4.0, width - catWidth - 4.0));
+            catDir_ = tx > catX_ ? 1 : -1;
+            double move = std::min(std::fabs(tx - catX_), 3.0 * walk * dt);
+            catX_ += catDir_ * move;
+            catStep_ += dt * 12.0;
+            if (std::fabs(tx - catX_) < 1.0)
+            {
+                catMode_ = CatMode::Smack;
+                catJump_ = 0.0;
+            }
+            break;
+        }
+        case CatMode::Smack:
+        {
+            catJump_ += dt * 2.5;
+            if (catJump_ > 0.5 && catTarget_ >= 0 && !invaders_[(size_t)catTarget_].flying)
+            {
+                Invader& hit = invaders_[(size_t)catTarget_];
+                hit.flying = true;
+                double side = hit.fx + 5.5 * scale < width / 2.0 ? -1.0 : 1.0;
+                if (sceneRandomUnit() < 0.3) side = -side;
+                hit.vx = side * (55.0 + 40.0 * sceneRandomUnit()) * scale;
+                hit.vy = -75.0 * scale;
+                hit.spin = side * (6.0 + 4.0 * sceneRandomUnit());
+            }
+            if (catJump_ >= 1.0)
+            {
+                catMode_ = CatMode::Walk;
+                catTarget_ = -1;
+            }
+            break;
+        }
+    }
+}
+
+void GlissandoScope::paintFilesScene(wxGraphicsContext* gc, const wxRect& trace, int fade)
+{
+    auto phosphor = [fade](int a) { return wxColour(225, 232, 228, (unsigned char)(a * fade / 255)); };
+    double now = steadySeconds();
+    double W = trace.width, H = trace.height;
+    double x0 = trace.x, y0 = trace.y;
+
+    gc->SetFont(captionTextFont(), phosphor(200));
+    double cw = 0, th = 0;
+    gc->GetTextExtent("M", &cw, &th);
+    double row = std::ceil(th) + 4.0;
+    double px = std::max(2.0, std::floor(W / 150.0));
+    double catPx = std::max(3.0, std::floor(H / 64.0));
+    double catW = 13.0 * catPx, catH = 12.0 * catPx;
+    double captionY = H - th - 3.0;
+    double catTop = captionY - 4.0 - catH;
+
+    // The history: the newest at the bottom, the oldest rolled up into a
+    // count once there are more than fit in the top half of the screen.
+    int fit = std::max(2, (int)(H * 0.5 / row));
+    int room = fit - (haveCurrent_ ? 1 : 0);
+    int total = (int)shelf_.size() + shelfDropped_;
+    int shown = std::min((int)shelf_.size(), total > room ? room - 1 : room);
+    int earlier = total - shown;
+    double y = 6.0;
+    double textX = 8.0 + 5.0 * 2.0 + 6.0;
+
+    // Columns: time, arrow, station, name, size, result; the name gets
+    // what is left.
+    int nameChars = std::clamp((int)((W - textX - 6.0) / cw) - 37, 4, 28);
+    double arrowX = textX + 6.0 * cw;
+    double stationX = arrowX + 2.0 * cw;
+    double nameX = stationX + 8.0 * cw;
+    double sizeRight = nameX + (nameChars + 9.0) * cw;
+    double resultX = sizeRight + 2.0 * cw;
+
+    if (earlier > 0)
+    {
+        gc->SetFont(captionTextFont(), phosphor(110));
+        gc->DrawText(wxString::Format(wxPLURAL("%s %d earlier file", "%s %d earlier files", earlier),
+                                      wxString::FromUTF8("\xE2\x80\xA6"), earlier),
+                     x0 + textX, y0 + y);
+        y += row;
+    }
+    for (size_t i = shelf_.size() - (size_t)shown; i < shelf_.size(); i++)
+    {
+        const ShelfLine& line = shelf_[i];
+        drawSprite(gc, sprite(FLOPPY), x0 + 8.0, y0 + y + (th - 10.0) / 2.0, 2.0, phosphor(150), phosphor(25));
+        gc->SetFont(captionTextFont(), phosphor(200));
+        gc->DrawText(line.time, x0 + textX, y0 + y);
+        gc->DrawText(wxString::FromUTF8(line.outgoing ? "\xE2\x86\x92" : "\xE2\x86\x90"), x0 + arrowX, y0 + y);
+        gc->DrawText(shorten(line.station, 7), x0 + stationX, y0 + y);
+        gc->DrawText(shorten(line.name, (size_t)nameChars), x0 + nameX, y0 + y);
+        wxString size = shelfSize(line.size);
+        double sw = 0, sh = 0;
+        gc->GetTextExtent(size, &sw, &sh);
+        gc->DrawText(size, x0 + sizeRight - sw, y0 + y);
+        gc->SetFont(captionTextFont(), phosphor(line.result == _("FAILED") ? 255 : 230));
+        gc->DrawText(line.result, x0 + resultX, y0 + y);
+        y += row;
+    }
+
+    // The file moving: a bar of its pieces under the history, and who and
+    // what beside it, flashing with the console's blink.
+    double barY = y;
+    double barW = std::min(200.0, W * 0.36);
+    if (haveCurrent_)
+    {
+        double segY = y0 + y + (th - 7.0) / 2.0;
+        const std::vector<uint8_t>& map = current_.pieceMap;
+        size_t n = map.empty() ? 20 : map.size();
+        size_t lit = (size_t)std::floor(std::clamp(current_.fraction, 0.0, 1.0) * 20.0);
+        gc->SetPen(*wxTRANSPARENT_PEN);
+        for (size_t i = 0; i < n; i++)
+        {
+            double a = std::floor(i * barW / n), b = std::floor((i + 1) * barW / n);
+            double gap = b - a >= 3.0 ? 1.0 : 0.0;
+            int mark = map.empty() ? (i < lit ? 1 : 0) : map[i];
+            gc->SetBrush(wxBrush(mark == 1   ? phosphor(215)
+                                 : mark == 2 ? wxColour(150, 52, 46, (unsigned char)fade)
+                                             : phosphor(38)));
+            gc->DrawRectangle(x0 + textX + a, segY, std::max(1.0, b - a - gap), 7.0);
+        }
+        gc->SetFont(captionTextFont(), phosphor(Chaotica::blinkLit() ? 255 : 150));
+        wxString what = wxString::FromUTF8(current_.outgoing ? "\xE2\x86\x92 " : "\xE2\x86\x90 ") + current_.station +
+                        "  " + current_.name;
+        double room2 = W - (textX + barW + 10.0) - 6.0;
+        gc->DrawText(shorten(what, (size_t)std::max(4.0, room2 / cw)), x0 + textX + barW + 10.0, y0 + y);
+        y += row;
+    }
+    double shelfBottom = y + 2.0;
+    gc->SetPen(*wxTRANSPARENT_PEN);
+    gc->SetBrush(wxBrush(phosphor(40)));
+    gc->DrawRectangle(x0 + 6.0, y0 + shelfBottom, W - 12.0, 1.0);
+
+    // The invaders sit just under the history, marching to and fro and
+    // creeping down a little each time they reach a side.
+    const int ACROSS = 6;
+    double spacing = 16.0 * px;
+    double invW = 11.0 * px, invH = 8.0 * px;
+    double swing = std::max(0.0, W - ACROSS * spacing - 4.0 * px);
+    int steps = std::max(1, (int)(swing / (2.0 * px)));
+    int step = (int)std::floor(sceneClock_ * 2.0);
+    int pass = step / steps;
+    int along = step % steps;
+    double offset = (pass % 2 ? steps - along : along) * 2.0 * px;
+    int passes = std::max(0, (int)std::floor((sceneClock_ - waveStart_) * 2.0) / steps);
+    double lowest = catTop - 4.0 * catPx - invH;
+    double top = std::min(shelfBottom + 8.0 + passes * 3.0 * px, std::max(shelfBottom + 8.0, lowest));
+    for (Invader& invader : invaders_)
+    {
+        if (!invader.flying)
+        {
+            invader.fx = 2.0 * px + offset + invader.slot * spacing + invW / 2.0 - catW / 2.0;
+            invader.fy = top;
+        }
+    }
+    // fx of a standing one is where the cat would stand under it; drawn,
+    // it is put back where the invader is.
+    stepFilesScene(now, W, top + invH, catTop, catW, catPx / 2.0);
+
+    bool close = top + invH > catTop - CAT_REACH_CELLS * catPx;
+    for (const Invader& invader : invaders_)
+    {
+        Sprite sp = (invader.kind + step) % 2 ? sprite(CRAB) : sprite(SQUID);
+        double nudge = (11 - sp.width()) * px / 2.0;
+        if (!invader.flying)
+        {
+            double ix = invader.fx + catW / 2.0 - invW / 2.0;
+            int glow = close && Chaotica::blinkLit() ? 235 : 200;
+            drawSprite(gc, sp, x0 + ix + nudge, y0 + top, px, phosphor(glow), phosphor(110));
+            continue;
+        }
+        double ix = invader.fx + catW / 2.0;
+        gc->PushState();
+        gc->Translate(x0 + ix, y0 + invader.fy + invH / 2.0);
+        gc->Rotate(invader.angle);
+        drawSprite(gc, sp, -invW / 2.0 + nudge, -invH / 2.0, px, phosphor(200), phosphor(110));
+        gc->PopState();
+        if (invader.vy < 0.0)
+        {
+            gc->SetFont(captionTextFont(), phosphor(255));
+            double bw = 0, bh = 0;
+            wxString bonk = _("BONK");
+            gc->GetTextExtent(bonk, &bw, &bh);
+            // On black, so it reads over the history it flies past.
+            gc->SetBrush(wxBrush(wxColour(0, 0, 0, (unsigned char)fade)));
+            gc->DrawRectangle(x0 + ix - bw / 2.0 - 2.0, y0 + invader.fy - bh - 5.0, bw + 4.0, bh + 2.0);
+            gc->DrawText(bonk, x0 + ix - bw / 2.0, y0 + invader.fy - bh - 4.0);
+        }
+    }
+
+    // The cat, in its DORC glasses, hopping to smack one.
+    double hop = 0.0;
+    if (catMode_ == CatMode::Smack)
+    {
+        double height = std::clamp(catTop - 4.0 * catPx - (top + invH), 2.0 * catPx, 14.0 * catPx);
+        hop = std::sin(std::min(1.0, catJump_) * PI) * height;
+    }
+    double catY = y0 + catTop - hop;
+    double catX = x0 + catX_;
+    bool flip = catDir_ < 0;
+    bool walking = catMode_ != CatMode::Smack;
+    Sprite cat = walking && (int)std::floor(catStep_) % 2 ? sprite(CAT_WALK_B) : sprite(CAT_WALK_A);
+    drawSprite(gc, cat, catX, catY, catPx, phosphor(170), phosphor(90), flip);
+    drawGlasses(gc, catX + (flip ? catPx : -catPx), catY + 2.0 * catPx, catPx, phosphor(120), phosphor(255),
+                (unsigned char)fade);
+    if (catMode_ == CatMode::Smack && catJump_ > 0.25 && catJump_ < 0.8)
+    {
+        drawSprite(gc, sprite(PAW), catX + (flip ? 5.0 : 3.0) * catPx, catY - 4.0 * catPx, catPx, phosphor(200),
+                   phosphor(200));
+    }
+
+    // Floppies: pieces flying in from the right onto the bar, or tossed
+    // away to the right by the cat.
+    double floppyPx = std::max(2.0, px * 0.8);
+    while (!floppies_.empty() && now - floppies_.front().born > 1.4) floppies_.pop_front();
+    for (const Floppy& floppy : floppies_)
+    {
+        double k = (now - floppy.born) / 1.4;
+        if (k < 0.0) continue;
+        double fx, fy;
+        if (floppy.outgoing)
+        {
+            double sx = catX_ + catW, sy = catTop - hop;
+            fx = sx + (W + 20.0 - sx) * k;
+            fy = sy - std::sin(k * PI) * H * 0.35;
+        }
+        else
+        {
+            double sx = W + 6.0, sy = floppy.fromY * H;
+            fx = sx + (textX - sx) * k;
+            fy = sy + (barY - sy) * k;
+        }
+        drawSprite(gc, sprite(FLOPPY), x0 + fx, y0 + fy, floppyPx, phosphor(190), phosphor(30));
+    }
+
+    // And who has the chat.
+    wxString caption = _("CHAT IS ON DATA2G");
+    if (haveCurrent_) caption += wxString::FromUTF8(" \xC2\xB7 ") + (current_.outgoing ? _("SENDING") : _("RECEIVING"));
+    gc->SetFont(captionTextFont(), phosphor(120));
+    double tw = 0, tth = 0;
+    gc->GetTextExtent(caption, &tw, &tth);
+    gc->DrawText(caption, x0 + (W - tw) / 2.0, y0 + captionY);
 }
 
 void GlissandoScope::setSmoke(double level)

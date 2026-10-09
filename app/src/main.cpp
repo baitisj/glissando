@@ -1337,6 +1337,12 @@ void MainFrame::chatHoldGroupFiles(uint64_t holdMs)
     if (m_data2gTransport != nullptr) m_data2gTransport->holdGroupFiles(holdMs);
 }
 
+std::string MainFrame::chatSessionPeer()
+{
+    if (!data2gChatActive_.load() || m_data2gTransport == nullptr) return std::string();
+    return m_data2gTransport->status().sessionPeer;
+}
+
 wxString MainFrame::chatModemStatus()
 {
     if (!data2gChatActive_.load() || m_data2gTransport == nullptr) return wxEmptyString;

@@ -9,6 +9,7 @@
 #include <cmath>
 #include <memory>
 
+#include <wx/cursor.h>
 #include <wx/dcbuffer.h>
 #include <wx/graphics.h>
 #include <wx/eventfilter.h>
@@ -120,6 +121,7 @@ void Panel::OnPaint(wxPaintEvent&)
 
 Control::Control(wxWindow* parent, wxWindowID id, const wxSize& size)
     : wxControl(parent, id, wxDefaultPosition, size, wxBORDER_NONE)
+    , backdrop_(Colour::Plate)
 {
     SetBackgroundStyle(wxBG_STYLE_PAINT);
     SetMinSize(size);
@@ -130,7 +132,7 @@ Control::Control(wxWindow* parent, wxWindowID id, const wxSize& size)
 void Control::OnPaint(wxPaintEvent&)
 {
     wxAutoBufferedPaintDC dc(this);
-    dc.SetBackground(wxBrush(Colour::Plate));
+    dc.SetBackground(wxBrush(backdrop_));
     dc.Clear();
 
     std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::CreateFromUnknownDC(dc));
@@ -536,7 +538,13 @@ Lamp::Lamp(wxWindow* parent, const wxString& caption, const wxSize& size)
     , caption_(caption)
     , lit_(false)
 {
-    // empty
+    Bind(wxEVT_LEFT_UP, [this](wxMouseEvent& event) {
+        event.Skip();
+        if (!clickable_ || !GetClientRect().Contains(event.GetPosition())) return;
+        wxCommandEvent click(wxEVT_BUTTON, GetId());
+        click.SetEventObject(this);
+        ProcessWindowEvent(click);
+    });
 }
 
 void Lamp::SetLit(bool lit)
@@ -553,24 +561,92 @@ void Lamp::SetCaption(const wxString& caption)
     Refresh();
 }
 
+void Lamp::SetTint(Tint tint)
+{
+    if (tint_ == tint) return;
+    tint_ = tint;
+    Refresh();
+}
+
+void Lamp::SetProgress(double fraction)
+{
+    fraction = fraction < 0.0 ? -1.0 : std::min(1.0, fraction);
+    // To the bar's pixel, so a slow file doesn't repaint it for nothing.
+    if (std::lround(fraction * 256.0) == std::lround(progress_ * 256.0)) return;
+    progress_ = fraction;
+    Refresh();
+}
+
+void Lamp::SetClickable(bool clickable)
+{
+    if (clickable == clickable_) return;
+    clickable_ = clickable;
+    SetCursor(clickable ? wxCursor(wxCURSOR_HAND) : wxNullCursor);
+}
+
 void Lamp::paint(wxGraphicsContext* gc, const wxSize& size)
 {
     double r = std::min(size.y / 2.0 - 3.0, 7.0);
     double cx = r + 5, cy = size.y / 2.0;
 
-    if (lit_) drawGlow(gc, cx, cy, std::min(r * 3.0, size.y / 2.0), 0.9);
+    // Red and amber glow their own colour; white the console's own glow.
+    wxColour hot = tint_ == Tint::Red ? Colour::Alarm : wxColour(224, 164, 58);
+    wxColour pale = tint_ == Tint::Red ? wxColour(255, 150, 140) : wxColour(255, 224, 160);
+    if (lit_ && tint_ == Tint::White) drawGlow(gc, cx, cy, std::min(r * 3.0, size.y / 2.0), 0.9);
+    else if (lit_)
+    {
+        double halo = std::min(r * 3.0, size.y / 2.0);
+        gc->SetPen(*wxTRANSPARENT_PEN);
+        gc->SetBrush(gc->CreateRadialGradientBrush(cx, cy, cx, cy, halo, wxColour(hot.Red(), hot.Green(), hot.Blue(), 150),
+                                                   wxColour(hot.Red(), hot.Green(), hot.Blue(), 0)));
+        gc->DrawEllipse(cx - halo, cy - halo, halo * 2, halo * 2);
+    }
 
+    // Red flashes: in its dark half the bulb is dark red and the caption
+    // stays red, so it reads as one lamp blinking.
+    bool flashing = tint_ == Tint::Red && !lit_;
     gc->SetPen(wxPen(Colour::Chrome, 1.5));
-    gc->SetBrush(lit_ ? gc->CreateRadialGradientBrush(cx - r * 0.3, cy - r * 0.3, cx, cy, r,
-                                                      Colour::Glow, Colour::Chrome)
-                      : gc->CreateRadialGradientBrush(cx - r * 0.3, cy - r * 0.3, cx, cy, r,
-                                                      wxColour(70, 68, 66), Colour::Bakelite));
+    if (flashing)
+    {
+        gc->SetBrush(gc->CreateRadialGradientBrush(cx - r * 0.3, cy - r * 0.3, cx, cy, r, wxColour(110, 46, 42),
+                                                   wxColour(42, 19, 18)));
+    }
+    else if (!lit_)
+    {
+        gc->SetBrush(gc->CreateRadialGradientBrush(cx - r * 0.3, cy - r * 0.3, cx, cy, r, wxColour(70, 68, 66),
+                                                   Colour::Bakelite));
+    }
+    else if (tint_ == Tint::White)
+    {
+        gc->SetBrush(gc->CreateRadialGradientBrush(cx - r * 0.3, cy - r * 0.3, cx, cy, r, Colour::Glow, Colour::Chrome));
+    }
+    else
+    {
+        gc->SetBrush(gc->CreateRadialGradientBrush(cx - r * 0.3, cy - r * 0.3, cx, cy, r, pale, hot));
+    }
     gc->DrawEllipse(cx - r, cy - r, r * 2, r * 2);
 
-    gc->SetFont(font(FontRole::Button), lit_ ? Colour::Glow : Colour::Dim);
+    wxColour ink = flashing ? pale : !lit_ ? Colour::Dim : tint_ == Tint::White ? Colour::Glow : pale;
+    gc->SetFont(font(FontRole::Button), ink);
     double tw = 0, th = 0;
     gc->GetTextExtent("X", &tw, &th);
-    drawSpacedText(gc, caption_, cx + r + 8, cy - th / 2, 1.5);
+    double end = drawSpacedText(gc, caption_, cx + r + 8, cy - th / 2, 1.5);
+
+    // The bar, in a recessed slot like the readouts' windows.
+    if (progress_ >= 0.0)
+    {
+        double bx = cx + r + 8 + end + 10;
+        double bw = std::min(64.0, size.x - bx - 4);
+        if (bw > 12)
+        {
+            gc->SetPen(wxPen(Colour::PlateEdge, 1));
+            gc->SetBrush(wxBrush(Colour::PlateShadow));
+            gc->DrawRoundedRectangle(bx, cy - 3.5, bw, 7, 3);
+            gc->SetPen(*wxTRANSPARENT_PEN);
+            gc->SetBrush(wxBrush(Colour::Bone));
+            if (progress_ > 0.0) gc->DrawRoundedRectangle(bx + 1.5, cy - 2, (bw - 3) * progress_, 4, 2);
+        }
+    }
 }
 
 //--------------------------------------------------------------- Meter

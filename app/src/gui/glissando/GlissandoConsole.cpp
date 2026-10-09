@@ -436,9 +436,15 @@ void GlissandoConsole::buildControls()
     engagedLamp_ = new Lamp(scopePlate, _("Engaged"), wxSize(160, 22));
     receivingLamp_ = new Lamp(scopePlate, _("Receiving"), wxSize(160, 22));
     transmittingLamp_ = new Lamp(scopePlate, _("Transmitting"), wxSize(160, 22));
+    fileLamp_ = new Lamp(scopePlate, _("File"), wxSize(160, 22));
+    fileLamp_->SetClickable(true);
+    fileLamp_->SetToolTip(_("Files through Data2G. Flashing red: a station offers you a file. Amber: a file "
+                            "for the group is on the air, and you have not said whether to receive it. "
+                            "White, with its bar: a file is moving. Click to open COMMS."));
     lamps->Add(engagedLamp_, 0, wxBOTTOM, 4);
     lamps->Add(receivingLamp_, 0, wxBOTTOM, 4);
-    lamps->Add(transmittingLamp_, 0);
+    lamps->Add(transmittingLamp_, 0, wxBOTTOM, 4);
+    lamps->Add(fileLamp_, 0);
     scopeControls->Add(lamps, 0, wxALIGN_CENTER_VERTICAL);
     mapBall_ = new MapBall(scopePlate);
     scopeControls->Add(mapBall_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 12);
@@ -682,6 +688,11 @@ void GlissandoConsole::buildControls()
         }
         refreshTelemetry();
     });
+    fileLamp_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+        // COMMS shows the offer, or the transfer, at its top.
+        host_->glissandoShowChat(true);
+        chatButton_->SetChecked(host_->glissandoChatShown());
+    });
     chatButton_->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent&) {
         host_->glissandoShowChat(chatButton_->IsChecked());
         chatButton_->SetChecked(host_->glissandoChatShown());
@@ -861,6 +872,14 @@ void GlissandoConsole::refreshTelemetry()
     transmittingLamp_->SetLit(t.transmitting);
     scope_->setActivity(t.receiving, t.transmitting);
     scope_->setData2G(t.data2g);
+    // Files go only through Data2G: without it, nothing is asked for.
+    std::vector<GlissandoScopeFile> files;
+    if (t.data2g)
+    {
+        files = host_->glissandoFiles();
+        scope_->setFiles(files);
+    }
+    updateFileLamp(files);
     scope_->setSmoke(t.smoke);
     scope_->setCarrierSense(t.channelHeld, t.carrierHz);
     mapBall_->setLocators(t.homeLocator, t.stationLocator, t.stationLocatorCurrent);
@@ -917,6 +936,41 @@ void GlissandoConsole::refreshTelemetry()
     // A message waiting in a closed COMMS window: the button flashes red,
     // in step with ENGAGE TO SEND, until the window is opened.
     chatButton_->SetAlarm(t.chatUnread && Chaotica::blinkLit());
+}
+
+// The FILE lamp says what most wants the operator: an offer waiting for an
+// answer flashes red, in step with everything else that flashes; a group
+// file heard and not yet answered is amber, steady, since its stream goes
+// on regardless; a file moving is white, with a bar of how far it has got.
+void GlissandoConsole::updateFileLamp(const std::vector<GlissandoScopeFile>& files)
+{
+    bool offered = false, heard = false;
+    const GlissandoScopeFile* moving = nullptr;
+    for (const GlissandoScopeFile& f : files)
+    {
+        offered = offered || f.offered;
+        heard = heard || f.heard;
+        if (f.moving && !f.heard && moving == nullptr) moving = &f;
+    }
+
+    if (offered)
+    {
+        fileLamp_->SetTint(Lamp::Tint::Red);
+        fileLamp_->SetLit(Chaotica::blinkLit());
+        fileLamp_->SetProgress(-1.0);
+    }
+    else if (heard)
+    {
+        fileLamp_->SetTint(Lamp::Tint::Amber);
+        fileLamp_->SetLit(true);
+        fileLamp_->SetProgress(-1.0);
+    }
+    else
+    {
+        fileLamp_->SetTint(Lamp::Tint::White);
+        fileLamp_->SetLit(moving != nullptr);
+        fileLamp_->SetProgress(moving != nullptr ? moving->fraction : -1.0);
+    }
 }
 
 // Much of the world holds 30 m to 500 Hz (the IARU Region 1 band plan, which

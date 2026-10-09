@@ -109,9 +109,13 @@ public:
     bool isTransmitting() const override;
     bool isChannelBusy() const override;
     // data2g-host waits for a clear channel, and holds the group back
-    // during a session, by itself.
+    // during a session, by itself: a chat keying is written to it whether
+    // or not a session is up, and goes when the session idles (Data2G's
+    // PR #59) or ends. Meanwhile keyingHeldBy() names the session's far end.
     bool pacesItself() const override { return true; }
     bool withdrawKeying() override;
+    std::string keyingHeldBy() const override;
+    bool takeKeyingLost() override;
     double airTimeScale(int gear) const override;
 
     // Session keyings: with sessions on, a message or ping for one station
@@ -171,9 +175,11 @@ public:
     // Test hook: the clock the keying and session timers read.
     void setClock(std::function<uint64_t()> monotonicMs);
 
-    // A group keying data2g-host never puts on the air (it holds broadcasts
-    // during a session, and while the channel is busy) is given up after
-    // this long.
+    // A group keying data2g-host never puts on the air (while the channel
+    // is busy, say) is given up after this long, and reported NOT SENT. The
+    // time runs only while no session is up and no file keying of ours is
+    // with the host: data2g-host holds the group for those, and the keying
+    // goes after them.
     static constexpr uint64_t NOT_SENT_TIMEOUT_MS = 120000;
 
     // A session is closed once nothing has gone either way in it for this
@@ -207,8 +213,8 @@ private:
 
         enum class Stage
         {
-            Waiting,        // for the group's mode, or a session to end
-            Sent,           // written; waiting for data2g-host to transmit it
+            Waiting,        // for the group's mode, or a file keying to go
+            Sent,           // written; waiting for data2g-host to transmit it (after any session)
             Done,
         } stage = Stage::Waiting;
 
@@ -243,6 +249,7 @@ private:
     void settleSessionLocked();
     bool sessionWritableLocked() const;
     void wroteLocked(uint64_t bytes);
+    void loseKeyingLocked();
     void log(const std::string& line);
     uint64_t now() const;
 
@@ -255,6 +262,7 @@ private:
     bool busy_;
     bool hasKeying_;
     Keying keying_;
+    bool keyingLost_;   // the last keying ended without all of it reported sent
     bool callsignChanged_;
 
     // Session bookkeeping, read by the thread under mutex_.
