@@ -924,6 +924,12 @@ std::vector<GroupFile> GroupFileEngine::files(uint64_t nowMs) const
         {
             f.askers.push_back({call, asked.first, nowMs > asked.second ? (nowMs - asked.second) / 1000 : 0});
         }
+        f.pieceMap.assign((size_t)std::max(0, o.pieces), GroupFile::PieceNotYet);
+        for (int i = 0; i < f.have; i++) f.pieceMap[(size_t)i] = GroupFile::PieceHeld;
+        for (int index : o.granted)
+        {
+            if (index >= 0 && index < o.pieces) f.pieceMap[(size_t)index] = GroupFile::PieceMissed;
+        }
         out.push_back(f);
     }
 
@@ -952,6 +958,19 @@ std::vector<GroupFile> GroupFileEngine::files(uint64_t nowMs) const
         {
             f.slot = in.slot;
             f.slotInSeconds = seconds(in.sendAtMs);
+        }
+        if (in.geometry)
+        {
+            // Lacking once a window has opened; before that, only what the
+            // stream has gone past.
+            int passed = in.round >= 0 ? in.pieces : (in.spool.empty() ? 0 : in.spool.rbegin()->first);
+            f.pieceMap.assign((size_t)std::max(0, in.pieces), GroupFile::PieceNotYet);
+            for (int i = 0; i < in.pieces; i++)
+            {
+                bool held = in.verified || in.spool.count(i) != 0;
+                f.pieceMap[(size_t)i] = held ? GroupFile::PieceHeld : i < passed ? GroupFile::PieceMissed
+                                                                                 : GroupFile::PieceNotYet;
+            }
         }
         out.push_back(f);
     }

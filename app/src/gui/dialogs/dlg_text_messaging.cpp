@@ -35,6 +35,7 @@
 #include "dlg_text_messaging.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 
@@ -86,6 +87,19 @@ constexpr uint64_t LARGE_FILE_BYTES = 100 * 1000;
 // File lines kept in the chat; past this the oldest finished ones go.
 constexpr size_t FILE_LINES_KEPT = 100;
 
+// A finished transfer stays in the status area this long, saying how it
+// ended.
+constexpr double FINISHED_SHOWN_SECONDS = 30.0;
+
+// The offer box's red, dark and lit, and its border's.
+const wxColour OFFER_BACKGROUND(58, 21, 19);
+const wxColour OFFER_BORDER_DARK(94, 37, 34);
+
+double steadySeconds()
+{
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 enum
 {
     ID_STATION_LIST = wxID_HIGHEST + 700,
@@ -112,6 +126,8 @@ enum
     ID_MENU_IGNORE_GROUP_FILE,
     ID_OFFER_SAVE,
     ID_OFFER_DECLINE,
+    ID_STATUS_CANCEL,
+    ID_STATUS_RECEIVE,
     ID_DISCONNECT,
     ID_PING,
     ID_SEND,
@@ -397,6 +413,9 @@ TextMessagingDialog::TextMessagingDialog(wxWindow* parent, wxWindowID id, const 
             wxCommandEventHandler(TextMessagingDialog::OnMenuCancelTransfer));
     Connect(ID_OFFER_SAVE, wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TextMessagingDialog::OnOfferSave));
     Connect(ID_OFFER_DECLINE, wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TextMessagingDialog::OnOfferDecline));
+    Connect(ID_STATUS_CANCEL, wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TextMessagingDialog::OnStatusCancel));
+    Connect(ID_STATUS_RECEIVE, wxEVT_COMMAND_BUTTON_CLICKED,
+            wxCommandEventHandler(TextMessagingDialog::OnStatusReceive));
     Connect(ID_DISCONNECT, wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TextMessagingDialog::OnDisconnect));
     Connect(ID_AUTO_REPLY, wxEVT_TOGGLEBUTTON,
             wxCommandEventHandler(TextMessagingDialog::OnAutoReplyToggled));
@@ -600,6 +619,168 @@ void darken(wxWindow* window)
 
 } // namespace
 
+// The transfer under way, at the top of the COMMS plate: who and what on
+// the first line with what it is doing beside it, a bar drawn the
+// console's way, and the figures under it, with Cancel (and, for a group
+// file not yet answered, Receive...) beside the bar.
+class TransferStatusArea : public wxPanel
+{
+public:
+    struct View
+    {
+        wxString who;
+        wxString stage;
+        wxString meta;
+        wxString more;                  // "+2 more"
+        bool group = false;
+        double handed = 0.0;            // a session's: handed to the modem, 0 to 1
+        double acked = 0.0;             // and acknowledged (or, received, written)
+        std::vector<uint8_t> pieces;    // a group file's: 0 not yet, 1 held, 2 missed
+        bool failed = false;
+
+        bool operator==(const View&) const = default;
+    };
+
+    static constexpr int HEIGHT = 74;
+
+    TransferStatusArea(wxWindow* parent, wxWindowID cancelId, wxWindowID receiveId)
+        : wxPanel(parent, wxID_ANY, wxDefaultPosition, wxSize(-1, HEIGHT))
+    {
+        SetBackgroundStyle(wxBG_STYLE_PAINT);
+        SetMinSize(wxSize(-1, HEIGHT));
+        cancel_ = new Chaotica::Button(this, cancelId, _("Cancel"), false, wxSize(84, 28));
+        cancel_->SetBackdrop(BACKGROUND);
+        receive_ = new Chaotica::Button(this, receiveId, _("Receive..."), false, wxSize(100, 28));
+        receive_->SetBackdrop(BACKGROUND);
+        receive_->Hide();
+        Bind(wxEVT_PAINT, &TransferStatusArea::OnPaint, this);
+        Bind(wxEVT_SIZE, [this](wxSizeEvent& event) {
+            place();
+            Refresh();
+            event.Skip();
+        });
+    }
+
+    void setView(const View& view, const wxString& cancelLabel, bool canCancel, bool canReceive)
+    {
+        bool buttons = cancel_->IsShown() != canCancel || receive_->IsShown() != canReceive ||
+                       cancel_->GetLabel() != cancelLabel;
+        if (!buttons && view == view_) return;
+        view_ = view;
+        cancel_->SetLabel(cancelLabel);
+        cancel_->Show(canCancel);
+        receive_->Show(canReceive);
+        place();
+        Refresh();
+    }
+
+private:
+    inline static const wxColour BACKGROUND{11, 12, 13};
+
+    // The buttons at the right of the bar's row.
+    int buttonsWidth() const
+    {
+        int width = 0;
+        if (cancel_->IsShown()) width += cancel_->GetSize().x + 6;
+        if (receive_->IsShown()) width += receive_->GetSize().x + 6;
+        return width;
+    }
+
+    void place()
+    {
+        wxSize size = GetClientSize();
+        int x = size.x - 8;
+        int y = BAR_TOP + BAR_HEIGHT / 2;
+        if (cancel_->IsShown())
+        {
+            x -= cancel_->GetSize().x;
+            cancel_->Move(x, y - cancel_->GetSize().y / 2);
+            x -= 6;
+        }
+        if (receive_->IsShown())
+        {
+            x -= receive_->GetSize().x;
+            receive_->Move(x, y - receive_->GetSize().y / 2);
+        }
+    }
+
+    static constexpr int BAR_TOP = 28;
+    static constexpr int BAR_HEIGHT = 14;
+
+    void OnPaint(wxPaintEvent&)
+    {
+        namespace Colour = Chaotica::Colour;
+        wxAutoBufferedPaintDC dc(this);
+        dc.SetBackground(wxBrush(Colour::Plate));
+        dc.Clear();
+        std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::CreateFromUnknownDC(dc));
+        if (!gc) return;
+
+        wxSize size = GetClientSize();
+        gc->SetPen(wxPen(wxColour(60, 64, 67), 1));
+        gc->SetBrush(wxBrush(BACKGROUND));
+        gc->DrawRoundedRectangle(0.5, 0.5, size.x - 1, size.y - 1, 4);
+
+        // Who and what, and beside it what it is doing, and how many more.
+        wxFont bold = Chaotica::font(Chaotica::FontRole::Button);
+        bold.SetPointSize(10);
+        wxFont plain = bold;
+        plain.SetWeight(wxFONTWEIGHT_NORMAL);
+        wxString stage = view_.stage;
+        if (!view_.more.empty()) stage += wxString::FromUTF8("  \xC2\xB7  ") + view_.more;
+        gc->SetFont(plain, view_.failed ? Colour::Alarm : Colour::Dim);
+        double sw = 0, sh = 0;
+        gc->GetTextExtent(stage, &sw, &sh);
+        double right = size.x - 10;
+        double stageX = std::max(size.x * 0.45, right - sw);
+        gc->Clip(stageX, 0, right - stageX, BAR_TOP);
+        gc->DrawText(stage, std::max(stageX, right - sw), 6);
+        gc->ResetClip();
+        gc->SetFont(bold, Colour::Bone);
+        gc->Clip(10, 0, std::max(0.0, stageX - 22), BAR_TOP);
+        gc->DrawText(view_.who, 10, 6);
+        gc->ResetClip();
+
+        // The bar: a session's handed over in grey under what is
+        // acknowledged in bone; a group file's one segment per piece.
+        double bx = 10, bw = std::max(20, size.x - 20 - buttonsWidth());
+        gc->SetPen(*wxTRANSPARENT_PEN);
+        gc->SetBrush(wxBrush(wxColour(22, 24, 26)));
+        gc->DrawRectangle(bx, BAR_TOP, bw, BAR_HEIGHT);
+        if (!view_.group)
+        {
+            gc->SetBrush(wxBrush(wxColour(107, 111, 109)));
+            gc->DrawRectangle(bx, BAR_TOP + 2, bw * std::clamp(view_.handed, 0.0, 1.0), BAR_HEIGHT - 4);
+            gc->SetBrush(wxBrush(view_.failed ? wxColour(150, 52, 46) : Colour::Bone));
+            gc->DrawRectangle(bx, BAR_TOP + 2, bw * std::clamp(view_.acked, 0.0, 1.0), BAR_HEIGHT - 4);
+        }
+        else
+        {
+            size_t n = view_.pieces.size();
+            for (size_t i = 0; i < n; i++)
+            {
+                double a = std::floor(bx + i * bw / n), b = std::floor(bx + (i + 1) * bw / n);
+                double gap = b - a >= 4 ? 2 : b - a >= 3 ? 1 : 0;
+                uint8_t mark = view_.pieces[i];
+                gc->SetBrush(wxBrush(mark == 1   ? Colour::Bone
+                                     : mark == 2 ? wxColour(94, 37, 34)
+                                                 : wxColour(42, 45, 48)));
+                gc->DrawRectangle(a + gap / 2, BAR_TOP + 2, std::max(1.0, b - a - gap), BAR_HEIGHT - 4);
+            }
+        }
+
+        // The figures.
+        gc->SetFont(wxFont(wxFontInfo(9).Family(wxFONTFAMILY_TELETYPE)), Colour::Dim);
+        gc->Clip(10, BAR_TOP + BAR_HEIGHT, size.x - 20, size.y - BAR_TOP - BAR_HEIGHT);
+        gc->DrawText(view_.meta, 10, BAR_TOP + BAR_HEIGHT + 9);
+        gc->ResetClip();
+    }
+
+    View view_;
+    Chaotica::Button* cancel_;
+    Chaotica::Button* receive_;
+};
+
 void TextMessagingDialog::buildControls()
 {
     using Chaotica::Button;
@@ -667,22 +848,40 @@ void TextMessagingDialog::buildControls()
 
     Panel* logPlate = new Panel(this, _("Comms"));
 
-    // A file offered to us: who offers what, and the two answers. Shown
-    // over the chat only while an offer waits.
+    // A file offered to us: who offers what, how long the offer has left,
+    // and the two answers. Shown over the chat only while an offer waits,
+    // red, with its border flashing on the console's blink.
     m_offerBox = new wxPanel(logPlate);
-    m_offerBox->SetBackgroundColour(Colour::Plate);
+    m_offerBox->SetBackgroundStyle(wxBG_STYLE_PAINT);
+    m_offerBox->SetBackgroundColour(OFFER_BACKGROUND);
+    m_offerBox->Bind(wxEVT_PAINT, &TextMessagingDialog::paintOfferBox, this);
     wxBoxSizer* offerSizer = new wxBoxSizer(wxHORIZONTAL);
+    wxBoxSizer* offerWords = new wxBoxSizer(wxVERTICAL);
     m_offerText = new WrappingText(m_offerBox);
     m_offerText->SetForegroundColour(Colour::Bone);
-    offerSizer->Add(m_offerText, 1, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT, 8);
+    m_offerText->SetBackgroundColour(OFFER_BACKGROUND);
+    offerWords->Add(m_offerText, 0, wxEXPAND);
+    m_offerCountdown = new wxStaticText(m_offerBox, wxID_ANY, wxEmptyString);
+    m_offerCountdown->SetFont(wxFont(wxFontInfo(9).Family(wxFONTFAMILY_TELETYPE)));
+    m_offerCountdown->SetForegroundColour(wxColour(255, 179, 173));
+    m_offerCountdown->SetBackgroundColour(OFFER_BACKGROUND);
+    offerWords->Add(m_offerCountdown, 0, wxTOP, 2);
+    offerSizer->Add(offerWords, 1, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT | wxTOP | wxBOTTOM, 10);
     Button* offerSave = new Button(m_offerBox, ID_OFFER_SAVE, _("Save as..."), false, wxSize(110, 30));
     offerSave->SetToolTip(_("Choose where to save the file; it is then sent. Nothing received is opened or run."));
-    offerSizer->Add(offerSave, 0, wxALIGN_CENTER_VERTICAL | wxTOP | wxBOTTOM | wxRIGHT, 6);
+    offerSave->SetBackdrop(OFFER_BACKGROUND);
+    offerSizer->Add(offerSave, 0, wxALIGN_CENTER_VERTICAL | wxTOP | wxBOTTOM | wxRIGHT, 8);
     Button* offerDecline = new Button(m_offerBox, ID_OFFER_DECLINE, _("Decline"), false, wxSize(90, 30));
-    offerSizer->Add(offerDecline, 0, wxALIGN_CENTER_VERTICAL | wxTOP | wxBOTTOM | wxRIGHT, 6);
+    offerDecline->SetBackdrop(OFFER_BACKGROUND);
+    offerSizer->Add(offerDecline, 0, wxALIGN_CENTER_VERTICAL | wxTOP | wxBOTTOM | wxRIGHT, 8);
     m_offerBox->SetSizer(offerSizer);
     m_offerBox->Hide();
     logPlate->GetContentSizer()->Add(m_offerBox, 0, wxEXPAND | wxBOTTOM, 6);
+
+    // The transfer under way, while one is, and a while after it ends.
+    m_transferStatus = new TransferStatusArea(logPlate, ID_STATUS_CANCEL, ID_STATUS_RECEIVE);
+    m_transferStatus->Hide();
+    logPlate->GetContentSizer()->Add(m_transferStatus, 0, wxEXPAND | wxBOTTOM, 6);
 
     m_chatWindow = new wxHtmlWindow(logPlate, wxID_ANY, wxDefaultPosition, wxDefaultSize,
                                     wxHW_SCROLLBAR_AUTO | wxBORDER_NONE);
@@ -830,14 +1029,30 @@ void TextMessagingDialog::renderChat(bool keepPlace)
     html.reserve(4096);
     html += "<html><body bgcolor=\"" + colors.page + "\" text=\"" + colors.text + "\">";
 
+    // Each file has a line when it starts and another once it has ended.
+    struct FileRow
+    {
+        std::time_t at;
+        size_t index;
+        bool result;
+    };
+    std::vector<FileRow> fileRows;
+    for (size_t i = 0; i < m_fileLines.size(); i++)
+    {
+        fileRows.push_back({m_fileLines[i].at, i, false});
+        if (m_fileLines[i].endedAt != 0) fileRows.push_back({m_fileLines[i].endedAt, i, true});
+    }
+    std::stable_sort(fileRows.begin(), fileRows.end(),
+                     [](const FileRow& a, const FileRow& b) { return a.at < b.at; });
+
     // Messages and file lines, each in the order it came, a file line ahead
     // of the messages that came after it.
     m_rows.clear();
-    for (size_t index = 0, file = 0; index < m_messages.size() || file < m_fileLines.size();)
+    for (size_t index = 0, file = 0; index < m_messages.size() || file < fileRows.size();)
     {
-        bool fileFirst = file < m_fileLines.size() &&
-                         (index == m_messages.size() || m_fileLines[file].at < m_messages[index].timestamp);
-        m_rows.push_back({fileFirst, fileFirst ? file : index});
+        bool fileFirst = file < fileRows.size() &&
+                         (index == m_messages.size() || fileRows[file].at < m_messages[index].timestamp);
+        m_rows.push_back({fileFirst, fileFirst ? fileRows[file].index : index, fileFirst && fileRows[file].result});
 
         // Marks where each line starts, so a click can be traced back to
         // it: see rowAt(). Ahead of the line's table rather than in it,
@@ -846,8 +1061,9 @@ void TextMessagingDialog::renderChat(bool keepPlace)
 
         if (fileFirst)
         {
-            const FileLine& line = m_fileLines[file++];
-            html += line.group ? groupLineHtml(line, colors) : fileLineHtml(line, colors);
+            const FileRow& row = fileRows[file++];
+            const FileLine& line = m_fileLines[row.index];
+            html += line.group ? groupLineHtml(line, colors, row.result) : fileLineHtml(line, colors, row.result);
             continue;
         }
 
@@ -2265,25 +2481,168 @@ void TextMessagingDialog::updateTransmitControls()
     }
 }
 
-// A file's line in the chat: ours on the right, theirs on the left, like
-// messages, saying how far it has got.
-wxString TextMessagingDialog::fileLineHtml(const FileLine& line, const Palette& colors) const
+namespace
+{
+
+// "45 s" or "12 min", for how long something takes.
+wxString duration(double seconds)
+{
+    if (seconds < 90) return wxString::Format(_("%d s"), (int)std::ceil(seconds));
+    return wxString::Format(_("%d min"), (int)std::ceil(seconds / 60.0));
+}
+
+// The time of day so many seconds from now.
+wxString clockIn(double seconds)
+{
+    return (wxDateTime::Now() + wxTimeSpan::Seconds((wxLongLong)std::llround(seconds))).Format("%H:%M");
+}
+
+wxString groupFileName(const Data2G::GroupFile& f)
+{
+    if (!f.name.empty()) return wxString::FromUTF8(f.name);
+    return wxString::Format(_("file %06X"), (unsigned)f.fileId);
+}
+
+// How a group file is getting on, or how it ended, in words; and, for
+// one of ours, who has asked for pieces, and for one heard, whether
+// Receive... and Ignore still apply.
+wxString groupStateText(const Data2G::GroupFile& f, wxString& note, bool& receive, bool& ignore)
+{
+    using State = Data2G::GroupFile::State;
+    using Phase = Data2G::GroupFile::Phase;
+    wxString text;
+    note.clear();
+    receive = ignore = false;
+    if (f.outgoing)
+    {
+        wxString state;
+        switch (f.state)
+        {
+            case State::Sending:
+                state = f.have == 0 ? wxString(_("announced"))
+                                    : wxString::Format(_("sending %d of %d"), f.have, f.pieces);
+                break;
+            case State::Repairing:
+                switch (f.phase)
+                {
+                    case Phase::WindowOpen:
+                        state = wxString::Format(_("repairs open, round %d (%d s left)"), f.round + 1,
+                                                 f.secondsLeftInPhase);
+                        break;
+                    case Phase::Resending:
+                        state = wxString::Format(_("round %d: resending %d pieces, %s first in line"), f.round + 1,
+                                                 f.resending, wxString::FromUTF8(f.firstInLine));
+                        if (f.othersAsking > 0) state += wxString::Format(_(" (+%d others)"), f.othersAsking);
+                        break;
+                    case Phase::Waiting:
+                        state = wxString::Format(_("idle; the next window in %d s"), f.secondsLeftInPhase);
+                        break;
+                    case Phase::Ending: state = _("ending"); break;
+                    default: state = _("repairs open"); break;
+                }
+                if (f.serviceSecondsLeft >= 0 && f.phase != Phase::Ending)
+                {
+                    state += wxString::Format(_("; repairs until %s at the latest"), clockIn(f.serviceSecondsLeft));
+                }
+                break;
+            default:
+                switch (f.endReason)
+                {
+                    case Data2G::GroupFileEnd::Quiet: state = _("ended: no more requests"); break;
+                    case Data2G::GroupFileEnd::Deadline: state = _("ended: repair time over"); break;
+                    case Data2G::GroupFileEnd::Stopped: state = _("ended: stopped serving repairs"); break;
+                    case Data2G::GroupFileEnd::Cancelled: state = _("cancelled"); break;
+                    case Data2G::GroupFileEnd::Failed: state = _("failed"); break;
+                }
+                break;
+        }
+        text = state;
+
+        // Who asked, and when; and that nobody says they have it.
+        for (const Data2G::GroupFile::Asker& asker : f.askers)
+        {
+            note += note.empty() ? wxString(_("Asked: ")) : wxString(", ");
+            note += wxString::Format(_("%s (%d missing, %s ago)"), wxString::FromUTF8(asker.call), asker.missing,
+                                     duration((double)asker.secondsAgo));
+        }
+        if (!note.empty()) note += ". ";
+        note += _("Stations don't confirm receipt, so silence says nothing.");
+    }
+    else
+    {
+        wxString from = wxString::FromUTF8(f.sender);
+        wxString have = f.pieces > 0 ? wxString::Format(_("have %d of %d"), f.have, f.pieces)
+                                     : wxString::Format(_("have %d"), f.have);
+        wxString state;
+        switch (f.state)
+        {
+            case State::Heard:
+                if (f.verified) state = _("complete, verified");
+                else if (f.serviceSecondsLeft > 0)
+                {
+                    state = have + wxString::Format(_("; Receive to ask for the rest before %s"),
+                                                    clockIn(f.serviceSecondsLeft));
+                }
+                else state = have;
+                receive = ignore = true;
+                break;
+            case State::Receiving:
+                state = have;
+                if (f.verified) state = _("complete, verified; waiting for its name");
+                else if (f.slot >= 0)
+                {
+                    state += wxString::Format(_("; asking in slot %d (in %d s)"), f.slot + 1, f.slotInSeconds);
+                }
+                else if (!f.firstInLine.empty())
+                {
+                    state += "; " + wxString::Format(_("%s first in line; %d of your pieces coming"),
+                                                     wxString::FromUTF8(f.firstInLine), f.comingForUs);
+                }
+                ignore = true;
+                break;
+            case State::Incomplete:
+                state = wxString::Format(_("incomplete: %d missing (pieces kept 24 h)"), std::max(0, f.pieces - f.have));
+                if (!f.path.empty())
+                {
+                    state += "; " + wxString::Format(_("saved to %s if it is sent again"), wxString::FromUTF8(f.path));
+                }
+                receive = ignore = true;
+                break;
+            case State::Saved:
+                state = wxString::Format(f.autoReceived ? _("saved to %s without asking") : _("saved to %s"),
+                                         wxString::FromUTF8(f.path));
+                break;
+            case State::Ignored: state = _("ignored"); break;
+            case State::FailedVerification: state = _("failed verification: nothing saved"); break;
+            case State::CancelledThere: state = wxString::Format(_("cancelled by %s"), from); break;
+            default: state = _("failed"); break;
+        }
+        text = state;
+    }
+    if (!f.live() && !f.error.empty()) text += " (" + wxString::FromUTF8(f.error) + ")";
+    return text;
+}
+
+} // namespace
+
+namespace
+{
+
+// How a session's file is getting on, or how it ended, in a few words.
+wxString fileStateText(const Data2G::FileTransfer& t)
 {
     using State = Data2G::FileTransfer::State;
-    const Data2G::FileTransfer& t = line.transfer;
     wxString peer = wxString::FromUTF8(t.peer);
-    wxString of = groupDigits(t.done) + " " + _("of") + " " + groupDigits(t.size);
-
     wxString state;
     switch (t.state)
     {
         case State::Waiting: state = wxString::Format(_("waiting for a session with %s"), peer); break;
-        case State::Offered: state = _("offered"); break;
-        case State::Sending: state = _("sending") + " " + of; break;
+        case State::Offered: state = _("offered; waiting for an answer"); break;
+        case State::Sending: state = _("sending"); break;
         case State::Delivered: state = _("delivered"); break;
         case State::Declined: state = _("declined"); break;
         case State::Asking: state = _("offered"); break;
-        case State::Receiving: state = _("receiving") + " " + of; break;
+        case State::Receiving: state = _("receiving"); break;
         case State::Saved:
             state = wxString::Format(t.autoAccepted ? _("saved to %s without asking") : _("saved to %s"),
                                      wxString::FromUTF8(t.path));
@@ -2295,29 +2654,74 @@ wxString TextMessagingDialog::fileLineHtml(const FileLine& line, const Palette& 
         case State::FailedThere: state = wxString::Format(_("failed on %s's side"), peer); break;
         case State::NotSupported: state = _("failed: their Glissando can't take files"); break;
     }
+    if (t.state == State::Failed && !t.error.empty()) state += ": " + wxString::FromUTF8(t.error);
+    return state;
+}
 
-    wxString text = wxString::FromUTF8(t.name) + ", " + groupDigits(t.size) + " " + _("bytes") + ": " + state;
-    wxString body;
-    if (!t.outgoing) body += "<b>" + escapeHtml(t.peer) + ":</b> ";
-    body += escapeHtml(text);
-    wxString tag = " <font size=\"-2\" color=\"" + colors.subdued + "\">[" +
-                   (t.outgoing ? wxString::Format(_("FILE TO %s"), peer) : wxString(_("FILE"))) + "]</font>";
-
-    wxString align = t.outgoing ? "right" : "left";
-    wxString bubble = t.outgoing ? colors.sentBubble : colors.receivedBubble;
+// One bubble of the chat for a file: ours on the right, theirs on the
+// left, like messages.
+wxString fileBubble(bool outgoing, const wxString& body, const wxString& tag, const wxString& extra,
+                    std::time_t at, const wxString& text, const wxString& bubble, const wxString& subdued)
+{
+    wxString align = outgoing ? "right" : "left";
     wxString html = "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"" + align + "\">";
     html += "<table cellpadding=\"6\" cellspacing=\"0\" bgcolor=\"" + bubble + "\"><tr><td>";
-    html += "<font color=\"" + colors.text + "\">" + body + tag + "</font>";
+    html += "<font color=\"" + text + "\">" + body + " <font size=\"-2\" color=\"" + subdued + "\">[" + tag +
+            "]</font></font>";
+    html += extra;
     html += "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"left\">"
-            "<font size=\"-2\" color=\"" + colors.subdued + "\">" + formatTime(line.at) + "</font></td></tr></table>";
+            "<font size=\"-2\" color=\"" + subdued + "\">" + formatTime(at) + "</font></td></tr></table>";
     html += "</td></tr></table></td></tr><tr><td height=\"10\"></td></tr></table>";
     return html;
 }
 
+} // namespace
+
+// A file's lines in the chat: what it is when it starts, and how it ended.
+wxString TextMessagingDialog::fileLineHtml(const FileLine& line, const Palette& colors, bool result) const
+{
+    const Data2G::FileTransfer& t = line.transfer;
+    wxString peer = wxString::FromUTF8(t.peer);
+    wxString name = wxString::FromUTF8(t.name);
+    wxString body;
+    if (result)
+    {
+        body = escapeHtml(name + ": " + fileStateText(t));
+    }
+    else if (t.outgoing)
+    {
+        body = escapeHtml(wxString::Format(_("%s to %s, %s bytes"), name, peer, groupDigits(t.size)));
+    }
+    else
+    {
+        body = "<b>" + escapeHtml(t.peer) + "</b> " +
+               escapeHtml(wxString::Format(_("offers %s, %s bytes"), name, groupDigits(t.size)));
+    }
+    wxString tag = t.outgoing ? wxString::Format(_("FILE TO %s"), peer) : wxString(_("FILE"));
+    return fileBubble(t.outgoing, body, tag, wxEmptyString, result ? line.endedAt : line.at, colors.text,
+                      t.outgoing ? colors.sentBubble : colors.receivedBubble, colors.subdued);
+}
+
+wxString TextMessagingDialog::fileLinesShown(const FileLine& line) const
+{
+    Palette colors = palette();
+    wxString shown = line.group ? groupLineHtml(line, colors, false) : fileLineHtml(line, colors, false);
+    if (line.endedAt != 0) shown += line.group ? groupLineHtml(line, colors, true) : fileLineHtml(line, colors, true);
+    return shown;
+}
+
+void TextMessagingDialog::noteEnded(FileLine& line)
+{
+    if (line.live() || line.endedAt != 0) return;
+    line.endedAt = std::max(line.at, std::time(nullptr));
+    line.endedSteady = steadySeconds();
+}
+
 // Follows the transfers the transport has, on the blink timer: a new one
-// gets its line, a changed one its line redrawn, and an offer to us the
-// box over the chat. A file coming in while the window is closed flashes
-// the console's COMMS button, as a message does.
+// gets its line, and one that has ended a line saying how; an offer to us
+// the box over the chat, and COMMS comes forward for it; the one under way
+// the status area. A file coming in while the window is closed flashes the
+// console's COMMS button, as a message does.
 void TextMessagingDialog::updateFileTransfers()
 {
     MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
@@ -2333,6 +2737,8 @@ void TextMessagingDialog::updateFileTransfers()
     m_fileLinesRead = true;
     m_fileChanges = changes;
 
+    bool offered = false;
+    double now = steadySeconds();
     for (const Data2G::FileTransfer& t : fresh ? frame->chatFileTransfers() : std::vector<Data2G::FileTransfer>())
     {
         if (m_clearedFiles.count(t.id) != 0) continue;
@@ -2343,23 +2749,45 @@ void TextMessagingDialog::updateFileTransfers()
             FileLine newLine;
             newLine.transfer = t;
             newLine.at = std::time(nullptr);
+            newLine.readAt = now;
+            noteEnded(newLine);
+            newLine.shown = fileLinesShown(newLine);
             m_fileLines.push_back(newLine);
             added = true;
             incoming = incoming || !t.outgoing;
             if (uiLogEnabled()) log_info("UI: file line id=%d %s", (int)t.id, t.name.c_str());
             continue;
         }
-        if (line->transfer.state != t.state || line->transfer.done != t.done || line->transfer.path != t.path)
+
+        // The status bar says why one failed, as well as its line.
+        if (t.state == Data2G::FileTransfer::State::Failed && line->transfer.state != t.state && !t.error.empty())
         {
-            // The line says only "failed"; why goes to the status bar.
-            if (t.state == Data2G::FileTransfer::State::Failed && line->transfer.state != t.state && !t.error.empty())
-            {
-                setStatus(wxString::Format(_("%s failed: %s"), wxString::FromUTF8(t.name),
-                                           wxString::FromUTF8(t.error)));
-            }
-            line->transfer = t;
+            setStatus(wxString::Format(_("%s failed: %s"), wxString::FromUTF8(t.name), wxString::FromUTF8(t.error)));
+        }
+        bool moving = t.state == Data2G::FileTransfer::State::Sending ||
+                      t.state == Data2G::FileTransfer::State::Receiving;
+        if (moving && line->rateSince < 0.0)
+        {
+            line->rateSince = now;
+            line->rateBytes = t.done;
+        }
+        line->transfer = t;
+        line->readAt = now;
+        noteEnded(*line);
+        wxString shown = fileLinesShown(*line);
+        if (shown != line->shown)
+        {
+            line->shown = shown;
             changed = true;
         }
+    }
+
+    // An offer nobody has answered brings COMMS forward, once each.
+    for (const FileLine& line : m_fileLines)
+    {
+        if (line.group || line.transfer.outgoing || line.transfer.state != Data2G::FileTransfer::State::Asking) continue;
+        if (!m_offersRaised.insert(line.transfer.id).second) continue;
+        offered = true;
     }
 
     // The oldest finished lines go once there are many.
@@ -2375,16 +2803,31 @@ void TextMessagingDialog::updateFileTransfers()
         added = true;
     }
 
-    if (incoming && !IsShown()) frame->noteChatUnread();
+    if (incoming && !IsShown() && !offered) frame->noteChatUnread();
     updateOfferBox();
+    updateTransferStatus();
 
-    // A new line scrolls to it; progress leaves the view where it is.
+    // A new line scrolls to it; a line that ended leaves the view where it is.
     if (added) renderChat();
     else if (changed && IsShown()) renderChat(true);
+
+    if (offered)
+    {
+        if (uiLogEnabled()) log_info("UI: a file is offered; COMMS comes forward");
+        if (IsShown())
+        {
+            Iconize(false);
+            Raise();
+        }
+        else
+        {
+            frame->glissandoShowChat(true);
+        }
+    }
 }
 
 // The oldest offer still waiting for the operator, in the box over the
-// chat; the box goes once none is.
+// chat, with how long it has left; the box goes once none is.
 void TextMessagingDialog::updateOfferBox()
 {
     const FileLine* offer = nullptr;
@@ -2394,6 +2837,22 @@ void TextMessagingDialog::updateOfferBox()
         {
             offer = &line;
             break;
+        }
+    }
+
+    if (offer != nullptr)
+    {
+        double left = offer->transfer.expiresInMs / 1000.0 - (steadySeconds() - offer->readAt);
+        int seconds = std::max(0, (int)std::ceil(left));
+        wxString countdown = offer->transfer.expiresInMs == 0
+                                 ? wxString()
+                                 : wxString::Format(_("expires in %d:%02d"), seconds / 60, seconds % 60);
+        if (m_offerCountdown->GetLabel() != countdown) m_offerCountdown->SetLabel(countdown);
+        bool lit = Chaotica::blinkLit();
+        if (lit != m_offerLit)
+        {
+            m_offerLit = lit;
+            m_offerBox->Refresh();
         }
     }
 
@@ -2413,6 +2872,267 @@ void TextMessagingDialog::updateOfferBox()
     // own sizer has to be run to make room for the box.
     m_offerBox->GetParent()->Layout();
     m_offerBox->Layout();
+}
+
+void TextMessagingDialog::paintOfferBox(wxPaintEvent&)
+{
+    wxAutoBufferedPaintDC dc(m_offerBox);
+    dc.SetBackground(wxBrush(Chaotica::Colour::Plate));
+    dc.Clear();
+    std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::CreateFromUnknownDC(dc));
+    if (!gc) return;
+    wxSize size = m_offerBox->GetClientSize();
+    gc->SetPen(wxPen(m_offerLit ? Chaotica::Colour::Alarm : OFFER_BORDER_DARK, 2));
+    gc->SetBrush(wxBrush(OFFER_BACKGROUND));
+    gc->DrawRoundedRectangle(1, 1, size.x - 2, size.y - 2, 4);
+}
+
+namespace
+{
+
+// "34 B/s", "1.2 kB/s".
+wxString rateText(double bytesPerSecond)
+{
+    if (bytesPerSecond < 1000.0) return wxString::Format(_("%.0f B/s"), bytesPerSecond);
+    return wxString::Format(_("%.1f kB/s"), bytesPerSecond / 1000.0);
+}
+
+// "45 s left", "12 min left".
+wxString timeLeftText(double seconds)
+{
+    if (seconds < 90) return wxString::Format(_("%d s left"), (int)std::ceil(seconds));
+    return wxString::Format(_("%d min left"), (int)std::ceil(seconds / 60.0));
+}
+
+wxString joinMeta(const std::vector<wxString>& parts)
+{
+    wxString out;
+    for (const wxString& part : parts)
+    {
+        if (part.empty()) continue;
+        if (!out.empty()) out += wxString::FromUTF8("   \xC2\xB7   ");
+        out += part;
+    }
+    return out;
+}
+
+} // namespace
+
+// The status area over the chat: the newest transfer still going, unless
+// it is an offer to us (the box above has that), or else the one it last
+// showed, for a while after that one ended.
+void TextMessagingDialog::updateTransferStatus()
+{
+    double now = steadySeconds();
+    const FileLine* shown = nullptr;
+    int others = 0;
+    for (const FileLine& line : m_fileLines)
+    {
+        if (!line.live()) continue;
+        if (!line.group && line.transfer.state == Data2G::FileTransfer::State::Asking) continue;
+        if (shown != nullptr) others++;
+        if (shown == nullptr || line.at >= shown->at) shown = &line;
+    }
+    if (shown == nullptr && m_statusId != 0)
+    {
+        auto last = std::find_if(m_fileLines.begin(), m_fileLines.end(), [this](const FileLine& l) {
+            return l.group == m_statusGroup && (l.group ? l.groupFile.id : l.transfer.id) == m_statusId;
+        });
+        if (last != m_fileLines.end() && !last->live() && now - last->endedSteady < FINISHED_SHOWN_SECONDS)
+        {
+            shown = &*last;
+        }
+    }
+
+    if (shown == nullptr)
+    {
+        m_statusId = 0;
+        if (m_transferStatus->IsShown())
+        {
+            m_transferStatus->Hide();
+            m_transferStatus->GetParent()->Layout();
+        }
+        return;
+    }
+    m_statusGroup = shown->group;
+    m_statusId = shown->group ? shown->groupFile.id : shown->transfer.id;
+
+    TransferStatusArea::View view;
+    wxString cancel = _("Cancel");
+    bool canCancel = shown->live();
+    bool canReceive = false;
+    if (others > 0) view.more = wxString::Format(_("+%d more"), others);
+    wxString arrowOut = wxString::FromUTF8("\xE2\x86\x92  "), arrowIn = wxString::FromUTF8("\xE2\x86\x90  ");
+
+    if (!shown->group)
+    {
+        using State = Data2G::FileTransfer::State;
+        const Data2G::FileTransfer& t = shown->transfer;
+        view.who = (t.outgoing ? arrowOut : arrowIn) + wxString::FromUTF8(t.peer) + "     " + wxString::FromUTF8(t.name);
+        view.stage = fileStateText(t);
+        double size = (double)std::max<uint64_t>(1, t.size);
+        bool whole = t.state == State::Delivered || t.state == State::Saved;
+        view.acked = whole ? 1.0 : t.done / size;
+        view.handed = whole ? 1.0 : t.handed / size;
+        view.failed = !t.live() && !whole;
+
+        std::vector<wxString> meta;
+        if (t.state == State::Sending || t.state == State::Receiving)
+        {
+            meta.push_back(wxString::Format(t.outgoing ? _("%s of %s bytes acknowledged") : _("%s of %s bytes"),
+                                            groupDigits(t.done), groupDigits(t.size)));
+            double elapsed = now - shown->rateSince;
+            if (shown->rateSince >= 0.0 && elapsed >= 3.0 && t.done > shown->rateBytes)
+            {
+                double rate = (t.done - shown->rateBytes) / elapsed;
+                meta.push_back(rateText(rate));
+                meta.push_back(timeLeftText((t.size - t.done) / rate));
+            }
+        }
+        else
+        {
+            meta.push_back(wxString::Format(_("%s bytes"), groupDigits(t.size)));
+            if (t.state == State::Offered && t.expiresInMs != 0)
+            {
+                int left = std::max(0, (int)std::ceil(t.expiresInMs / 1000.0 - (now - shown->readAt)));
+                meta.push_back(wxString::Format(_("the offer expires in %d:%02d"), left / 60, left % 60));
+            }
+        }
+        view.meta = joinMeta(meta);
+    }
+    else
+    {
+        using State = Data2G::GroupFile::State;
+        using Phase = Data2G::GroupFile::Phase;
+        const Data2G::GroupFile& f = shown->groupFile;
+        wxString name = groupFileName(f);
+        view.group = true;
+        view.pieces = f.pieceMap;
+        if (view.pieces.empty()) view.pieces.assign(20, Data2G::GroupFile::PieceNotYet);
+        view.who = f.outgoing ? arrowOut + "GLISS     " + name
+                              : arrowIn + wxString::Format(_("%s to GLISS"), wxString::FromUTF8(f.sender)) + "     " +
+                                    name;
+        wxString tempo = GlissandoConsole::gearLabel(f.tempo + 1);
+        std::vector<wxString> meta;
+        if (f.outgoing)
+        {
+            switch (f.state)
+            {
+                case State::Sending: view.stage = f.have == 0 ? _("announced") : _("streaming"); break;
+                case State::Repairing:
+                    switch (f.phase)
+                    {
+                        case Phase::WindowOpen:
+                            view.stage = wxString::Format(_("repairs open, round %d (%d s left)"), f.round + 1,
+                                                          f.secondsLeftInPhase);
+                            break;
+                        case Phase::Resending:
+                            view.stage = wxString::Format(_("repairs, round %d, %s first in line"), f.round + 1,
+                                                          wxString::FromUTF8(f.firstInLine));
+                            break;
+                        case Phase::Waiting:
+                            view.stage = wxString::Format(_("idle; the next window in %d s"), f.secondsLeftInPhase);
+                            break;
+                        case Phase::Ending: view.stage = _("ending"); break;
+                        default: view.stage = _("repairs open"); break;
+                    }
+                    break;
+                default:
+                {
+                    wxString note;
+                    bool receive = false, ignore = false;
+                    view.stage = groupStateText(f, note, receive, ignore);
+                    view.failed = f.endReason == Data2G::GroupFileEnd::Failed;
+                    break;
+                }
+            }
+            meta.push_back(f.state == State::Sending ? wxString::Format(_("sent %d of %d pieces"), f.have, f.pieces)
+                                                     : wxString::Format(_("%d pieces"), f.pieces));
+            meta.push_back(tempo);
+            if (f.live() && f.serviceSecondsLeft >= 0)
+            {
+                meta.push_back(wxString::Format(_("serving until %s"), clockIn(f.serviceSecondsLeft)));
+            }
+            if (!f.askers.empty()) meta.push_back(wxString::Format(_("%d asked"), (int)f.askers.size()));
+        }
+        else
+        {
+            switch (f.state)
+            {
+                case State::Heard:
+                    view.stage = f.verified ? _("complete: Receive to save it") : _("heard: Receive or Ignore");
+                    canReceive = true;
+                    break;
+                case State::Receiving:
+                    if (f.verified) view.stage = _("complete; waiting for its name");
+                    else if (f.slot >= 0)
+                    {
+                        view.stage = wxString::Format(_("asking in slot %d (in %d s)"), f.slot + 1, f.slotInSeconds);
+                    }
+                    else if (!f.firstInLine.empty())
+                    {
+                        view.stage = wxString::Format(_("repairs, round %d, %s first in line"), f.round + 1,
+                                                      wxString::FromUTF8(f.firstInLine));
+                    }
+                    else view.stage = _("receiving");
+                    break;
+                default:
+                {
+                    wxString note;
+                    bool receive = false, ignore = false;
+                    view.stage = groupStateText(f, note, receive, ignore);
+                    view.failed = f.state != State::Saved && f.state != State::Ignored;
+                    break;
+                }
+            }
+            meta.push_back(f.pieces > 0 ? wxString::Format(_("have %d of %d pieces"), f.have, f.pieces)
+                                        : wxString::Format(_("have %d pieces"), f.have));
+            meta.push_back(tempo);
+            if (f.live() && f.serviceSecondsLeft > 0)
+            {
+                meta.push_back(wxString::Format(_("served until %s"), clockIn(f.serviceSecondsLeft)));
+            }
+            cancel = _("Ignore");
+            canCancel = f.state == State::Heard || f.state == State::Receiving;
+        }
+        view.meta = joinMeta(meta);
+    }
+
+    m_transferStatus->setView(view, cancel, canCancel, canReceive);
+    if (!m_transferStatus->IsShown())
+    {
+        m_transferStatus->Show();
+        m_transferStatus->GetParent()->Layout();
+    }
+}
+
+// The status area's buttons act on the transfer it shows.
+void TextMessagingDialog::OnStatusCancel(wxCommandEvent& event)
+{
+    if (m_statusId == 0) return;
+    if (!m_statusGroup)
+    {
+        m_menuTransferId = m_statusId;
+        OnMenuCancelTransfer(event);
+        return;
+    }
+    auto line = std::find_if(m_fileLines.begin(), m_fileLines.end(),
+                             [this](const FileLine& l) { return l.group && l.groupFile.id == m_statusId; });
+    if (line == m_fileLines.end()) return;
+    if (line->groupFile.outgoing)
+    {
+        m_menuGroupFileId = m_statusId;
+        OnMenuCancelGroupFile(event);
+    }
+    else
+    {
+        ignoreGroupFile(m_statusId);
+    }
+}
+
+void TextMessagingDialog::OnStatusReceive(wxCommandEvent&)
+{
+    if (m_statusId != 0 && m_statusGroup) receiveGroupFile(m_statusId);
 }
 
 // Save as...: the system's save dialog, in the received files folder with
@@ -2549,181 +3269,53 @@ void TextMessagingDialog::OnMenuCancelTransfer(wxCommandEvent&)
 // Files for everybody on the GLISS group
 //-------------------------------------------------------------------------
 
-namespace
-{
 
-// "45 s" or "12 min", for how long something takes.
-wxString duration(double seconds)
-{
-    if (seconds < 90) return wxString::Format(_("%d s"), (int)std::ceil(seconds));
-    return wxString::Format(_("%d min"), (int)std::ceil(seconds / 60.0));
-}
-
-// The time of day so many seconds from now.
-wxString clockIn(double seconds)
-{
-    return (wxDateTime::Now() + wxTimeSpan::Seconds((wxLongLong)std::llround(seconds))).Format("%H:%M");
-}
-
-wxString groupFileName(const Data2G::GroupFile& f)
-{
-    if (!f.name.empty()) return wxString::FromUTF8(f.name);
-    return wxString::Format(_("file %06X"), (unsigned)f.fileId);
-}
-
-} // namespace
-
-// A group file's line: ours on the right, saying what the transfer is
-// doing; one heard on the left, saying how much of it has come, with
-// Receive... and Ignore while that is still for the operator to say.
-wxString TextMessagingDialog::groupLineHtml(const FileLine& line, const Palette& colors) const
+// A group file's lines: ours on the right, theirs on the left; the first
+// saying what it is, with Receive... and Ignore while that is still for
+// the operator to say, the second how it ended.
+wxString TextMessagingDialog::groupLineHtml(const FileLine& line, const Palette& colors, bool result) const
 {
     using State = Data2G::GroupFile::State;
-    using Phase = Data2G::GroupFile::Phase;
     const Data2G::GroupFile& f = line.groupFile;
     wxString size = f.size != 0 ? ", " + groupDigits(f.size) + " " + _("bytes") : wxString();
+    wxString from = wxString::FromUTF8(f.sender);
 
-    wxString text;
     wxString note;
     bool receive = false;
     bool ignore = false;
-    if (f.outgoing)
-    {
-        wxString state;
-        switch (f.state)
-        {
-            case State::Sending:
-                state = f.have == 0 ? wxString(_("announced"))
-                                    : wxString::Format(_("sending %d of %d"), f.have, f.pieces);
-                break;
-            case State::Repairing:
-                switch (f.phase)
-                {
-                    case Phase::WindowOpen:
-                        state = wxString::Format(_("repairs open, round %d (%d s left)"), f.round + 1,
-                                                 f.secondsLeftInPhase);
-                        break;
-                    case Phase::Resending:
-                        state = wxString::Format(_("round %d: resending %d pieces, %s first in line"), f.round + 1,
-                                                 f.resending, wxString::FromUTF8(f.firstInLine));
-                        if (f.othersAsking > 0) state += wxString::Format(_(" (+%d others)"), f.othersAsking);
-                        break;
-                    case Phase::Waiting:
-                        state = wxString::Format(_("idle; the next window in %d s"), f.secondsLeftInPhase);
-                        break;
-                    case Phase::Ending: state = _("ending"); break;
-                    default: state = _("repairs open"); break;
-                }
-                if (f.serviceSecondsLeft >= 0 && f.phase != Phase::Ending)
-                {
-                    state += wxString::Format(_("; repairs until %s at the latest"), clockIn(f.serviceSecondsLeft));
-                }
-                break;
-            default:
-                switch (f.endReason)
-                {
-                    case Data2G::GroupFileEnd::Quiet: state = _("ended: no more requests"); break;
-                    case Data2G::GroupFileEnd::Deadline: state = _("ended: repair time over"); break;
-                    case Data2G::GroupFileEnd::Stopped: state = _("ended: stopped serving repairs"); break;
-                    case Data2G::GroupFileEnd::Cancelled: state = _("cancelled"); break;
-                    case Data2G::GroupFileEnd::Failed: state = _("failed"); break;
-                }
-                break;
-        }
-        text = groupFileName(f) + size + " " + _("to the group") + ": " + state;
+    wxString state = groupStateText(f, note, receive, ignore);
 
-        // Who asked, and when; and that nobody says they have it.
-        for (const Data2G::GroupFile::Asker& asker : f.askers)
-        {
-            note += note.empty() ? wxString(_("Asked: ")) : wxString(", ");
-            note += wxString::Format(_("%s (%d missing, %s ago)"), wxString::FromUTF8(asker.call), asker.missing,
-                                     duration((double)asker.secondsAgo));
-        }
-        if (!note.empty()) note += ". ";
-        note += _("Stations don't confirm receipt, so silence says nothing.");
-    }
-    else
+    wxString text;
+    if (result) text = groupFileName(f) + ": " + state;
+    else if (f.outgoing) text = groupFileName(f) + " " + _("to the group") + size;
+    else if (f.name.empty() && f.state != State::Saved)
     {
-        wxString from = wxString::FromUTF8(f.sender);
-        wxString have = f.pieces > 0 ? wxString::Format(_("have %d of %d"), f.have, f.pieces)
-                                     : wxString::Format(_("have %d"), f.have);
-        wxString state;
-        switch (f.state)
-        {
-            case State::Heard:
-                if (f.verified) state = _("complete, verified");
-                else if (f.serviceSecondsLeft > 0)
-                {
-                    state = have + wxString::Format(_("; Receive to ask for the rest before %s"),
-                                                    clockIn(f.serviceSecondsLeft));
-                }
-                else state = have;
-                receive = ignore = true;
-                break;
-            case State::Receiving:
-                state = have;
-                if (f.verified) state = _("complete, verified; waiting for its name");
-                else if (f.slot >= 0)
-                {
-                    state += wxString::Format(_("; asking in slot %d (in %d s)"), f.slot + 1, f.slotInSeconds);
-                }
-                else if (!f.firstInLine.empty())
-                {
-                    state += "; " + wxString::Format(_("%s first in line; %d of your pieces coming"),
-                                                     wxString::FromUTF8(f.firstInLine), f.comingForUs);
-                }
-                ignore = true;
-                break;
-            case State::Incomplete:
-                state = wxString::Format(_("incomplete: %d missing (pieces kept 24 h)"), std::max(0, f.pieces - f.have));
-                if (!f.path.empty())
-                {
-                    state += "; " + wxString::Format(_("saved to %s if it is sent again"), wxString::FromUTF8(f.path));
-                }
-                receive = ignore = true;
-                break;
-            case State::Saved:
-                state = wxString::Format(f.autoReceived ? _("saved to %s without asking") : _("saved to %s"),
-                                         wxString::FromUTF8(f.path));
-                break;
-            case State::Ignored: state = _("ignored"); break;
-            case State::FailedVerification: state = _("failed verification: nothing saved"); break;
-            case State::CancelledThere: state = wxString::Format(_("cancelled by %s"), from); break;
-            default: state = _("failed"); break;
-        }
-        if (f.name.empty() && f.state != State::Saved)
-        {
-            text = wxString::Format(_("incoming file %06X from %s, waiting for details"), (unsigned)f.fileId, from) +
-                   ": " + state;
-        }
-        else
-        {
-            text = wxString::Format(_("%s is sending %s"), from, groupFileName(f)) + size + ": " + state;
-        }
+        text = wxString::Format(_("incoming file %06X from %s, waiting for details"), (unsigned)f.fileId, from);
     }
+    else text = wxString::Format(_("%s is sending %s to the group"), from, groupFileName(f)) + size;
 
-    wxString body = escapeHtml(text);
-    wxString tag = " <font size=\"-2\" color=\"" + colors.subdued + "\">[" +
-                   (f.outgoing ? wxString(_("FILE TO GROUP")) : wxString(_("GROUP FILE"))) + "]</font>";
+    // The links go on the line that is last: the first while it is going,
+    // the second once it has ended incomplete.
+    bool last = result || line.endedAt == 0;
     wxString links;
-    if (receive) links += wxString::Format("<a href=\"gfile:receive:%llu\">%s</a>", (unsigned long long)f.id, _("Receive..."));
-    if (ignore)
+    if (last && receive)
+    {
+        links += wxString::Format("<a href=\"gfile:receive:%llu\">%s</a>", (unsigned long long)f.id, _("Receive..."));
+    }
+    if (last && ignore)
     {
         if (!links.empty()) links += " &nbsp; ";
         links += wxString::Format("<a href=\"gfile:ignore:%llu\">%s</a>", (unsigned long long)f.id, _("Ignore"));
     }
-
-    wxString align = f.outgoing ? "right" : "left";
-    wxString bubble = f.outgoing ? colors.sentBubble : colors.receivedBubble;
-    wxString html = "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"" + align + "\">";
-    html += "<table cellpadding=\"6\" cellspacing=\"0\" bgcolor=\"" + bubble + "\"><tr><td>";
-    html += "<font color=\"" + colors.text + "\">" + body + tag + "</font>";
-    if (!links.empty()) html += "<br>" + links;
-    if (!note.empty()) html += "<br><font size=\"-2\" color=\"" + colors.subdued + "\">" + escapeHtml(note) + "</font>";
-    html += "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"left\">"
-            "<font size=\"-2\" color=\"" + colors.subdued + "\">" + formatTime(line.at) + "</font></td></tr></table>";
-    html += "</td></tr></table></td></tr><tr><td height=\"10\"></td></tr></table>";
-    return html;
+    wxString extra;
+    if (!links.empty()) extra += "<br>" + links;
+    if (result && !note.empty())
+    {
+        extra += "<br><font size=\"-2\" color=\"" + colors.subdued + "\">" + escapeHtml(note) + "</font>";
+    }
+    wxString tag = f.outgoing ? wxString(_("FILE TO GROUP")) : wxString(_("GROUP FILE"));
+    return fileBubble(f.outgoing, escapeHtml(text), tag, extra, result ? line.endedAt : line.at, colors.text,
+                      f.outgoing ? colors.sentBubble : colors.receivedBubble, colors.subdued);
 }
 
 // Follows the group files the transport has: a new one gets its line, a
@@ -2759,6 +3351,9 @@ void TextMessagingDialog::updateGroupFiles(bool& added, bool& changed, bool& inc
             fresh.at = std::time(nullptr);
             fresh.group = true;
             fresh.groupFile = f;
+            fresh.readAt = steadySeconds();
+            noteEnded(fresh);
+            fresh.shown = fileLinesShown(fresh);
             m_fileLines.push_back(fresh);
             added = true;
             incoming = incoming || !f.outgoing;
@@ -2767,25 +3362,6 @@ void TextMessagingDialog::updateGroupFiles(bool& added, bool& changed, bool& inc
         }
 
         const Data2G::GroupFile& was = line->groupFile;
-        // Everything the line shows: the service time only by whether it is
-        // known, its clock not moving, and how long ago a station asked as
-        // the line words it.
-        bool askersDiffer = was.askers.size() != f.askers.size() ||
-                            !std::equal(was.askers.begin(), was.askers.end(), f.askers.begin(),
-                                        [](const Data2G::GroupFile::Asker& a, const Data2G::GroupFile::Asker& b) {
-                                            return a.call == b.call && a.missing == b.missing &&
-                                                   duration((double)a.secondsAgo) == duration((double)b.secondsAgo);
-                                        });
-        bool differs = was.state != f.state || was.phase != f.phase || was.have != f.have || was.round != f.round ||
-                       was.pieces != f.pieces || was.secondsLeftInPhase != f.secondsLeftInPhase ||
-                       was.slot != f.slot || was.slotInSeconds != f.slotInSeconds || was.firstInLine != f.firstInLine ||
-                       was.comingForUs != f.comingForUs || was.resending != f.resending || askersDiffer ||
-                       was.path != f.path || was.name != f.name || was.sender != f.sender ||
-                       was.verified != f.verified || was.size != f.size || was.othersAsking != f.othersAsking ||
-                       (was.serviceSecondsLeft >= 0) != (f.serviceSecondsLeft >= 0) ||
-                       (was.serviceSecondsLeft > 0) != (f.serviceSecondsLeft > 0) ||
-                       was.endReason != f.endReason || was.autoReceived != f.autoReceived || was.error != f.error;
-        if (!differs) continue;
         if (f.state == Data2G::GroupFile::State::Failed && was.state != f.state && !f.error.empty())
         {
             setStatus(wxString::Format(_("%s failed: %s"), groupFileName(f), wxString::FromUTF8(f.error)));
@@ -2794,8 +3370,22 @@ void TextMessagingDialog::updateGroupFiles(bool& added, bool& changed, bool& inc
         {
             setStatus(wxString::Format(_("%s: %s"), groupFileName(f), wxString::FromUTF8(f.error)));
         }
+        // Sent again, it is going once more: it gets a line saying how
+        // this time ends.
+        if (f.live() && line->endedAt != 0)
+        {
+            line->endedAt = 0;
+            line->endedSteady = 0.0;
+        }
         line->groupFile = f;
-        changed = true;
+        line->readAt = steadySeconds();
+        noteEnded(*line);
+        wxString shown = fileLinesShown(*line);
+        if (shown != line->shown)
+        {
+            line->shown = shown;
+            changed = true;
+        }
     }
 }
 

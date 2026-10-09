@@ -60,6 +60,8 @@ class Button;
 class Lamp;
 }
 
+class TransferStatusArea;
+
 // A label that wraps to whatever width the layout gives it, and wraps again
 // when the window is resized, rather than running off the edge. Set its text
 // with setText(), which keeps the unwrapped text to wrap from.
@@ -182,20 +184,36 @@ private:
     // offer to us a box over it until the operator answers.
     // A file to or from the whole GLISS group is a line too, with group
     // set and groupFile, not transfer, telling its story.
+    // The chat shows two lines for each: one when it starts, and one
+    // saying how it ended. How it is getting on is shown over the chat,
+    // in the transfer's status area.
     struct FileLine
     {
         TextMessaging::Data2G::FileTransfer transfer;  // as last seen
         std::time_t at = 0;                             // when it first appeared
         bool group = false;
         TextMessaging::Data2G::GroupFile groupFile;     // as last seen
+        double readAt = 0.0;        // steady clock seconds it was last seen
+        std::time_t endedAt = 0;    // when it was first seen over; 0 while live
+        double endedSteady = 0.0;   // the same on the steady clock
+        double rateSince = -1.0;    // steady clock seconds bytes began to move, -1 until they did
+        uint64_t rateBytes = 0;     // and how many had moved then
+        wxString shown;             // its lines as the chat last drew them
 
         bool live() const { return group ? groupFile.live() : transfer.live(); }
     };
     void updateFileTransfers();
     void updateGroupFiles(bool& added, bool& changed, bool& incoming);
     void updateOfferBox();
-    wxString fileLineHtml(const FileLine& line, const Palette& colors) const;
-    wxString groupLineHtml(const FileLine& line, const Palette& colors) const;
+    void paintOfferBox(wxPaintEvent& event);
+    void updateTransferStatus();
+    // The line it starts with, or (result) the one saying how it ended.
+    wxString fileLineHtml(const FileLine& line, const Palette& colors, bool result) const;
+    wxString groupLineHtml(const FileLine& line, const Palette& colors, bool result) const;
+    // Both, as the chat would draw them now: when this changes, it is drawn again.
+    wxString fileLinesShown(const FileLine& line) const;
+    // When a line ended, the first time it is seen over.
+    static void noteEnded(FileLine& line);
     void sendFileTo(const std::string& callsign);
     // Files going to or from the station, which letting go of it cancels.
     int liveFilesWith(const std::string& callsign) const;
@@ -229,6 +247,8 @@ private:
     void OnChatLink(wxHtmlLinkEvent& event);
     void OnOfferSave(wxCommandEvent& event);
     void OnOfferDecline(wxCommandEvent& event);
+    void OnStatusCancel(wxCommandEvent& event);
+    void OnStatusReceive(wxCommandEvent& event);
     void OnAddStationText(wxCommandEvent& event);
     void OnAddStation(wxCommandEvent& event);
     void OnAutoReplyToggled(wxCommandEvent& event);
@@ -331,10 +351,19 @@ private:
     std::set<uint64_t> m_clearedGroupFiles;
     uint64_t m_menuGroupFileId = 0; // the group file line the chat log's menu was opened on; 0 for none
 
-    // The box over the chat asking whether to save a file offered to us.
+    // The box over the chat asking whether to save a file offered to us,
+    // red, its border flashing, counting down to the offer's expiry.
     wxPanel* m_offerBox = nullptr;
     WrappingText* m_offerText = nullptr;
+    wxStaticText* m_offerCountdown = nullptr;
     uint64_t m_offerId = 0;         // the offer it shows; 0 while hidden
+    bool m_offerLit = false;        // its border, as last painted
+    std::set<uint64_t> m_offersRaised; // offers COMMS has come forward for
+
+    // The transfer under way, over the chat: one at a time, the newest.
+    TransferStatusArea* m_transferStatus = nullptr;
+    bool m_statusGroup = false;     // the one it shows, or last showed
+    uint64_t m_statusId = 0;
 
     // What each line of the chat is, top to bottom, for a click to find:
     // a message (an index into m_messages) or a file (into m_fileLines).
@@ -342,6 +371,7 @@ private:
     {
         bool file = false;
         size_t index = 0;
+        bool result = false;    // a file's line saying how it ended
     };
     std::vector<ChatRow> m_rows;
 };

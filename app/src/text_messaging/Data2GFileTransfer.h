@@ -64,6 +64,8 @@ struct FileTransfer
     std::string name;           // the name offered; one received is made safe to save under
     uint64_t size = 0;
     uint64_t done = 0;          // sending: bytes the far end's modem has acknowledged; receiving: bytes written
+    uint64_t handed = 0;        // sending: bytes handed to the modem, acknowledged or not; receiving: as done
+    uint64_t expiresInMs = 0;   // an offer still unanswered: how long before it expires (see transfers())
     State state = State::Waiting;
     std::string path;           // the file sent, or where the one received is saved; UTF-8
     std::string error;          // why it failed, when this side knows
@@ -132,7 +134,8 @@ public:
     // empty folder or list turns it off.
     void setAutoAccept(const std::string& folder, const std::vector<std::string>& calls);
 
-    std::vector<FileTransfer> transfers() const;
+    // nowMs, when given, fills in each unanswered offer's expiresInMs.
+    std::vector<FileTransfer> transfers(uint64_t nowMs = 0) const;
 
     // Moves whenever anything transfers() shows changes.
     uint64_t changes() const { return changes_; }

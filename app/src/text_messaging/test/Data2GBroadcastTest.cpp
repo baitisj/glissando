@@ -16,6 +16,7 @@
 #include <functional>
 #include <memory>
 #include <random>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -1455,8 +1456,58 @@ void testStopAllEndsIncoming()
 
 } // namespace
 
+// What the chat window draws of each piece: held, missed, or not yet.
+void testPieceMapsForTheWindow()
+{
+    Scratch scratch("maps");
+    std::string source = scratch.write("LOG.TXT", 5000);
+    Group group;
+    group.add("AG7EW");
+    group.add("K7ABC").engine.setAutoReceive(scratch.folder("a"));
+    std::set<int> lost = {3, 7};
+    group.loss = [&](int from, int, const std::vector<uint8_t>& frame) {
+        GroupData d;
+        if (from != 0 || !decodeGroupData(frame.data(), frame.size(), d) || lost.count(d.index) == 0) return false;
+        lost.erase(d.index); // resends get through
+        return true;
+    };
+
+    std::string error;
+    CHECK(group[0].engine.send(source, group.nowMs, error) != 0);
+    GroupFile sending = group.file(0, true);
+    CHECK((int)sending.pieceMap.size() == sending.pieces);
+    CHECK(std::count(sending.pieceMap.begin(), sending.pieceMap.end(), GroupFile::PieceNotYet) == sending.pieces);
+
+    // Part way through the stream: what has gone past and was lost is
+    // missed, what is still to come is not yet.
+    CHECK(group.runUntil([&]() { return group.file(1, false).have > 8; }));
+    GroupFile part = group.file(1, false);
+    CHECK((int)part.pieceMap.size() == part.pieces);
+    if ((int)part.pieceMap.size() == part.pieces && part.pieces > 9)
+    {
+        CHECK(part.pieceMap[3] == GroupFile::PieceMissed && part.pieceMap[7] == GroupFile::PieceMissed);
+        CHECK(part.pieceMap[0] == GroupFile::PieceHeld && part.pieceMap[8] == GroupFile::PieceHeld);
+        CHECK(part.pieceMap.back() == GroupFile::PieceNotYet);
+    }
+
+    // The sender resends them, marked as missed on its own map.
+    CHECK(group.runUntil([&]() { return group.file(0, true).phase == GroupFile::Phase::Resending; }));
+    GroupFile resending = group.file(0, true);
+    if ((int)resending.pieceMap.size() == resending.pieces && resending.pieces > 9)
+    {
+        CHECK(resending.pieceMap[3] == GroupFile::PieceMissed && resending.pieceMap[7] == GroupFile::PieceMissed);
+        CHECK(std::count(resending.pieceMap.begin(), resending.pieceMap.end(), GroupFile::PieceHeld) ==
+              resending.pieces - 2);
+    }
+
+    CHECK(group.runUntil([&]() { return group.file(1, false).state == State::Saved; }));
+    GroupFile saved = group.file(1, false);
+    CHECK(std::count(saved.pieceMap.begin(), saved.pieceMap.end(), GroupFile::PieceHeld) == saved.pieces);
+}
+
 int main()
 {
+    testPieceMapsForTheWindow();
     testFramesRoundTrip();
     testChatNeverSeesThem();
     testPieceSets();

@@ -287,6 +287,18 @@ struct GroupFile
     std::string path;           // where it was saved, or is to be
     std::string error;
 
+    // Every piece, for drawing: ours, sent in the first pass or not yet,
+    // or missed by a station the round's Grant resends it for; theirs,
+    // held, not yet heard, or missed (passed by in the stream, or lacking
+    // once a request window has opened). Empty until the pieces are known.
+    enum Piece : uint8_t
+    {
+        PieceNotYet = 0,
+        PieceHeld = 1,
+        PieceMissed = 2,
+    };
+    std::vector<uint8_t> pieceMap;
+
     // Still going: being sent, or being heard or received.
     bool live() const;
 };

@@ -457,11 +457,21 @@ void FileTransferEngine::setAutoAccept(const std::string& folder, const std::vec
     }
 }
 
-std::vector<FileTransfer> FileTransferEngine::transfers() const
+std::vector<FileTransfer> FileTransferEngine::transfers(uint64_t nowMs) const
 {
     std::vector<FileTransfer> out;
     out.reserve(entries_.size());
-    for (const Entry& entry : entries_) out.push_back(entry.transfer);
+    for (const Entry& entry : entries_)
+    {
+        FileTransfer& t = out.emplace_back(entry.transfer);
+        t.handed = t.outgoing ? std::max(entry.written, t.done) : t.done;
+        bool open = t.state == FileTransfer::State::Offered || t.state == FileTransfer::State::Asking;
+        if (open && nowMs != 0)
+        {
+            uint64_t age = nowMs > entry.sinceMs ? nowMs - entry.sinceMs : 0;
+            t.expiresInMs = age < OFFER_EXPIRY_MS ? OFFER_EXPIRY_MS - age : 0;
+        }
+    }
     return out;
 }
 

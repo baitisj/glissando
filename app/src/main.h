@@ -421,6 +421,7 @@ public:
     virtual void glissandoSetDriveAuto(bool automatic) override;
     virtual std::vector<double> glissandoFrequencyPresets() override;
     virtual void glissandoShowChat(bool show) override;
+    virtual std::vector<GlissandoScopeFile> glissandoFiles() override;
     virtual bool glissandoChatShown() override;
     virtual void glissandoShowSnoop(bool show) override;
     virtual bool glissandoSnoopShown() override;

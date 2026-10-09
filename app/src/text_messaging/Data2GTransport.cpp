@@ -1565,7 +1565,7 @@ void Data2GTransport::setFileAutoAccept(const std::string& folder, const std::ve
 std::vector<Data2G::FileTransfer> Data2GTransport::fileTransfers() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    return files_.transfers();
+    return files_.transfers(now());
 }
 
 uint64_t Data2GTransport::fileTransferChanges() const

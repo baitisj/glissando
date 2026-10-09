@@ -139,6 +139,11 @@ public:
     virtual void glissandoShowSnoop(bool show) = 0;
     virtual bool glissandoSnoopShown() = 0;
 
+    // The files going through Data2G and those finished this run, for the
+    // FILE lamp and the visi-scope's scene. Asked only while Data2G has
+    // the chat.
+    virtual std::vector<GlissandoScopeFile> glissandoFiles() = 0;
+
     // Some setup can only change while the audio is stopped.
     virtual bool glissandoSetupAvailable(GlissandoSetup setup) = 0;
     virtual void glissandoOpenSetup(GlissandoSetup setup) = 0;
@@ -180,6 +185,7 @@ private:
     void showFrequencyPresets();
     void updateBandWidthWarning(const GlissandoTelemetry& t);
     void updateDrive(const GlissandoTelemetry& t);
+    void updateFileLamp(const std::vector<GlissandoScopeFile>& files);
     void showPreferences();
 
     void OnTimer(wxTimerEvent& event);
@@ -223,6 +229,7 @@ private:
     Chaotica::Lamp* engagedLamp_;
     Chaotica::Lamp* receivingLamp_;
     Chaotica::Lamp* transmittingLamp_;
+    Chaotica::Lamp* fileLamp_;
     MapBall* mapBall_;
 };
 
