@@ -51,6 +51,7 @@
 #include <stdint.h>
 #include <future>
 #include <map>
+#include <string>
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386) || defined(_M_IX86)
 #include <cpuid.h>
 #endif
@@ -391,6 +392,10 @@ public:
     void chatApplyGroupFileAutoReceive();
     // "Woah!" holds file keyings too.
     void chatHoldGroupFiles(uint64_t holdMs);
+
+    // The station a Data2G session is connected with now, as data2g-host
+    // names it; empty with none, and always with Data2G off.
+    std::string chatSessionPeer();
 
 private:
 

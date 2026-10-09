@@ -143,7 +143,7 @@ void HeardStationList::restore(const std::vector<HeardStation>& stations, std::t
     }
 }
 
-int HeardStationList::prune(std::time_t now)
+int HeardStationList::prune(std::time_t now, const std::string& keep)
 {
     std::lock_guard<std::mutex> lock(mutex_);
 
@@ -152,7 +152,7 @@ int HeardStationList::prune(std::time_t now)
 
     for (auto it = stations_.begin(); it != stations_.end();)
     {
-        if (!it->second.pinned && it->second.lastHeard < cutoff)
+        if (!it->second.pinned && it->second.lastHeard < cutoff && it->first != keep)
         {
             it = stations_.erase(it);
             removed++;

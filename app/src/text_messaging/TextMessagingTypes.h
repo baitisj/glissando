@@ -404,6 +404,11 @@ struct TextMessage
     // message outlives the attempt to deliver it by less than a restart.
     int fragmentCount = 0;
     int fragmentsConfirmed = 0;
+
+    // While it is handed to the transmitter but held there behind a
+    // connected session with another station (a Data2G session holds the
+    // GLISS group): that station. Not kept in the message store either.
+    std::string heldBy;
 };
 
 // The two data modes a burst can be sent in. One keying of the transmitter may

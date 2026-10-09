@@ -56,6 +56,7 @@
 #include "gui/glissando/ChaoticaControls.h"
 #include "gui/glissando/ChaoticaTheme.h"
 #include "gui/glissando/GlissandoConsole.h"
+#include "text_messaging/Data2GLink.h"
 #include "text_messaging/DeliveryChip.h"
 #include "text_messaging/FrameCodec.h"
 #include "text_messaging/HamText.h"
@@ -77,10 +78,6 @@ constexpr int BLINK_INTERVAL_MS = 125;
 
 // The countdown bar on a queued message's chip, in pixels before scaling.
 constexpr int QUEUE_BAR_WIDTH = 112;
-
-// A press and release on the chat log further apart than this is a drag to
-// select text, not a click on a message.
-constexpr int CLICK_SLOP_PIXELS = 4;
 
 // Past this a file is sent only once the operator has agreed to the time
 // it will take on the air.
@@ -115,6 +112,7 @@ enum
     ID_MENU_IGNORE_GROUP_FILE,
     ID_OFFER_SAVE,
     ID_OFFER_DECLINE,
+    ID_DISCONNECT,
     ID_PING,
     ID_SEND,
     ID_AUTO_REPLY,
@@ -257,6 +255,14 @@ DeliveryChip deliveryChip(const TextMessage& message, bool waitingForEngage = fa
             chip.background = "#FFFCF0";
             chip.foreground = black;
             break;
+        case DeliveryChipKind::Held:
+            // Handed to data2g-host, which holds the group while a session
+            // is up: it goes when the session idles or ends.
+            chip.label = _("HELD") + wxString::FromUTF8(" \u00B7 ") +
+                         wxString::Format(_("session with %s"), wxString::FromUTF8(state.heldBy));
+            chip.background = smoke;
+            chip.foreground = "#E0A060";
+            break;
         case DeliveryChipKind::Sent:
             chip.label = _("SENT");
             chip.background = smoke;
@@ -391,6 +397,7 @@ TextMessagingDialog::TextMessagingDialog(wxWindow* parent, wxWindowID id, const 
             wxCommandEventHandler(TextMessagingDialog::OnMenuCancelTransfer));
     Connect(ID_OFFER_SAVE, wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TextMessagingDialog::OnOfferSave));
     Connect(ID_OFFER_DECLINE, wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TextMessagingDialog::OnOfferDecline));
+    Connect(ID_DISCONNECT, wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TextMessagingDialog::OnDisconnect));
     Connect(ID_AUTO_REPLY, wxEVT_TOGGLEBUTTON,
             wxCommandEventHandler(TextMessagingDialog::OnAutoReplyToggled));
     Connect(ID_STATION_LIST, wxEVT_COMMAND_LIST_ITEM_SELECTED,
@@ -408,8 +415,7 @@ TextMessagingDialog::TextMessagingDialog(wxWindow* parent, wxWindowID id, const 
 
     // The chat log keeps its own handling of the mouse, for selecting text;
     // these only watch it, and pass every event on.
-    m_chatWindow->Bind(wxEVT_LEFT_DOWN, &TextMessagingDialog::OnChatLeftDown, this);
-    m_chatWindow->Bind(wxEVT_LEFT_UP, &TextMessagingDialog::OnChatLeftUp, this);
+    m_chatWindow->Bind(wxEVT_LEFT_DCLICK, &TextMessagingDialog::OnChatDoubleClick, this);
     m_chatWindow->Bind(wxEVT_CONTEXT_MENU, &TextMessagingDialog::OnChatContextMenu, this);
     // The links on a group file's line: Receive... and Ignore.
     m_chatWindow->Bind(wxEVT_HTML_LINK_CLICKED, &TextMessagingDialog::OnChatLink, this);
@@ -439,8 +445,7 @@ TextMessagingDialog::~TextMessagingDialog()
     m_txtEntry->Disconnect(wxEVT_KEY_DOWN, wxKeyEventHandler(TextMessagingDialog::OnEntryKeyDown),
                            nullptr, this);
     connectStationMouse(false);
-    m_chatWindow->Unbind(wxEVT_LEFT_DOWN, &TextMessagingDialog::OnChatLeftDown, this);
-    m_chatWindow->Unbind(wxEVT_LEFT_UP, &TextMessagingDialog::OnChatLeftUp, this);
+    m_chatWindow->Unbind(wxEVT_LEFT_DCLICK, &TextMessagingDialog::OnChatDoubleClick, this);
     m_chatWindow->Unbind(wxEVT_CONTEXT_MENU, &TextMessagingDialog::OnChatContextMenu, this);
     m_chatWindow->Unbind(wxEVT_HTML_LINK_CLICKED, &TextMessagingDialog::OnChatLink, this);
 }
@@ -619,6 +624,24 @@ void TextMessagingDialog::buildControls()
     m_stationList->InsertColumn(2, _("Heard"), wxLIST_FORMAT_LEFT, 90);
     stationSizer->Add(new StationHeader(stationPlate, m_stationList), 0, wxEXPAND);
     stationSizer->Add(m_stationList, 1, wxEXPAND | wxBOTTOM, 6);
+
+    // A Data2G session: lit while one is connected, with the far end named
+    // under it, and the one way to end it without being asked.
+    m_stationSizer = stationSizer;
+    m_sessionSizer = new wxBoxSizer(wxVERTICAL);
+    wxBoxSizer* sessionRow = new wxBoxSizer(wxHORIZONTAL);
+    m_sessionLamp = new Chaotica::Lamp(stationPlate, _("CONNECTED"), wxSize(140, 30));
+    m_sessionLamp->SetLit(true);
+    sessionRow->Add(m_sessionLamp, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    Button* disconnect = new Button(stationPlate, ID_DISCONNECT, _("Disconnect"), false, wxSize(110, 30));
+    disconnect->SetToolTip(_("End the Data2G session now. Anything not yet acknowledged in it is dropped."));
+    sessionRow->Add(disconnect, 0, wxALIGN_CENTER_VERTICAL);
+    m_sessionSizer->Add(sessionRow, 0, wxEXPAND);
+    m_sessionText = new WrappingText(stationPlate);
+    m_sessionText->SetForegroundColour(Colour::Bone);
+    m_sessionSizer->Add(m_sessionText, 0, wxEXPAND | wxTOP, 2);
+    stationSizer->Add(m_sessionSizer, 0, wxEXPAND | wxBOTTOM, 6);
+    stationSizer->Show(m_sessionSizer, false, true);
 
     // Typing a callsign puts a station on the list before it has been heard,
     // so a directed message can be the first thing sent.
@@ -867,7 +890,7 @@ void TextMessagingDialog::renderChat(bool keepPlace)
                 right = queueBarChip(message);
             }
             else if (message.status == MessageStatus::Transmitting && message.kind == MessageKind::Chat &&
-                     m_sendFillPixels >= 0)
+                     message.heldBy.empty() && m_sendFillPixels >= 0)
             {
                 // On the air: SENDING, or RETRY or RESEND, over a bar that
                 // fills as it goes out.
@@ -937,7 +960,21 @@ void TextMessagingDialog::refreshStations()
 {
     auto& session = TextMessagingSession::instance();
     std::time_t now = std::time(nullptr);
-    session.stations().prune(now);
+    // The far end of a Data2G session stays listed while the session lasts,
+    // however quiet it is.
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    std::string peer = frame != nullptr ? frame->chatSessionPeer() : std::string();
+    std::string keep;
+    if (!peer.empty())
+    {
+        for (const HeardStation& station : session.stations().stations())
+        {
+            if (Data2G::commandCallsign(station.callsign) != peer) continue;
+            keep = station.callsign;
+            break;
+        }
+    }
+    session.stations().prune(now, keep);
 
     std::vector<HeardStation> stations = session.stations().stations();
 
@@ -1056,8 +1093,26 @@ void TextMessagingDialog::setStationSelected(long item, bool selected)
 // is cleared.
 void TextMessagingDialog::updateSelectionControls()
 {
+    if (m_restoringSelection) return;
+
     std::string callsign = selectedCallsign();
     bool selected = !callsign.empty();
+
+    // A change nothing here asked about (the keyboard, say) that would let
+    // go of a station in a session, or with files going: the selection is
+    // put back, and the operator asked.
+    if (callsign != m_mapPick && !m_lettingGo && !m_mapPick.empty() && needsAskingToLetGo(m_mapPick))
+    {
+        long item = stationItem(m_mapPick);
+        if (item >= 0)
+        {
+            m_restoringSelection = true;
+            m_stationList->SetItemState(item, wxLIST_STATE_SELECTED, wxLIST_STATE_SELECTED);
+            m_restoringSelection = false;
+            askToLetGoLater(m_mapPick, callsign);
+            return;
+        }
+    }
 
     if (callsign != m_mapPick)
     {
@@ -1211,10 +1266,29 @@ void TextMessagingDialog::OnStationDeselected(wxListEvent& event)
 void TextMessagingDialog::OnStationLeftDown(wxMouseEvent& event)
 {
     long item = stationAt(event);
-    if (item >= 0 && m_stationList->GetItemState(item, wxLIST_STATE_SELECTED) != 0)
+    if (item < 0)
     {
-        // Clicking the selected station again clears it. The press is not
-        // passed on, or the list would select it straight back.
+        event.Skip();
+        return;
+    }
+
+    // Clicking the selected station again clears it; clicking another
+    // chooses that one. Either lets go of the station selected, which is
+    // asked about first while that ends a session or cancels files, and
+    // then the press is not passed on: the list would change the selection
+    // under the question.
+    bool selected = m_stationList->GetItemState(item, wxLIST_STATE_SELECTED) != 0;
+    std::string wanted = selected ? std::string() : m_stationList->GetItemText(item).ToStdString();
+    std::string before = selectedCallsign();
+    if (!before.empty() && before != wanted && needsAskingToLetGo(before))
+    {
+        askToLetGoLater(before, wanted);
+        return;
+    }
+
+    if (selected)
+    {
+        // Not passed on, or the list would select it straight back.
         setStationSelected(item, false);
         return;
     }
@@ -1279,16 +1353,29 @@ void TextMessagingDialog::OnMenuSelectStation(wxCommandEvent&)
     if (item < 0) return; // aged out while the menu was open
 
     bool selected = m_stationList->GetItemState(item, wxLIST_STATE_SELECTED) != 0;
+    std::string before = selectedCallsign();
+    std::string wanted = selected ? std::string() : m_menuCallsign;
+    if (!before.empty() && before != wanted && !askToLetGo(before, wanted, _("Choose Station"))) return;
+
+    item = stationItem(m_menuCallsign);
+    if (item < 0) return;
+    m_lettingGo = true;
     setStationSelected(item, !selected);
+    m_lettingGo = false;
 }
 
 void TextMessagingDialog::OnMenuRemoveStation(wxCommandEvent&)
 {
+    // Removing the selected station lets go of it.
+    bool selected = m_menuCallsign == selectedCallsign();
+    if (selected && !askToLetGo(m_menuCallsign, std::string(), _("Remove Station"))) return;
     if (!TextMessagingSession::instance().stations().remove(m_menuCallsign)) return;
 
     // The rebuild cannot restore a selection the list no longer holds, so a
     // removed selected station leaves the send button on Broadcast.
+    m_lettingGo = true;
     refreshStations();
+    m_lettingGo = false;
     setStatus(wxString::Format(_("%s removed from the station list."),
                                wxString::FromUTF8(m_menuCallsign)));
     if (uiLogEnabled()) log_info("UI: station %s removed", m_menuCallsign.c_str());
@@ -1376,21 +1463,13 @@ void TextMessagingDialog::selectStation(const std::string& callsign, bool addIfM
     if (uiLogEnabled()) log_info("UI: station %s selected from the chat log", callsign.c_str());
 }
 
-void TextMessagingDialog::OnChatLeftDown(wxMouseEvent& event)
-{
-    m_chatPressAt = event.GetPosition();
-    event.Skip();
-}
-
-// A click on a message chooses the station it is with, to answer it. A
-// click on a broadcast of our own changes nothing, and a drag is somebody
-// selecting text and is left to the log.
-void TextMessagingDialog::OnChatLeftUp(wxMouseEvent& event)
+// A double click on a message chooses the station it is with, to answer it.
+// One on a broadcast of our own changes nothing. A single click only places
+// the caret or starts selecting text: choosing a station lets go of the one
+// before, which can end a session, so it takes more than a stray click.
+void TextMessagingDialog::OnChatDoubleClick(wxMouseEvent& event)
 {
     event.Skip();
-
-    wxPoint moved = event.GetPosition() - m_chatPressAt;
-    if (std::abs(moved.x) > CLICK_SLOP_PIXELS || std::abs(moved.y) > CLICK_SLOP_PIXELS) return;
 
     int row = rowAt(event.GetPosition());
     if (row < 0) return;
@@ -1402,30 +1481,161 @@ void TextMessagingDialog::OnChatLeftUp(wxMouseEvent& event)
     std::string callsign = line.file ? m_fileLines[line.index].transfer.peer : stationOf(m_messages[line.index]);
     if (callsign.empty()) return;
 
-    // Choosing another station lets go of this one, cancelling the files
-    // going to or from it: not on a stray click without asking.
     std::string before = selectedCallsign();
-    int live = before.empty() || before == callsign ? 0 : liveFilesWith(before);
-    if (live == 0)
+    if (!before.empty() && before != callsign && needsAskingToLetGo(before))
     {
-        selectStation(callsign, true);
+        askToLetGoLater(before, callsign);
         return;
     }
-    // Asked once the click is over.
-    CallAfter([this, callsign, before, live]() {
+    selectStation(callsign, true);
+}
+
+// A session with the station, or files going to or from it.
+bool TextMessagingDialog::needsAskingToLetGo(const std::string& before) const
+{
+    return !before.empty() && (sessionWith(before) || liveFilesWith(before) > 0);
+}
+
+// One question, whichever of the two it is about, with No the default.
+bool TextMessagingDialog::askToLetGo(const std::string& before, const std::string& wanted, const wxString& title)
+{
+    bool session = sessionWith(before);
+    int live = liveFilesWith(before);
+    if (!session && live == 0) return true;
+
+    wxString was = wxString::FromUTF8(before);
+    wxString will = wxString::FromUTF8(wanted);
+    wxString text;
+    if (session)
+    {
+        text = wxString::Format(_("End the session with %s?"), was);
+        text += "\n\n";
+        text += wanted.empty() ? wxString::Format(_("Letting go of %s ends it."), was)
+                               : wxString::Format(_("Choosing %s ends it."), will);
+        if (live > 0)
+        {
+            text += " ";
+            text += wxString::Format(wxPLURAL("%d file going to or from %s is cancelled.",
+                                              "%d files going to or from %s are cancelled.", live),
+                                     live, was);
+        }
+    }
+    else if (wanted.empty())
+    {
+        text = wxString::Format(wxPLURAL("%d file is going to or from %s. Letting go of %s cancels it. Go ahead?",
+                                         "%d files are going to or from %s. Letting go of %s cancels them. Go ahead?",
+                                         live),
+                                live, was, was);
+    }
+    else
+    {
+        text = wxString::Format(wxPLURAL("%d file is going to or from %s. Choosing %s lets go of %s, which "
+                                         "cancels it. Go ahead?",
+                                         "%d files are going to or from %s. Choosing %s lets go of %s, which "
+                                         "cancels them. Go ahead?",
+                                         live),
+                                live, was, will, was);
+    }
+
+    wxMessageDialog confirm(this, text, title, wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
+    bool yes = confirm.ShowModal() == wxID_YES;
+    if (uiLogEnabled()) log_info("UI: let go of %s for \"%s\"? %s", before.c_str(), wanted.c_str(), yes ? "yes" : "no");
+    return yes;
+}
+
+void TextMessagingDialog::askToLetGoLater(const std::string& before, const std::string& wanted)
+{
+    if (m_letGoAsked) return;
+    m_letGoAsked = true;
+    CallAfter([this, before, wanted]() {
+        m_letGoAsked = false;
         if (selectedCallsign() != before) return; // chosen otherwise meanwhile
-        wxMessageDialog confirm(
-            this,
-            wxString::Format(wxPLURAL("%d file is going to or from %s. Choosing %s lets go of %s, which "
-                                      "cancels it. Go ahead?",
-                                      "%d files are going to or from %s. Choosing %s lets go of %s, which "
-                                      "cancels them. Go ahead?",
-                                      live),
-                             live, wxString::FromUTF8(before), wxString::FromUTF8(callsign),
-                             wxString::FromUTF8(before)),
-            _("Choose Station"), wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
-        if (confirm.ShowModal() == wxID_YES) selectStation(callsign, true);
+        if (askToLetGo(before, wanted, _("Choose Station"))) chooseStation(before, wanted);
     });
+}
+
+// The operator has agreed: the selection moves to wanted, or is cleared.
+void TextMessagingDialog::chooseStation(const std::string& before, const std::string& wanted)
+{
+    m_lettingGo = true;
+    if (wanted.empty())
+    {
+        long item = stationItem(before);
+        if (item >= 0) setStationSelected(item, false);
+    }
+    else
+    {
+        selectStation(wanted, true);
+    }
+    m_lettingGo = false;
+}
+
+std::string TextMessagingDialog::sessionStation() const
+{
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    std::string peer = frame != nullptr ? frame->chatSessionPeer() : std::string();
+    if (peer.empty()) return peer;
+    for (long item = 0; item < m_stationList->GetItemCount(); item++)
+    {
+        std::string callsign = m_stationList->GetItemText(item).ToStdString();
+        if (Data2G::commandCallsign(callsign) == peer) return callsign;
+    }
+    return peer;
+}
+
+bool TextMessagingDialog::sessionWith(const std::string& callsign) const
+{
+    if (callsign.empty()) return false;
+    MainFrame* frame = dynamic_cast<MainFrame*>(GetParent());
+    std::string peer = frame != nullptr ? frame->chatSessionPeer() : std::string();
+    return !peer.empty() && Data2G::commandCallsign(callsign) == peer;
+}
+
+// The lamp and Disconnect show only while a session is connected, which
+// never happens with Data2G off.
+void TextMessagingDialog::updateSessionPlate()
+{
+    std::string station = sessionStation();
+    if (station == m_sessionShown) return;
+    m_sessionShown = station;
+
+    bool up = !station.empty();
+    if (up)
+    {
+        m_sessionText->setText(wxString::Format(_("Session with %s"), wxString::FromUTF8(station)));
+        m_sessionLamp->SetToolTip(wxString::Format(_("A Data2G session with %s is connected. Choosing another "
+                                                     "station, or none, ends it; you are asked first."),
+                                                   wxString::FromUTF8(station)));
+    }
+    m_stationSizer->Show(m_sessionSizer, up, true);
+    Layout();
+    if (uiLogEnabled()) log_info("UI: session plate %s", up ? station.c_str() : "hidden");
+}
+
+// Ends the session without asking: the button says what it does.
+void TextMessagingDialog::OnDisconnect(wxCommandEvent&)
+{
+    std::string station = sessionStation();
+    if (station.empty()) return;
+
+    long item = stationItem(station);
+    int dropped = 0;
+    if (item >= 0 && m_stationList->GetItemState(item, wxLIST_STATE_SELECTED) != 0)
+    {
+        // Letting go of the selected station is what ends its session.
+        m_lettingGo = true;
+        setStationSelected(item, false);
+        m_lettingGo = false;
+    }
+    else
+    {
+        dropped = TextMessagingSession::instance().protocol().releaseStation(station);
+    }
+    setStatus(dropped > 0 ? wxString::Format(wxPLURAL("Ending the session with %s; %d message aborted.",
+                                                      "Ending the session with %s; %d messages aborted.", dropped),
+                                             wxString::FromUTF8(station), dropped)
+                          : wxString::Format(_("Ending the session with %s."), wxString::FromUTF8(station)));
+    if (uiLogEnabled()) log_info("UI: Disconnect %s", station.c_str());
 }
 
 int TextMessagingDialog::liveFilesWith(const std::string& callsign) const
@@ -1759,6 +1969,7 @@ void TextMessagingDialog::updatePhraseHighlight()
 
 void TextMessagingDialog::OnTimer(wxTimerEvent&)
 {
+    updateSessionPlate();
     refreshStations();
     updateTransmitControls();
     updateAckWaitStatus();
@@ -2304,26 +2515,15 @@ void TextMessagingDialog::sendFileTo(const std::string& callsign)
     }
 
     std::string before = selectedCallsign();
-    if (!before.empty() && before != callsign)
-    {
-        int live = liveFilesWith(before);
-        if (live > 0)
-        {
-            wxMessageDialog confirm(
-                this,
-                wxString::Format(wxPLURAL("%d file is going to or from %s. Sending to %s lets go of %s, which "
-                                          "cancels it. Go ahead?",
-                                          "%d files are going to or from %s. Sending to %s lets go of %s, which "
-                                          "cancels them. Go ahead?",
-                                          live),
-                                 live, wxString::FromUTF8(before), call, wxString::FromUTF8(before)),
-                _("Send File"), wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
-            if (confirm.ShowModal() != wxID_YES) return;
-        }
-    }
+    if (!before.empty() && before != callsign && !askToLetGo(before, callsign, _("Send File"))) return;
     long item = stationItem(callsign);
     if (item < 0) return; // aged out while the dialogs were open
-    if (m_stationList->GetItemState(item, wxLIST_STATE_SELECTED) == 0) setStationSelected(item, true);
+    if (m_stationList->GetItemState(item, wxLIST_STATE_SELECTED) == 0)
+    {
+        m_lettingGo = true;
+        setStationSelected(item, true);
+        m_lettingGo = false;
+    }
 
     wxString error;
     if (frame->chatSendFile(callsign, path, error) == 0)

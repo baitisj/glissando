@@ -54,10 +54,27 @@ signal report (the chat window shows a dash).
 
 Each frame is written as a KISS ACKMODE frame with a tag. The host answers
 with the tag once the burst carrying it has gone out, which is how the app
-knows the keying is over and the acknowledgement timer can start. A keying
-the host never sends (it holds broadcasts during a session, and while the
-channel is busy) is given up after two minutes, not counting time a
-session holds the group back.
+knows the keying is over and the acknowledgement timer can start.
+
+**Held by a session.** data2g-host holds group bursts while an ARQ session
+is up: until it ends, or, since Data2G's PR #59, until the session goes
+idle. The app writes a chat keying to the host whether or not a session is
+up, and lets the host decide. While the host holds it (a session is up and
+none of the keying's tags have come back), the message's chip reads
+**HELD · session with K7ABC**, not SENDING; it goes back to SENDING, then
+SENT, once the host sends it. Before this the app held the keying back
+itself for the whole session, so with PR #59 it would still have waited
+for the session to end, and the chip said SENDING meanwhile.
+
+**Not sent.** A keying the host never sends is given up after two minutes
+and ends **NOT SENT**, never SENT. The two minutes run only while no
+session is up and no file keying of ours is with the host, in either stage
+(still with the app, or written to the host). So a keying held through a
+long session is never given up while the session lasts; it goes when the
+session idles or ends, and only a channel that then stays busy for two
+minutes gives it up. A keying also ends NOT SENT when the host reports it
+dropped, when the command port closes before it is sent, and when Data2G
+is restarted.
 
 On the group too, data2g-host takes its own turns: it waits for a clear
 channel and for any session to end. So the app keeps none of its own
@@ -66,10 +83,12 @@ reply windows, no channel-busy hold and no retry backoff, and the chat
 window shows no countdown on a queued message. Only "Woah!" holds it.
 The app still hands over one keying at a time, the next as soon as the
 host reports the last one sent, so whatever waits behind it stays in the
-app's queue, where it can be cancelled. A keying the host has been given
-but not yet sent (waiting for its mode, a clear channel or the end of a
-session) can be cancelled too, and is dropped when sending is inhibited;
-one that has started goes out. A directed message on the group still
+app's queue, where it can be cancelled. A keying handed over but still
+with the app (waiting for its mode, or for a file keying of ours to go) can
+be cancelled too, and is dropped when sending is inhibited. Once it is
+written to the host it is the host's: it goes out, or ends NOT SENT as
+above. A HELD keying can't be cancelled for that reason; Disconnect, on the
+station plate, ends the session that holds it. A directed message on the group still
 waits for the far end's chat acknowledgement, since the group has no
 acknowledgement of its own.
 
@@ -174,9 +193,10 @@ How the session itself runs:
   apart and the session dropped.
 - A session the app opened is closed once nothing of ours is waiting on
   it and nothing has gone either way for 45 s, or straight away when
-  something for another station, or for the group, is waiting. Data2G
-  sends no broadcasts during a session. A session the far end opened is
-  left to it, unless something else has waited 45 s.
+  something for another station, or for the group, is waiting (a group
+  keying the host holds counts). data2g-host sends no broadcasts during a
+  session, or since PR #59 only while it is idle. A session the far end
+  opened is left to it, unless something else has waited 45 s.
 - Deselecting the station in the call roster (clicking it again, picking
   another station, or removing it) ends the session with it at once and
   aborts every message and ping still outstanding for it, so the group is
@@ -185,6 +205,23 @@ How the session itself runs:
   since `DISCONNECT` would wait for the acknowledgements, and the far end
   then finds the session gone when it stops hearing us. Over Glissando's
   own modem deselecting changes nothing, as before.
+- **Harder to drop by accident** (Jeff, 2026-10-09). While a session is
+  connected with the selected station, anything that would change or
+  clear the selection asks first, **End the session with W1AW?**, with No
+  the default: clicking the selected station again, picking another,
+  Deselect Station or Remove in its menu, Send File to another station,
+  a double click on another station's line in the chat, or the keyboard.
+  The same question covers files going to or from the station (it says
+  they are cancelled); with files but no session it asks only about the
+  files, as before. A single click on a chat line no longer selects its
+  station; a double click does.
+- While a session is connected, the station plate shows a lit
+  **CONNECTED** lamp, "Session with W1AW" under it, and **Disconnect**,
+  which ends the session at once without asking (it lets go of the station
+  if it is selected, and otherwise releases it directly). The far end of a
+  session is never aged off the heard-station list while the session
+  lasts. With Data2G off there is never a session, so none of this
+  shows.
 - With `LISTEN ON`, the host takes sessions other Glissando stations open
   to us, and frames arriving in them go to the chat protocol.
 - If the station doesn't answer (`DISCONNECTED` while connecting; Data2G
@@ -293,9 +330,9 @@ When things go wrong:
   a Cancel for each file offered in the session goes first, and the
   `DISCONNECT` once data2g-host has read it, so the far end shows
   `cancelled by VK3ABC` (an offer it made, still unanswered, included);
-  otherwise `ABORT`, and the far end sees the session gone. Clicking a
-  line in the chat log that would choose another station asks first
-  while files are going to or from the one chosen now.
+  otherwise `ABORT`, and the far end sees the session gone. Anything that
+  would choose another station asks first while files are going to or
+  from the one chosen now, in the same question as a session's (above).
 - A station running an older Glissando takes the `F` for a stream that
   isn't chat and closes the session. A session the far end ends while our
   offer is unanswered so shows `failed: their Glissando can't take
@@ -442,7 +479,10 @@ long, or 2 minutes after the sender's time left runs out.
 each once the host acknowledges the last (ACKMODE), and a chat keying
 always goes first. After each of our file keyings the app leaves the
 channel for 4 s (2 s more after any busy report), so others can get in;
-chat keeps no such pause. Woah! holds file keyings too. A file keying the
+chat keeps no such pause. Woah! holds file keyings too. Unlike a chat
+keying, the app keeps a file keying back itself during a session: it is
+long, and once data2g-host let it go in a lull it would hold up the
+session's own traffic for the whole of it. A file keying the
 host doesn't send within 2 minutes (not counting a session) is tried once
 more; lost twice, the transfer fails. A chat keying given up on that way
 may still be with the host: a drop the host reports is counted against
@@ -501,7 +541,11 @@ command port lost mid-keying: the keying counts as lost, as above.
   failing a message, a ping through a session, deselecting the station
   ending its session (ABORT with messages outstanding, DISCONNECT without), a station without sessions
   getting the group instead, a lost command port, and a callsign change
-  reopening the group; the `F` records (every type, odd lengths, split
+  reopening the group; a broadcast held by a session (the fake host holds
+  group bursts during a session, as data2g-host does): HELD naming the
+  far end, not given up past the not-sent timeout, SENT when the host
+  lets it go in a lull or when the session ends, and NOT SENT, never
+  SENT, when the host never sends it; the `F` records (every type, odd lengths, split
   across reads, interleaved with chat frames); and files through a
   session: a 7,000-byte file end to end, declined, cancelled by either
   side, a lost session, an offer expiring, an odd name saved safely
@@ -524,8 +568,9 @@ command port lost mid-keying: the keying counts as lost, as above.
   overwriting, a receiver that can't write, more data than offered, and
   releasing the station.
   `TextMessagingProtocolTest` covers the protocol's side against a fake
-  link, and its older tests, unchanged, show nothing changes for our own
-  modem.
+  link (a held keying's chip, a lost keying ending NOT SENT), and its
+  older tests, unchanged, show nothing changes for our own modem.
+  `MessageStoreTest` checks a session's far end is kept on the heard list.
 - **Unit** (`fdv_text_messaging_data2g_broadcast_test`): the group file
   frames both ways (and that chat never takes one), piece lists, piece
   sizes and estimates, and engines on a simulated group with a simulated

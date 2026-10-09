@@ -997,6 +997,7 @@ void TextMessagingProtocol::updateStatusLocked(PendingTransmission& pending, Mes
 
     pending.message.status = status;
     pending.message.retryCount = pending.retries;
+    if (status != MessageStatus::Transmitting) pending.message.heldBy.clear();
     pending.message.fragmentCount =
         pending.mode == BurstMode::Text ? (int)pending.frames.size() : 0;
     pending.message.fragmentsConfirmed = std::popcount(pending.confirmed);
@@ -1781,17 +1782,31 @@ void TextMessagingProtocol::serviceOutboxLocked(uint64_t nowMs, bool frozen,
     // the transmitter is idle for the whole of that wait, so the traffic queued
     // behind it keeps moving, and handleAckLocked matches an acknowledgement to
     // any entry rather than just the first.
-    if (!transport_->isTransmitting())
+    if (transport_->isTransmitting())
+    {
+        noteKeyingHeldLocked(events);
+    }
+    else
     {
         // The keying we handed to the transport has finished, with everything
         // that was in it: a reply and the message that rode behind it both.
         // Acknowledgements push to the front, so neither is necessarily first.
+        // One the transport gave up on without sending went nowhere: NOT
+        // SENT, and nothing waits for an answer to it.
+        bool lost = transport_->takeKeyingLost();
         for (size_t i = 0; i < outbox_.size();)
         {
             PendingTransmission& sent = outbox_[i];
             if (sent.state != TransmissionState::Transmitting)
             {
                 i++;
+                continue;
+            }
+
+            if (lost)
+            {
+                updateStatusLocked(sent, MessageStatus::NotSent, events);
+                outbox_.erase(outbox_.begin() + (std::ptrdiff_t)i);
                 continue;
             }
 
@@ -1922,6 +1937,31 @@ void TextMessagingProtocol::serviceOutboxLocked(uint64_t nowMs, bool frozen,
         }
 
         if (!retryOrFailLocked(i, nowMs, events)) i++;
+    }
+}
+
+// A keying the transport holds behind a session with another station: the
+// chat lines in it say which, and say so no longer once it is let go. Our
+// own modem never holds one, so nothing changes there.
+void TextMessagingProtocol::noteKeyingHeldLocked(std::vector<PendingEvent>& events)
+{
+    std::string heldBy;
+    bool asked = false;
+    for (PendingTransmission& pending : outbox_)
+    {
+        if (pending.state != TransmissionState::Transmitting || pending.message.id == 0) continue;
+        if (!asked)
+        {
+            heldBy = transport_->keyingHeldBy();
+            asked = true;
+        }
+        if (pending.message.heldBy == heldBy) continue;
+        pending.message.heldBy = heldBy;
+
+        PendingEvent event;
+        event.type = PendingEvent::Type::MessageUpdated;
+        event.message = pending.message;
+        events.push_back(event);
     }
 }
 

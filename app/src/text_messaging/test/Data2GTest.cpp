@@ -37,6 +37,7 @@
 #include "../Data2GFileTransfer.h"
 #include "../Data2GLink.h"
 #include "../Data2GTransport.h"
+#include "../DeliveryChip.h"
 #include "../FrameCodec.h"
 #include "../HeardStationList.h"
 #include "../MessageStore.h"
@@ -348,6 +349,13 @@ public:
         // far end's acknowledgements of what it read before go on.
         bool holdReads = false;
         std::vector<uint8_t> unread;
+        // Group bursts are held while a session is up, as data2g-host does,
+        // and go once it ends (or the test lets them, as Data2G's PR #59
+        // does in a lull); with holdGroup, for good, as on a channel never
+        // clear.
+        bool holdGroupInSession = true;
+        bool holdGroup = false;
+        std::vector<std::vector<Data2G::KissFrame>> heldGroup;
         Data2G::KissDecoder kiss;
         Data2G::LineSplitter lines;
     };
@@ -493,6 +501,23 @@ public:
                 say(side, "BUFFER 0");
             }
             sessionWith = -1;
+            releaseHeld(0);
+            releaseHeld(1);
+            return 0;
+        });
+    }
+
+    size_t heldGroupBursts(int side)
+    {
+        return with([&]() { return sides[side].heldGroup.size(); });
+    }
+
+    // The session idles and data2g-host lets the group bursts it held go
+    // (Data2G's PR #59).
+    void releaseGroup(int side)
+    {
+        with([&]() {
+            releaseHeld(side);
             return 0;
         });
     }
@@ -529,6 +554,8 @@ private:
             say(sides[0], "DISCONNECTED");
             say(sides[1], "DISCONNECTED");
             sessionWith = -1;
+            releaseHeld(0);
+            releaseHeld(1);
         }
     }
 
@@ -616,6 +643,8 @@ private:
                 say(side, "DISCONNECTED");
                 say(other, "DISCONNECTED");
                 sessionWith = -1;
+                releaseHeld(0);
+                releaseHeld(1);
             }
         }
         else
@@ -627,10 +656,30 @@ private:
     void kissIn(int s, const uint8_t* bytes, int length)
     {
         Side& side = sides[s];
-        Side& other = sides[1 - s];
         std::vector<Data2G::KissFrame> frames;
         side.kiss.feed(bytes, length, frames);
         if (frames.empty()) return;
+        if (side.holdGroup || (side.holdGroupInSession && sessionWith >= 0))
+        {
+            side.heldGroup.push_back(frames);
+            return;
+        }
+        transmitGroup(s, frames);
+    }
+
+    void releaseHeld(int s)
+    {
+        Side& side = sides[s];
+        if (side.holdGroup) return;
+        std::vector<std::vector<Data2G::KissFrame>> held;
+        held.swap(side.heldGroup);
+        for (const auto& frames : held) transmitGroup(s, frames);
+    }
+
+    void transmitGroup(int s, const std::vector<Data2G::KissFrame>& frames)
+    {
+        Side& side = sides[s];
+        Side& other = sides[1 - s];
 
         // Everything that came in together is one burst.
         say(side, "PTT ON");
@@ -799,6 +848,28 @@ public:
             if (m.id == id) status = m.status;
         }
         return status;
+    }
+
+    // The message as it was last updated.
+    TextMessage lastUpdate(int64_t id)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        TextMessage last;
+        for (const TextMessage& m : updated)
+        {
+            if (m.id == id) last = m;
+        }
+        return last;
+    }
+
+    bool sawStatusOf(int64_t id, MessageStatus status)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        for (const TextMessage& m : updated)
+        {
+            if (m.id == id && m.status == status) return true;
+        }
+        return false;
     }
 
     int64_t lastAddedId()
@@ -1272,6 +1343,118 @@ void testACallsignChangeReopensTheGroup()
     a.transport.setMyCallsign("W1AW-2");
     CHECK(waitFor([&]() { return hosts.heardCommand(0, "BCAST OPEN GLISS FROM W1AW-2"); }, 6000));
     CHECK(hosts.heardCommand(0, "MYCALL W1AW-2"));
+}
+
+//-------------------------------------------------------------------------
+// A broadcast while a session holds the group
+//-------------------------------------------------------------------------
+
+// A session up, a broadcast of ours is written to data2g-host anyway, which
+// holds it; the chip says who holds it, and through a session longer than
+// the not-sent timeout it is not given up. When the session idles the host
+// lets it go (Data2G's PR #59), and it ends SENT.
+void testABroadcastHeldByASessionSaysSo()
+{
+    FakeHostPair hosts;
+    hosts.with([&]() {
+        hosts.sides[1].holdAcks = true;         // the session has something of VK3ABC's in it
+        hosts.sides[0].holdDisconnect = true;   // and stays up however W1AW tries to close it
+        return 0;
+    });
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(settled(hosts, a, b));
+    CHECK(waitFor([&]() { return hosts.heardCommand(0, "LISTEN ON"); }));
+
+    std::string error;
+    CHECK(b.protocol.sendMessage("are you there", "W1AW", error));
+    runBoth(a, b, [&]() { return a.transport.status().sessionPeer == "VK3ABC"; });
+    CHECK(a.transport.status().sessionPeer == "VK3ABC");
+
+    CHECK(a.protocol.sendMessage("CQ the group", "", error));
+    int64_t id = a.observer.lastAddedId();
+    runBoth(a, b, [&]() { return a.observer.lastUpdate(id).heldBy == "VK3ABC"; });
+    CHECK(hosts.heldGroupBursts(0) == 1);
+    TextMessage held = a.observer.lastUpdate(id);
+    CHECK(held.status == MessageStatus::Transmitting && held.heldBy == "VK3ABC");
+    CHECK(deliveryChipState(held).kind == DeliveryChipKind::Held);
+    CHECK(deliveryChipState(held).heldBy == "VK3ABC");
+
+    // Held well past the not-sent timeout: it waits for the session.
+    uint64_t until = a.nowMs.load() + Data2GTransport::NOT_SENT_TIMEOUT_MS + 20000;
+    runBoth(a, b, [&]() { return a.nowMs.load() >= until; }, 4000);
+    CHECK(a.nowMs.load() >= until);
+    CHECK(a.observer.statusOf(id) == MessageStatus::Transmitting);
+    CHECK(a.observer.lastUpdate(id).heldBy == "VK3ABC");
+    CHECK(!a.observer.sawStatusOf(id, MessageStatus::NotSent));
+    CHECK(!a.observer.sawStatusOf(id, MessageStatus::Sent));
+
+    // A lull in the session: data2g-host lets it go.
+    hosts.releaseGroup(0);
+    runBoth(a, b, [&]() { return a.observer.statusOf(id) == MessageStatus::Sent; });
+    CHECK(a.observer.statusOf(id) == MessageStatus::Sent);
+    CHECK(a.observer.lastUpdate(id).heldBy.empty());
+    CHECK(!a.observer.sawStatusOf(id, MessageStatus::NotSent));
+    std::vector<TextMessage> got = b.observer.receivedTexts();
+    CHECK(std::any_of(got.begin(), got.end(), [](const TextMessage& m) { return m.text == "CQ the group"; }));
+}
+
+// With a host that holds the group for the whole session, the broadcast
+// goes once the session ends, and the chip goes from HELD back to SENDING.
+void testABroadcastGoesWhenTheSessionEnds()
+{
+    FakeHostPair hosts;
+    hosts.with([&]() {
+        hosts.sides[1].holdAcks = true;
+        return 0;
+    });
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(settled(hosts, a, b));
+    CHECK(waitFor([&]() { return hosts.heardCommand(0, "LISTEN ON"); }));
+
+    std::string error;
+    CHECK(b.protocol.sendMessage("a long one", "W1AW", error));
+    runBoth(a, b, [&]() { return a.transport.status().sessionPeer == "VK3ABC"; });
+
+    CHECK(a.protocol.sendMessage("waiting my turn", "", error));
+    int64_t id = a.observer.lastAddedId();
+    runBoth(a, b, [&]() { return a.observer.lastUpdate(id).heldBy == "VK3ABC"; });
+    CHECK(a.observer.lastUpdate(id).heldBy == "VK3ABC");
+
+    hosts.loseSession();
+    runBoth(a, b, [&]() { return a.observer.statusOf(id) == MessageStatus::Sent; });
+    CHECK(a.observer.statusOf(id) == MessageStatus::Sent);
+    CHECK(!a.observer.sawStatusOf(id, MessageStatus::NotSent));
+    std::vector<TextMessage> got = b.observer.receivedTexts();
+    CHECK(std::any_of(got.begin(), got.end(), [](const TextMessage& m) { return m.text == "waiting my turn"; }));
+}
+
+// A keying data2g-host never sends, with no session to wait for, is given
+// up after the not-sent timeout and ends NOT SENT: never SENT.
+void testABroadcastNeverSentEndsNotSent()
+{
+    FakeHostPair hosts;
+    hosts.with([&]() {
+        hosts.sides[0].holdGroup = true;
+        return 0;
+    });
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(settled(hosts, a, b));
+
+    std::string error;
+    CHECK(a.protocol.sendMessage("into the void", "", error));
+    int64_t id = a.observer.lastAddedId();
+    runBoth(a, b, [&]() { return hosts.heldGroupBursts(0) == 1; });
+    CHECK(hosts.heldGroupBursts(0) == 1);
+    CHECK(a.observer.lastUpdate(id).heldBy.empty()); // nobody's session holds it
+
+    runBoth(a, b, [&]() { return a.observer.statusOf(id) == MessageStatus::NotSent; }, 4000);
+    CHECK(a.observer.statusOf(id) == MessageStatus::NotSent);
+    CHECK(!a.observer.sawStatusOf(id, MessageStatus::Sent));
+    CHECK(!a.transport.isTransmitting());
+    CHECK(a.nowMs.load() >= 1000 + Data2GTransport::NOT_SENT_TIMEOUT_MS);
 }
 
 //-------------------------------------------------------------------------
@@ -2652,6 +2835,9 @@ int main()
     testAStationWithoutSessionsGetsTheGroup();
     testLosingTheCommandPortClearsBusyAndReopens();
     testACallsignChangeReopensTheGroup();
+    testABroadcastHeldByASessionSaysSo();
+    testABroadcastGoesWhenTheSessionEnds();
+    testABroadcastNeverSentEndsNotSent();
     testAFileGoesThroughASession();
     testAFileDeclined();
     testTheSenderCancelsAFile();

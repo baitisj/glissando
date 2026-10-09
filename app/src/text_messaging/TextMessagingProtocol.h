@@ -99,6 +99,17 @@ public:
     // to go out. False once it has, or with nothing to take back.
     virtual bool withdrawKeying() { return false; }
 
+    // While the keying given to transmit() waits at the transport only
+    // because a connected session with one station holds the channel, as
+    // data2g-host holds group bursts during a session: that station. Empty
+    // otherwise, and always for our own modem.
+    virtual std::string keyingHeldBy() const { return std::string(); }
+
+    // True, once, when the keying given to transmit() has finished without
+    // the transport reporting all of it sent: given up on, or dropped. The
+    // protocol then reports it NOT SENT, not SENT. Our own modem says no.
+    virtual bool takeKeyingLost() { return false; }
+
     // A link that acknowledges, retries and paces what it carries by itself,
     // such as a Data2G connected session. Nothing else has one: the defaults
     // say no, and the protocol then works exactly as it does without them.
@@ -471,6 +482,7 @@ private:
     bool goesReliablyLocked(const PendingTransmission& pending) const;
     void sendReliablyLocked(uint64_t nowMs, std::vector<PendingEvent>& events);
     void settleReliableKeyingsLocked(std::vector<PendingEvent>& events);
+    void noteKeyingHeldLocked(std::vector<PendingEvent>& events);
     uint16_t nextAirIdLocked();
     Frame makeFrameLocked(FrameType type, const std::string& destination, uint16_t airId,
                           uint8_t fragmentIndex, uint8_t fragmentCount,

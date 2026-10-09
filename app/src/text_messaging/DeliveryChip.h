@@ -35,6 +35,8 @@
 #ifndef TEXT_MESSAGING__DELIVERY_CHIP_H
 #define TEXT_MESSAGING__DELIVERY_CHIP_H
 
+#include <string>
+
 #include "TextMessagingTypes.h"
 
 namespace TextMessaging
@@ -49,6 +51,7 @@ enum class DeliveryChipKind
     Queued,
     EngageToSend,    // queued, but the console is disengaged and nothing can key
     Sending,         // the first attempt, on the air
+    Held,            // handed over, but held behind a session with another station
     Sent,            // the first attempt, or a broadcast, done
     Retry,           // an attempt after one that got nothing through
     Resend,          // the far end has part of it; the rest is on its way
@@ -64,6 +67,7 @@ struct DeliveryChipState
     int retry = 0;              // for Retry
     int fragmentsConfirmed = 0; // for a partly delivered message: how far it got
     int fragmentCount = 0;
+    std::string heldBy;         // for Held: the station whose session holds it
 
     // Worth showing only between the first fragment confirmed and the last.
     bool showsProgress() const
@@ -80,6 +84,7 @@ inline DeliveryChipState deliveryChipState(const TextMessage& message, bool wait
     state.retry = message.retryCount;
     state.fragmentsConfirmed = message.fragmentsConfirmed;
     state.fragmentCount = message.fragmentCount;
+    state.heldBy = message.heldBy;
 
     switch (message.status)
     {
@@ -94,7 +99,13 @@ inline DeliveryChipState deliveryChipState(const TextMessage& message, bool wait
             // while the acknowledgement timer runs, or the chip appears to go
             // backwards every time the message returns to the air. A message
             // the far end holds part of shows that instead of starting over.
-            if (message.retryCount > 0)
+            // One held behind somebody's session is not on the air at all,
+            // whichever attempt it is, and says so (Data2G only).
+            if (message.status == MessageStatus::Transmitting && !message.heldBy.empty())
+            {
+                state.kind = DeliveryChipKind::Held;
+            }
+            else if (message.retryCount > 0)
             {
                 state.kind = DeliveryChipKind::Retry;
             }

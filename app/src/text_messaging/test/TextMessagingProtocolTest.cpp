@@ -109,6 +109,18 @@ public:
     bool paced = false;
     bool started = false;
     int withdrawnKeyings = 0;
+
+    // A keying held behind somebody's session, and one given up on unsent,
+    // as Data2G reports them; neither by default, as for our own modem.
+    std::string keyingHeldBy() const override { return heldBy; }
+    bool takeKeyingLost() override
+    {
+        bool was = lost;
+        lost = false;
+        return was;
+    }
+    std::string heldBy;
+    bool lost = false;
     double airTimeScale(int gear) const override { return gear == 1 ? 8.0 : 1.0; }
 
     // A link that acknowledges by itself, such as a Data2G session, to the
@@ -2302,6 +2314,18 @@ void testDeliveryChip()
     // Nothing or everything confirmed is not progress worth showing.
     CHECK(!kindOf(MessageStatus::AwaitingAck, 0, 0, 8).showsProgress());
     CHECK(!kindOf(MessageStatus::Acknowledged, 0, 8, 8).showsProgress());
+
+    // Handed over but held behind a session with another station: HELD,
+    // naming it, whichever attempt it is. Only while handed over.
+    TextMessage held;
+    held.status = MessageStatus::Transmitting;
+    held.heldBy = "K7ABC";
+    CHECK(deliveryChipState(held).kind == DeliveryChipKind::Held);
+    CHECK(deliveryChipState(held).heldBy == "K7ABC");
+    held.retryCount = 1;
+    CHECK(deliveryChipState(held).kind == DeliveryChipKind::Held);
+    held.status = MessageStatus::AwaitingAck;
+    CHECK(deliveryChipState(held).kind == DeliveryChipKind::Retry);
 }
 
 // Carrier sense: while the receiver is locked onto somebody else's burst,
@@ -3261,6 +3285,57 @@ void testATransportThatPacesItselfGetsNoPauses()
     CHECK(a.transport.transmissions.size() == before + 1);
 }
 
+// A keying the transport holds behind a session says so on its chat line,
+// and stops saying so once it is let go; one it gives up on unsent is NOT
+// SENT, and a message in it waits for no acknowledgement.
+void testAHeldKeyingSaysSoAndALostOneIsNotSent()
+{
+    Station a("W1AW");
+    a.transport.paced = true;
+
+    std::string error;
+    CHECK(a.protocol.sendMessage("CQ", "", error));
+    int64_t broadcast = a.observer.added.back().id;
+    a.protocol.tick();
+    CHECK(a.transport.transmissions.size() == 1);
+    CHECK(a.observer.lastUpdateFor(broadcast)->heldBy.empty());
+
+    size_t updates = a.observer.updated.size();
+    a.transport.heldBy = "K7ABC";
+    a.protocol.tick();
+    CHECK(a.observer.lastUpdateFor(broadcast)->status == MessageStatus::Transmitting);
+    CHECK(a.observer.lastUpdateFor(broadcast)->heldBy == "K7ABC");
+    a.protocol.tick();
+    CHECK(a.observer.updated.size() == updates + 1); // said once, not every tick
+
+    a.transport.heldBy.clear();
+    a.protocol.tick();
+    CHECK(a.observer.lastUpdateFor(broadcast)->heldBy.empty());
+    a.transport.transmitting = false;
+    a.protocol.tick();
+    CHECK(a.observer.lastUpdateFor(broadcast)->status == MessageStatus::Sent);
+
+    // Held, then given up on: NOT SENT, never SENT or awaiting an answer.
+    CHECK(a.protocol.sendMessage("are you there", "VK3ABC", error));
+    int64_t directed = a.observer.added.back().id;
+    a.protocol.tick();
+    CHECK(a.transport.transmissions.size() == 2);
+    a.transport.heldBy = "K7ABC";
+    a.protocol.tick();
+    CHECK(a.observer.lastUpdateFor(directed)->heldBy == "K7ABC");
+    a.transport.transmitting = false;
+    a.transport.lost = true;
+    a.protocol.tick();
+    CHECK(a.observer.lastUpdateFor(directed)->status == MessageStatus::NotSent);
+    CHECK(a.observer.lastUpdateFor(directed)->heldBy.empty());
+    CHECK(!a.protocol.hasQueuedTransmissions());
+    CHECK(a.protocol.ackWait() == AckWait::Nothing);
+    for (const TextMessage& m : a.observer.updated)
+    {
+        if (m.id == directed) CHECK(m.status != MessageStatus::Sent && m.status != MessageStatus::AwaitingAck);
+    }
+}
+
 // Inhibited, a keying a self-pacing transport has not started on is taken
 // back and dropped with the queue.
 void testAnInhibitTakesBackAnUnstartedKeying()
@@ -3447,6 +3522,7 @@ int main()
     testReleasingAStationDropsWhatIsOutstanding();
     testATransportThatPacesItselfGetsNoPauses();
     testAnInhibitTakesBackAnUnstartedKeying();
+    testAHeldKeyingSaysSoAndALostOneIsNotSent();
     testWhatTheLinkHasNotStartedCanBeTakenBack();
     testQueuedWaitsLeaveTheLinkOut();
     testChangingTransportRequeuesWhatTheLinkHeld();

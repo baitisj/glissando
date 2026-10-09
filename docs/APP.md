@@ -336,8 +336,9 @@ than the transmit time-out (Preferences, Options, Rig Control; 180 s when the ap
 timer is off, the usual rig setting). Nothing is shown for codec2 or Data2G.
 
 More messages can be queued while the transmitter is keyed; they go when it
-is free. In COMMS, clicking a message selects the station it
-is with in the heard list, putting the station back if it has aged out, and a
+is free. In COMMS, double-clicking a message selects the station it
+is with in the heard list (a single click only places the caret, so a stray
+click can't end a Data2G session), putting the station back if it has aged out, and a
 directed message for you selects its sender when no station is selected. A
 right click offers `Clear Messages`, which keeps only messages still being
 sent, and, on a message or ping of yours still outstanding, `Remove from
