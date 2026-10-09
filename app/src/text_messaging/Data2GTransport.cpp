@@ -232,6 +232,14 @@ std::string soleDestination(const std::vector<OutgoingBurst>& bursts)
     return destination;
 }
 
+// Data2G carries each frame's length, so the zero padding out to the modem's
+// fixed frame size need not be sent.
+std::vector<OutgoingBurst> trimmed(std::vector<OutgoingBurst> bursts)
+{
+    for (OutgoingBurst& burst : bursts) FrameCodec::trimPadding(burst.frame);
+    return bursts;
+}
+
 } // namespace
 
 Data2GTransport::Data2GTransport()
@@ -421,7 +429,7 @@ bool Data2GTransport::transmit(const std::vector<OutgoingBurst>& bursts)
     if (hasKeying_ || !status_.kissConnected || !status_.commandConnected) return false;
 
     keying_ = Keying();
-    keying_.bursts = bursts;
+    keying_.bursts = trimmed(bursts);
     keying_.gear = bursts.front().gear != 0 ? bursts.front().gear : gear_;
     keying_.queuedAtMs = now();
     keying_.heldSinceMs = keying_.queuedAtMs;
@@ -494,7 +502,7 @@ bool Data2GTransport::transmitReliably(const std::vector<OutgoingBurst>& bursts,
     keying.id = keyingId;
     keying.peer = peer;
     keying.queuedAtMs = now();
-    for (const OutgoingBurst& burst : bursts)
+    for (const OutgoingBurst& burst : trimmed(bursts))
     {
         std::vector<uint8_t> framed = Data2G::streamEncode(burst.frame);
         keying.bytes.insert(keying.bytes.end(), framed.begin(), framed.end());

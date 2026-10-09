@@ -117,6 +117,11 @@ public:
     // packed, or if a text frame's text does not all fit behind its header.
     static std::vector<uint8_t> encode(const Frame& frame, int frameBytes);
 
+    // Cuts the trailing zero bytes off an encoded frame while it still
+    // decodes to the same thing, for a link that carries each frame's length.
+    // A real code can end in zero bits, so the length is checked, not assumed.
+    static void trimPadding(std::vector<uint8_t>& bytes);
+
     // A locator frame cut down to what a duet's spare voice holds: its type,
     // the sender's callsign and the grid square, with no destination and no
     // bursts-following bit (it is always the end of its keying), so it fits
