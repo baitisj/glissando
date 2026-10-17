@@ -534,13 +534,19 @@ doing beside it; a bar drawn the console's way; the figures under it;
 and **Cancel** (**Ignore** for a group file coming in, with
 **Receive...** beside it until answered). A session's bar has two
 shades: grey for what has been handed to the modem, bone for what the
-far end's modem has acknowledged (received, for what has been written).
-Its figures are the bytes, the rate since bytes began to move, and the
-time left at that rate. A group file's bar has a segment per piece: lit
+far end's modem has acknowledged (received: grey for what has arrived,
+bone for what has been written). Both move every 256 bytes, inside a
+4,096-byte piece as well as at its end: the sender counts the bytes of
+the piece the far end's modem has acknowledged, the receiver the bytes
+of the piece that have arrived before the piece is whole. Its figures are
+the bytes, the rate since bytes began to move, the time left at that
+rate, and the clock time it should be done (`ETA 14:32`). A group file's bar has a segment per piece: lit
 when held (or, ours, sent), dark red where one was missed (passed by in
 the stream, or still lacking once a window opens; ours, the pieces the
 round's Grant resends), dark where none has come yet. Its figures are
-the pieces, the tempo, and until when the sender serves repairs. A
+the pieces, the time left and ETA at the pieces' pace so far (ours,
+while the stream goes; theirs, until all have come), the tempo, and
+until when the sender serves repairs. A
 finished transfer keeps its row for 30 seconds saying how it ended, then
 the row goes.
 

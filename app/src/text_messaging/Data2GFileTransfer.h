@@ -64,7 +64,8 @@ struct FileTransfer
     std::string name;           // the name offered; one received is made safe to save under
     uint64_t size = 0;
     uint64_t done = 0;          // sending: bytes the far end's modem has acknowledged; receiving: bytes written
-    uint64_t handed = 0;        // sending: bytes handed to the modem, acknowledged or not; receiving: as done
+    uint64_t handed = 0;        // sending: bytes handed to the modem, acknowledged or not; receiving: bytes
+                                // arrived, written or in the piece still coming in
     uint64_t expiresInMs = 0;   // an offer still unanswered: how long before it expires (see transfers())
     State state = State::Waiting;
     std::string path;           // the file sent, or where the one received is saved; UTF-8
@@ -153,7 +154,15 @@ public:
     bool takePiece(const std::string& peer, uint64_t streamOffset, std::vector<uint8_t>& out);
 
     // The far end's modem has acknowledged the session's bytes up to here.
+    // Progress moves in PROGRESS_STEP bytes, within a piece as well as at
+    // its end.
     void acknowledged(const std::string& peer, uint64_t streamAcked);
+
+    // Of a Data record still coming in from the station, this much of the
+    // file has arrived (see StreamDecoder::partialFileData).
+    void arriving(const std::string& peer, uint8_t number, size_t bytes);
+
+    static constexpr uint64_t PROGRESS_STEP = 256;
 
     void onRecord(const std::string& peer, const FileRecord& record, uint64_t nowMs);
 
@@ -208,7 +217,14 @@ private:
         std::filesystem::path part; // where out writes, while it does
         uint64_t written = 0;       // ours: bytes of the file written into the session
         bool awaitingSaved = false; // ours, cancelled with all of it written: a Saved still delivers it
-        std::deque<std::pair<uint64_t, uint64_t>> pieceEnds; // stream offset a piece ends at, file bytes to there
+        struct Piece
+        {
+            uint64_t streamStart;   // where in the session's stream its file bytes start
+            uint64_t fileStart;     // and where in the file
+            uint64_t length;
+        };
+        std::deque<Piece> pieces;   // ours, written and not yet all acknowledged
+        uint64_t arriving = 0;      // theirs: file bytes of the piece coming in, to the step
     };
 
     Entry* find(uint64_t id);

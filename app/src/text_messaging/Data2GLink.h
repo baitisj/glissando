@@ -219,6 +219,10 @@ public:
               std::vector<FileRecord>& recordsOut);
     void reset();
 
+    // A Data record partly in: the transfer's number and how many bytes of
+    // the file it has brought so far; 0 when none is.
+    size_t partialFileData(uint8_t& number) const;
+
 private:
     std::vector<uint8_t> pending_;
     bool foreign_ = false;

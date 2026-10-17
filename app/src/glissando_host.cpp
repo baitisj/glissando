@@ -600,7 +600,9 @@ std::vector<GlissandoScopeFile> MainFrame::glissandoFiles()
         f.moving = t.state == Transfer::State::Sending || t.state == Transfer::State::Receiving;
         f.offered = t.state == Transfer::State::Asking;
         bool whole = t.state == Transfer::State::Delivered || t.state == Transfer::State::Saved;
-        f.fraction = whole ? 1.0 : t.size > 0 ? std::min(1.0, (double)t.done / (double)t.size) : 0.0;
+        // Ours, what the far end's modem has acknowledged; theirs, what has arrived.
+        uint64_t moved = t.outgoing ? t.done : t.handed;
+        f.fraction = whole ? 1.0 : t.size > 0 ? std::min(1.0, (double)moved / (double)t.size) : 0.0;
         f.moved = (int)std::floor(f.fraction * 20.0);
         switch (t.state)
         {

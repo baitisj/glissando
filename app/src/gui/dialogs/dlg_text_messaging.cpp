@@ -2814,7 +2814,7 @@ void TextMessagingDialog::updateFileTransfers()
         if (moving && line->rateSince < 0.0)
         {
             line->rateSince = now;
-            line->rateBytes = t.done;
+            line->rateBytes = t.outgoing ? t.done : t.handed;
         }
         line->transfer = t;
         line->readAt = now;
@@ -3050,14 +3050,19 @@ void TextMessagingDialog::describeTransfer(const FileLine& line, double now, Tra
         std::vector<wxString> meta;
         if (t.state == State::Sending || t.state == State::Receiving)
         {
+            // Ours, what the far end's modem has acknowledged; theirs, what
+            // has arrived, written or not.
+            uint64_t moved = t.outgoing ? t.done : t.handed;
             meta.push_back(wxString::Format(t.outgoing ? _("%s of %s bytes acknowledged") : _("%s of %s bytes"),
-                                            groupDigits(t.done), groupDigits(t.size)));
+                                            groupDigits(moved), groupDigits(t.size)));
             double elapsed = now - shown->rateSince;
-            if (shown->rateSince >= 0.0 && elapsed >= 3.0 && t.done > shown->rateBytes)
+            if (shown->rateSince >= 0.0 && elapsed >= 3.0 && moved > shown->rateBytes)
             {
-                double rate = (t.done - shown->rateBytes) / elapsed;
+                double rate = (moved - shown->rateBytes) / elapsed;
+                double left = (t.size - moved) / rate;
                 meta.push_back(rateText(rate));
-                meta.push_back(timeLeftText((t.size - t.done) / rate));
+                meta.push_back(timeLeftText(left));
+                meta.push_back(wxString::Format(_("ETA %s"), clockIn(left)));
             }
         }
         else
@@ -3085,6 +3090,18 @@ void TextMessagingDialog::describeTransfer(const FileLine& line, double now, Tra
                                     name;
         wxString tempo = GlissandoConsole::gearLabel(f.tempo + 1);
         std::vector<wxString> meta;
+        // Time left at the pieces' pace so far, while some are still to come.
+        auto pace = [&]() {
+            double elapsed = now - shown->rateSince;
+            if (!f.live() || f.have >= f.pieces || shown->rateSince < 0.0 || elapsed < 3.0 ||
+                (uint64_t)f.have <= shown->rateBytes)
+            {
+                return;
+            }
+            double left = (f.pieces - f.have) / ((f.have - shown->rateBytes) / elapsed);
+            meta.push_back(timeLeftText(left));
+            meta.push_back(wxString::Format(_("ETA %s"), clockIn(left)));
+        };
         if (f.outgoing)
         {
             switch (f.state)
@@ -3119,6 +3136,7 @@ void TextMessagingDialog::describeTransfer(const FileLine& line, double now, Tra
             }
             meta.push_back(f.state == State::Sending ? wxString::Format(_("sent %d of %d pieces"), f.have, f.pieces)
                                                      : wxString::Format(_("%d pieces"), f.pieces));
+            if (f.state == State::Sending) pace();
             meta.push_back(tempo);
             if (f.live() && f.serviceSecondsLeft >= 0)
             {
@@ -3158,6 +3176,7 @@ void TextMessagingDialog::describeTransfer(const FileLine& line, double now, Tra
             }
             meta.push_back(f.pieces > 0 ? wxString::Format(_("have %d of %d pieces"), f.have, f.pieces)
                                         : wxString::Format(_("have %d pieces"), f.have));
+            pace();
             meta.push_back(tempo);
             if (f.live() && f.serviceSecondsLeft > 0)
             {
@@ -3443,6 +3462,11 @@ void TextMessagingDialog::updateGroupFiles(bool& added, bool& changed, bool& inc
         {
             line->endedAt = 0;
             line->endedSteady = 0.0;
+        }
+        if (f.live() && f.have > 0 && line->rateSince < 0.0)
+        {
+            line->rateSince = steadySeconds();
+            line->rateBytes = (uint64_t)f.have;
         }
         line->groupFile = f;
         line->readAt = steadySeconds();

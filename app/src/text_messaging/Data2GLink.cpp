@@ -429,6 +429,18 @@ bool StreamDecoder::feed(const uint8_t* bytes, int length, std::vector<std::vect
     return true;
 }
 
+size_t StreamDecoder::partialFileData(uint8_t& number) const
+{
+    // What feed() leaves is the start of one record, never more.
+    if (foreign_ || pending_.size() < FILE_HEADER_BYTES + 1 || pending_[0] != FILE_MAGIC ||
+        pending_[1] != (uint8_t)FileRecordType::Data)
+    {
+        return 0;
+    }
+    number = pending_[FILE_HEADER_BYTES];
+    return pending_.size() - FILE_HEADER_BYTES - 1;
+}
+
 void StreamDecoder::reset()
 {
     pending_.clear();
