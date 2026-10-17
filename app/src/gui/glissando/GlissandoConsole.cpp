@@ -941,16 +941,20 @@ void GlissandoConsole::refreshTelemetry()
 // The FILE lamp says what most wants the operator: an offer waiting for an
 // answer flashes red, in step with everything else that flashes; a group
 // file heard and not yet answered is amber, steady, since its stream goes
-// on regardless; a file moving is white, with a bar of how far it has got.
+// on regardless; a file moving is white, with a bar of how far it has got,
+// or two thin ones when files go both ways at once (sent over received).
 void GlissandoConsole::updateFileLamp(const std::vector<GlissandoScopeFile>& files)
 {
     bool offered = false, heard = false;
-    const GlissandoScopeFile* moving = nullptr;
+    const GlissandoScopeFile* sending = nullptr;
+    const GlissandoScopeFile* receiving = nullptr;
     for (const GlissandoScopeFile& f : files)
     {
         offered = offered || f.offered;
         heard = heard || f.heard;
-        if (f.moving && !f.heard && moving == nullptr) moving = &f;
+        if (!f.moving || f.heard) continue;
+        if (f.outgoing && sending == nullptr) sending = &f;
+        if (!f.outgoing && receiving == nullptr) receiving = &f;
     }
 
     if (offered)
@@ -968,8 +972,10 @@ void GlissandoConsole::updateFileLamp(const std::vector<GlissandoScopeFile>& fil
     else
     {
         fileLamp_->SetTint(Lamp::Tint::White);
-        fileLamp_->SetLit(moving != nullptr);
-        fileLamp_->SetProgress(moving != nullptr ? moving->fraction : -1.0);
+        fileLamp_->SetLit(sending != nullptr || receiving != nullptr);
+        if (sending != nullptr && receiving != nullptr) fileLamp_->SetProgress(sending->fraction, receiving->fraction);
+        else if (sending != nullptr) fileLamp_->SetProgress(sending->fraction);
+        else fileLamp_->SetProgress(receiving != nullptr ? receiving->fraction : -1.0);
     }
 }
 

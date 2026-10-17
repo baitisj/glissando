@@ -568,12 +568,18 @@ void Lamp::SetTint(Tint tint)
     Refresh();
 }
 
-void Lamp::SetProgress(double fraction)
+void Lamp::SetProgress(double fraction, double second)
 {
     fraction = fraction < 0.0 ? -1.0 : std::min(1.0, fraction);
+    second = fraction < 0.0 || second < 0.0 ? -1.0 : std::min(1.0, second);
     // To the bar's pixel, so a slow file doesn't repaint it for nothing.
-    if (std::lround(fraction * 256.0) == std::lround(progress_ * 256.0)) return;
+    if (std::lround(fraction * 256.0) == std::lround(progress_ * 256.0) &&
+        std::lround(second * 256.0) == std::lround(progress2_ * 256.0))
+    {
+        return;
+    }
     progress_ = fraction;
+    progress2_ = second;
     Refresh();
 }
 
@@ -644,7 +650,15 @@ void Lamp::paint(wxGraphicsContext* gc, const wxSize& size)
             gc->DrawRoundedRectangle(bx, cy - 3.5, bw, 7, 3);
             gc->SetPen(*wxTRANSPARENT_PEN);
             gc->SetBrush(wxBrush(Colour::Bone));
-            if (progress_ > 0.0) gc->DrawRoundedRectangle(bx + 1.5, cy - 2, (bw - 3) * progress_, 4, 2);
+            if (progress2_ < 0.0)
+            {
+                if (progress_ > 0.0) gc->DrawRoundedRectangle(bx + 1.5, cy - 2, (bw - 3) * progress_, 4, 2);
+            }
+            else
+            {
+                if (progress_ > 0.0) gc->DrawRectangle(bx + 1.5, cy - 2, (bw - 3) * progress_, 1.5);
+                if (progress2_ > 0.0) gc->DrawRectangle(bx + 1.5, cy + 0.5, (bw - 3) * progress2_, 1.5);
+            }
         }
     }
 }

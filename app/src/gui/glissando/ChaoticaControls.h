@@ -210,7 +210,8 @@ public:
     void SetTint(Tint tint);
 
     // A small bar after the caption, filled from 0 to 1; negative for none.
-    void SetProgress(double fraction);
+    // A second fraction splits it into two thin bars, one over the other.
+    void SetProgress(double fraction, double second = -1.0);
 
     // Clickable, it sends wxEVT_BUTTON when clicked.
     void SetClickable(bool clickable);
@@ -223,6 +224,7 @@ private:
     bool lit_;
     Tint tint_ = Tint::White;
     double progress_ = -1.0;
+    double progress2_ = -1.0;
     bool clickable_ = false;
 };
 
