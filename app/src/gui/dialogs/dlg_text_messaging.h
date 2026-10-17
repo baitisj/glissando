@@ -210,6 +210,9 @@ private:
     void updateOfferBox();
     void paintOfferBox(wxPaintEvent& event);
     void updateTransferStatus();
+    void describeTransfer(const FileLine& line, double now, TransferStatusArea* row, int others);
+    void statusCancel(size_t row, wxCommandEvent& event);
+    void statusReceive(size_t row);
     // The line it starts with, or (result) the one saying how it ended.
     wxString fileLineHtml(const FileLine& line, const Palette& colors, bool result) const;
     wxString groupLineHtml(const FileLine& line, const Palette& colors, bool result) const;
@@ -250,8 +253,6 @@ private:
     void OnChatLink(wxHtmlLinkEvent& event);
     void OnOfferSave(wxCommandEvent& event);
     void OnOfferDecline(wxCommandEvent& event);
-    void OnStatusCancel(wxCommandEvent& event);
-    void OnStatusReceive(wxCommandEvent& event);
     void OnAddStationText(wxCommandEvent& event);
     void OnAddStation(wxCommandEvent& event);
     void OnAutoReplyToggled(wxCommandEvent& event);
@@ -366,9 +367,16 @@ private:
     std::set<uint64_t> m_offersRaised; // offers COMMS has come forward for
 
     // The transfer under way, over the chat: one at a time, the newest.
-    TransferStatusArea* m_transferStatus = nullptr;
-    bool m_statusGroup = false;     // the one it shows, or last showed
-    uint64_t m_statusId = 0;
+    static constexpr size_t STATUS_ROWS = 3;
+    std::vector<TransferStatusArea*> m_transferRows;
+    struct StatusKey
+    {
+        bool group = false;
+        uint64_t id = 0;
+
+        bool operator==(const StatusKey&) const = default;
+    };
+    std::vector<StatusKey> m_statusShown;   // what each row shows, top down
 
     // What each line of the chat is, top to bottom, for a click to find:
     // a message (an index into m_messages) or a file (into m_fileLines).

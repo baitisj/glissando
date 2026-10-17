@@ -517,13 +517,18 @@ half-second blink, while a station offers a file and the operator has not
 answered; it is amber and steady while a group file is on the air and
 nobody has pressed Receive... or Ignore (the stream does not wait for an
 answer); and it is white, with a small bar beside it showing how far it
-has got, while a file moves. An offer outranks a group file heard, which
+has got, while a file moves. With a file going each way at once (both
+ends sending), the bar splits into two thin ones: the file going out on
+top, the one coming in under it. An offer outranks a group file heard, which
 outranks a file moving. Clicking it opens COMMS, whose top shows the
 offer or the transfer.
 
-**The status area** at the top of COMMS, under the offer box, shows the
-one transfer under way: the newest still going (an offer to us is left
-to the offer box), with `+2 more` when others are. A line of who and
+**The status area** at the top of COMMS, under the offer box, has a row
+for each transfer under way (an offer to us is left to the offer box),
+the oldest at the top, so a file going out and one coming in show one
+over the other, each with its own bar and buttons. There are three
+rows; beyond that the newest still going are shown, with `+2 more` on
+the last row. Each row has a line of who and
 what (`→ W1AW  FRED.TXT`, `← AG7EW to GLISS  FRED.TXT`) with what it is
 doing beside it; a bar drawn the console's way; the figures under it;
 and **Cancel** (**Ignore** for a group file coming in, with
@@ -536,8 +541,8 @@ when held (or, ours, sent), dark red where one was missed (passed by in
 the stream, or still lacking once a window opens; ours, the pieces the
 round's Grant resends), dark where none has come yet. Its figures are
 the pieces, the tempo, and until when the sender serves repairs. A
-finished transfer stays there for 30 seconds saying how it ended, then
-the area goes.
+finished transfer keeps its row for 30 seconds saying how it ended, then
+the row goes.
 
 The chat keeps only two lines for each file, one when it starts and one
 when it ends, so it doesn't scroll with progress.
@@ -549,7 +554,8 @@ bottom: the time it ended, `←` or `→`, the station (`GLISS` for one of
 ours to the group), the name, the size, and `SAVED`, `DELIVERED`, `SENT`,
 `DECLINED`, `CANCELLED`, `EXPIRED`, `IGNORED`, `INCOMPLETE` or `FAILED`.
 Once there are more than fit in the top half, the oldest roll up into
-`… 12 earlier files`. The file moving has a segmented bar under the last
+`… 12 earlier files`. Each file moving (up to three, so one going out
+and one coming in show together) has a segmented bar under the last
 line, and a little floppy flies in from the right for each piece received
 (a session's file in twentieths), or the cat tosses one off to the right
 for each piece sent. The invaders sit just under the history and creep

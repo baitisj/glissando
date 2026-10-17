@@ -126,8 +126,6 @@ enum
     ID_MENU_IGNORE_GROUP_FILE,
     ID_OFFER_SAVE,
     ID_OFFER_DECLINE,
-    ID_STATUS_CANCEL,
-    ID_STATUS_RECEIVE,
     ID_DISCONNECT,
     ID_PING,
     ID_SEND,
@@ -413,9 +411,6 @@ TextMessagingDialog::TextMessagingDialog(wxWindow* parent, wxWindowID id, const 
             wxCommandEventHandler(TextMessagingDialog::OnMenuCancelTransfer));
     Connect(ID_OFFER_SAVE, wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TextMessagingDialog::OnOfferSave));
     Connect(ID_OFFER_DECLINE, wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TextMessagingDialog::OnOfferDecline));
-    Connect(ID_STATUS_CANCEL, wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TextMessagingDialog::OnStatusCancel));
-    Connect(ID_STATUS_RECEIVE, wxEVT_COMMAND_BUTTON_CLICKED,
-            wxCommandEventHandler(TextMessagingDialog::OnStatusReceive));
     Connect(ID_DISCONNECT, wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(TextMessagingDialog::OnDisconnect));
     Connect(ID_AUTO_REPLY, wxEVT_TOGGLEBUTTON,
             wxCommandEventHandler(TextMessagingDialog::OnAutoReplyToggled));
@@ -619,10 +614,11 @@ void darken(wxWindow* window)
 
 } // namespace
 
-// The transfer under way, at the top of the COMMS plate: who and what on
+// A transfer under way, at the top of the COMMS plate: who and what on
 // the first line with what it is doing beside it, a bar drawn the
 // console's way, and the figures under it, with Cancel (and, for a group
-// file not yet answered, Receive...) beside the bar.
+// file not yet answered, Receive...) beside the bar. One for each file
+// going, so one going out and one coming in show together.
 class TransferStatusArea : public wxPanel
 {
 public:
@@ -643,14 +639,14 @@ public:
 
     static constexpr int HEIGHT = 74;
 
-    TransferStatusArea(wxWindow* parent, wxWindowID cancelId, wxWindowID receiveId)
+    TransferStatusArea(wxWindow* parent)
         : wxPanel(parent, wxID_ANY, wxDefaultPosition, wxSize(-1, HEIGHT))
     {
         SetBackgroundStyle(wxBG_STYLE_PAINT);
         SetMinSize(wxSize(-1, HEIGHT));
-        cancel_ = new Chaotica::Button(this, cancelId, _("Cancel"), false, wxSize(84, 28));
+        cancel_ = new Chaotica::Button(this, wxID_ANY, _("Cancel"), false, wxSize(84, 28));
         cancel_->SetBackdrop(BACKGROUND);
-        receive_ = new Chaotica::Button(this, receiveId, _("Receive..."), false, wxSize(100, 28));
+        receive_ = new Chaotica::Button(this, wxID_ANY, _("Receive..."), false, wxSize(100, 28));
         receive_->SetBackdrop(BACKGROUND);
         receive_->Hide();
         Bind(wxEVT_PAINT, &TransferStatusArea::OnPaint, this);
@@ -673,6 +669,10 @@ public:
         place();
         Refresh();
     }
+
+    // The buttons, so the dialog can tell which row's was pressed.
+    wxWindow* cancelButton() const { return cancel_; }
+    wxWindow* receiveButton() const { return receive_; }
 
 private:
     inline static const wxColour BACKGROUND{11, 12, 13};
@@ -878,10 +878,19 @@ void TextMessagingDialog::buildControls()
     m_offerBox->Hide();
     logPlate->GetContentSizer()->Add(m_offerBox, 0, wxEXPAND | wxBOTTOM, 6);
 
-    // The transfer under way, while one is, and a while after it ends.
-    m_transferStatus = new TransferStatusArea(logPlate, ID_STATUS_CANCEL, ID_STATUS_RECEIVE);
-    m_transferStatus->Hide();
-    logPlate->GetContentSizer()->Add(m_transferStatus, 0, wxEXPAND | wxBOTTOM, 6);
+    // The transfers under way, a row each while they are and a while after
+    // they end; a button acts on its own row's.
+    for (size_t i = 0; i < STATUS_ROWS; i++)
+    {
+        TransferStatusArea* row = new TransferStatusArea(logPlate);
+        row->Hide();
+        row->Bind(wxEVT_BUTTON, [this, i, row](wxCommandEvent& event) {
+            if (event.GetEventObject() == row->cancelButton()) statusCancel(i, event);
+            else if (event.GetEventObject() == row->receiveButton()) statusReceive(i);
+        });
+        logPlate->GetContentSizer()->Add(row, 0, wxEXPAND | wxBOTTOM, 6);
+        m_transferRows.push_back(row);
+    }
 
     m_chatWindow = new wxHtmlWindow(logPlate, wxID_ANY, wxDefaultPosition, wxDefaultSize,
                                     wxHW_SCROLLBAR_AUTO | wxBORDER_NONE);
@@ -2954,45 +2963,71 @@ wxString joinMeta(const std::vector<wxString>& parts)
 
 } // namespace
 
-// The status area over the chat: the newest transfer still going, unless
-// it is an offer to us (the box above has that), or else the one it last
-// showed, for a while after that one ended.
+// The status area over the chat: a row for each transfer going, unless
+// it is an offer to us (the box above has that), and a row stays a while
+// after its transfer ends. Each keeps its row while it shows, the oldest
+// at the top, so a file going out and one coming in sit one over the
+// other. More than there are rows: the newest live ones, and "+N more".
 void TextMessagingDialog::updateTransferStatus()
 {
     double now = steadySeconds();
-    const FileLine* shown = nullptr;
-    int others = 0;
+    auto key = [](const FileLine& l) { return StatusKey{l.group, l.group ? l.groupFile.id : l.transfer.id}; };
+    std::vector<const FileLine*> candidates;
     for (const FileLine& line : m_fileLines)
     {
-        if (!line.live()) continue;
-        if (!line.group && line.transfer.state == Data2G::FileTransfer::State::Asking) continue;
-        if (shown != nullptr) others++;
-        if (shown == nullptr || line.at >= shown->at) shown = &line;
-    }
-    if (shown == nullptr && m_statusId != 0)
-    {
-        auto last = std::find_if(m_fileLines.begin(), m_fileLines.end(), [this](const FileLine& l) {
-            return l.group == m_statusGroup && (l.group ? l.groupFile.id : l.transfer.id) == m_statusId;
-        });
-        if (last != m_fileLines.end() && !last->live() && now - last->endedSteady < FINISHED_SHOWN_SECONDS)
+        if (line.live())
         {
-            shown = &*last;
+            if (!line.group && line.transfer.state == Data2G::FileTransfer::State::Asking) continue;
+            candidates.push_back(&line);
+        }
+        else if (std::find(m_statusShown.begin(), m_statusShown.end(), key(line)) != m_statusShown.end() &&
+                 now - line.endedSteady < FINISHED_SHOWN_SECONDS)
+        {
+            candidates.push_back(&line);
         }
     }
-
-    if (shown == nullptr)
+    std::stable_sort(candidates.begin(), candidates.end(), [](const FileLine* a, const FileLine* b) {
+        if (a->live() != b->live()) return a->live();
+        return a->at > b->at;
+    });
+    int others = 0;
+    if (candidates.size() > STATUS_ROWS)
     {
-        m_statusId = 0;
-        if (m_transferStatus->IsShown())
-        {
-            m_transferStatus->Hide();
-            m_transferStatus->GetParent()->Layout();
-        }
-        return;
+        for (size_t i = STATUS_ROWS; i < candidates.size(); i++) others += candidates[i]->live() ? 1 : 0;
+        candidates.resize(STATUS_ROWS);
     }
-    m_statusGroup = shown->group;
-    m_statusId = shown->group ? shown->groupFile.id : shown->transfer.id;
+    std::stable_sort(candidates.begin(), candidates.end(),
+                     [](const FileLine* a, const FileLine* b) { return a->at < b->at; });
 
+    m_statusShown.clear();
+    bool relayout = false;
+    for (size_t i = 0; i < m_transferRows.size(); i++)
+    {
+        TransferStatusArea* row = m_transferRows[i];
+        if (i >= candidates.size())
+        {
+            if (row->IsShown())
+            {
+                row->Hide();
+                relayout = true;
+            }
+            continue;
+        }
+        m_statusShown.push_back(key(*candidates[i]));
+        describeTransfer(*candidates[i], now, row, i + 1 == candidates.size() ? others : 0);
+        if (!row->IsShown())
+        {
+            row->Show();
+            relayout = true;
+        }
+    }
+    if (relayout && !m_transferRows.empty()) m_transferRows.front()->GetParent()->Layout();
+}
+
+// One row: who and what, its stage, its bar and its figures.
+void TextMessagingDialog::describeTransfer(const FileLine& line, double now, TransferStatusArea* row, int others)
+{
+    const FileLine* shown = &line;
     TransferStatusArea::View view;
     wxString cancel = _("Cancel");
     bool canCancel = shown->live();
@@ -3134,41 +3169,37 @@ void TextMessagingDialog::updateTransferStatus()
         view.meta = joinMeta(meta);
     }
 
-    m_transferStatus->setView(view, cancel, canCancel, canReceive);
-    if (!m_transferStatus->IsShown())
-    {
-        m_transferStatus->Show();
-        m_transferStatus->GetParent()->Layout();
-    }
+    row->setView(view, cancel, canCancel, canReceive);
 }
 
-// The status area's buttons act on the transfer it shows.
-void TextMessagingDialog::OnStatusCancel(wxCommandEvent& event)
+// A row's buttons act on the transfer it shows.
+void TextMessagingDialog::statusCancel(size_t row, wxCommandEvent& event)
 {
-    if (m_statusId == 0) return;
-    if (!m_statusGroup)
+    if (row >= m_statusShown.size()) return;
+    StatusKey shown = m_statusShown[row];
+    if (!shown.group)
     {
-        m_menuTransferId = m_statusId;
+        m_menuTransferId = shown.id;
         OnMenuCancelTransfer(event);
         return;
     }
     auto line = std::find_if(m_fileLines.begin(), m_fileLines.end(),
-                             [this](const FileLine& l) { return l.group && l.groupFile.id == m_statusId; });
+                             [&shown](const FileLine& l) { return l.group && l.groupFile.id == shown.id; });
     if (line == m_fileLines.end()) return;
     if (line->groupFile.outgoing)
     {
-        m_menuGroupFileId = m_statusId;
+        m_menuGroupFileId = shown.id;
         OnMenuCancelGroupFile(event);
     }
     else
     {
-        ignoreGroupFile(m_statusId);
+        ignoreGroupFile(shown.id);
     }
 }
 
-void TextMessagingDialog::OnStatusReceive(wxCommandEvent&)
+void TextMessagingDialog::statusReceive(size_t row)
 {
-    if (m_statusId != 0 && m_statusGroup) receiveGroupFile(m_statusId);
+    if (row < m_statusShown.size() && m_statusShown[row].group) receiveGroupFile(m_statusShown[row].id);
 }
 
 // Save as...: the system's save dialog, in the received files folder with

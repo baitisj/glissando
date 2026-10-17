@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <utility>
 #include <vector>
 
 #include <wx/control.h>
@@ -356,14 +357,15 @@ private:
     std::vector<ShelfLine> shelf_;
     std::vector<uint64_t> shelved_;     // keys on the shelf, so each goes on once
     int shelfDropped_ = 0;              // the oldest, let go of once there were very many
-    bool haveCurrent_ = false;
-    GlissandoScopeFile current_;        // the one moving
-    int currentMoved_ = 0;
+    static constexpr size_t MOVING_SHOWN = 3;
+    std::vector<GlissandoScopeFile> moving_;    // the ones moving, a bar each, oldest first
+    std::vector<std::pair<uint64_t, int>> movedSeen_;   // pieces each had moved when last seen
     struct Floppy
     {
         double born;                // steady clock seconds; may be just ahead, to stagger them
         bool outgoing;
         double fromY;               // a received one's start, as a fraction of the trace's height
+        uint64_t key;               // the file it belongs to, whose bar a received one lands on
     };
     std::deque<Floppy> floppies_;
     struct Invader

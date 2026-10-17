@@ -578,7 +578,7 @@ void GlissandoScope::paintTv(wxGraphicsContext* gc, const wxRect& trace, Tv tv, 
     for (int y = trace.y; y < trace.y + trace.height; y += 3) gc->DrawRectangle(trace.x, y, trace.width, 1);
 
     // Once files have come or gone this run, the scene is theirs.
-    if (!shelf_.empty() || haveCurrent_)
+    if (!shelf_.empty() || !moving_.empty())
     {
         paintFilesScene(gc, trace, fade);
         return;
@@ -653,7 +653,7 @@ void GlissandoScope::paintTv(wxGraphicsContext* gc, const wxRect& trace, Tv tv, 
 void GlissandoScope::setFiles(const std::vector<GlissandoScopeFile>& files)
 {
     double now = steadySeconds();
-    const GlissandoScopeFile* moving = nullptr;
+    std::vector<const GlissandoScopeFile*> moving;
     for (const GlissandoScopeFile& f : files)
     {
         auto shelved = std::find(shelved_.begin(), shelved_.end(), f.key);
@@ -662,7 +662,7 @@ void GlissandoScope::setFiles(const std::vector<GlissandoScopeFile>& files)
             // Back to life (a group file sent again): it goes on the
             // history again when it ends.
             if (shelved != shelved_.end()) shelved_.erase(shelved);
-            if (f.moving && moving == nullptr) moving = &f;
+            if (f.moving) moving.push_back(&f);
             continue;
         }
         if (shelved != shelved_.end()) continue;
@@ -698,23 +698,26 @@ void GlissandoScope::setFiles(const std::vector<GlissandoScopeFile>& files)
     }
 
     // A floppy for each piece moved since last time, a few at most, one
-    // after another; none for what had moved before the scene saw it.
-    if (moving != nullptr)
+    // after another; none for what had moved before the scene saw it. A
+    // file going each way at once (both ends sending) gets a bar each.
+    std::vector<std::pair<uint64_t, int>> seen;
+    moving_.clear();
+    for (const GlissandoScopeFile* f : moving)
     {
-        if (!haveCurrent_ || current_.key != moving->key) currentMoved_ = moving->moved;
-        int fresh = std::min(4, moving->moved - currentMoved_);
-        for (int i = 0; i < fresh; i++)
+        auto before = std::find_if(movedSeen_.begin(), movedSeen_.end(),
+                                   [f](const std::pair<uint64_t, int>& m) { return m.first == f->key; });
+        if (before != movedSeen_.end())
         {
-            floppies_.push_back({now + i * 0.2, moving->outgoing, 0.12 + 0.3 * sceneRandomUnit()});
+            int fresh = std::min(4, f->moved - before->second);
+            for (int i = 0; i < fresh; i++)
+            {
+                floppies_.push_back({now + i * 0.2, f->outgoing, 0.12 + 0.3 * sceneRandomUnit(), f->key});
+            }
         }
-        currentMoved_ = moving->moved;
-        current_ = *moving;
-        haveCurrent_ = true;
+        seen.push_back({f->key, f->moved});
+        if (moving_.size() < MOVING_SHOWN) moving_.push_back(*f);
     }
-    else
-    {
-        haveCurrent_ = false;
-    }
+    movedSeen_ = std::move(seen);
     while (!floppies_.empty() && floppies_.front().born < now - 3.0) floppies_.pop_front();
 }
 
@@ -879,7 +882,7 @@ void GlissandoScope::paintFilesScene(wxGraphicsContext* gc, const wxRect& trace,
     // The history: the newest at the bottom, the oldest rolled up into a
     // count once there are more than fit in the top half of the screen.
     int fit = std::max(2, (int)(H * 0.5 / row));
-    int room = fit - (haveCurrent_ ? 1 : 0);
+    int room = std::max(2, fit - (int)moving_.size());
     int total = (int)shelf_.size() + shelfDropped_;
     int shown = std::min((int)shelf_.size(), total > room ? room - 1 : room);
     int earlier = total - shown;
@@ -921,16 +924,17 @@ void GlissandoScope::paintFilesScene(wxGraphicsContext* gc, const wxRect& trace,
         y += row;
     }
 
-    // The file moving: a bar of its pieces under the history, and who and
-    // what beside it, flashing with the console's blink.
-    double barY = y;
+    // The files moving: a bar of each one's pieces under the history, and
+    // who and what beside it, flashing with the console's blink.
+    std::vector<std::pair<uint64_t, double>> barYs;
     double barW = std::min(200.0, W * 0.36);
-    if (haveCurrent_)
+    for (const GlissandoScopeFile& file : moving_)
     {
         double segY = y0 + y + (th - 7.0) / 2.0;
-        const std::vector<uint8_t>& map = current_.pieceMap;
+        barYs.push_back({file.key, y});
+        const std::vector<uint8_t>& map = file.pieceMap;
         size_t n = map.empty() ? 20 : map.size();
-        size_t lit = (size_t)std::floor(std::clamp(current_.fraction, 0.0, 1.0) * 20.0);
+        size_t lit = (size_t)std::floor(std::clamp(file.fraction, 0.0, 1.0) * 20.0);
         gc->SetPen(*wxTRANSPARENT_PEN);
         for (size_t i = 0; i < n; i++)
         {
@@ -943,8 +947,8 @@ void GlissandoScope::paintFilesScene(wxGraphicsContext* gc, const wxRect& trace,
             gc->DrawRectangle(x0 + textX + a, segY, std::max(1.0, b - a - gap), 7.0);
         }
         gc->SetFont(captionTextFont(), phosphor(Chaotica::blinkLit() ? 255 : 150));
-        wxString what = wxString::FromUTF8(current_.outgoing ? "\xE2\x86\x92 " : "\xE2\x86\x90 ") + current_.station +
-                        "  " + current_.name;
+        wxString what = wxString::FromUTF8(file.outgoing ? "\xE2\x86\x92 " : "\xE2\x86\x90 ") + file.station + "  " +
+                        file.name;
         double room2 = W - (textX + barW + 10.0) - 6.0;
         gc->DrawText(shorten(what, (size_t)std::max(4.0, room2 / cw)), x0 + textX + barW + 10.0, y0 + y);
         y += row;
@@ -1049,6 +1053,9 @@ void GlissandoScope::paintFilesScene(wxGraphicsContext* gc, const wxRect& trace,
         }
         else
         {
+            auto bar = std::find_if(barYs.begin(), barYs.end(),
+                                    [&floppy](const std::pair<uint64_t, double>& b) { return b.first == floppy.key; });
+            double barY = bar != barYs.end() ? bar->second : y;
             double sx = W + 6.0, sy = floppy.fromY * H;
             fx = sx + (textX - sx) * k;
             fy = sy + (barY - sy) * k;
@@ -1058,7 +1065,13 @@ void GlissandoScope::paintFilesScene(wxGraphicsContext* gc, const wxRect& trace,
 
     // And who has the chat.
     wxString caption = _("CHAT IS ON DATA2G");
-    if (haveCurrent_) caption += wxString::FromUTF8(" \xC2\xB7 ") + (current_.outgoing ? _("SENDING") : _("RECEIVING"));
+    bool sending = std::any_of(moving_.begin(), moving_.end(), [](const GlissandoScopeFile& f) { return f.outgoing; });
+    bool receiving = std::any_of(moving_.begin(), moving_.end(), [](const GlissandoScopeFile& f) { return !f.outgoing; });
+    if (sending || receiving)
+    {
+        caption += wxString::FromUTF8(" \xC2\xB7 ") +
+                   (sending && receiving ? _("SENDING AND RECEIVING") : sending ? _("SENDING") : _("RECEIVING"));
+    }
     gc->SetFont(captionTextFont(), phosphor(120));
     double tw = 0, tth = 0;
     gc->GetTextExtent(caption, &tw, &tth);
