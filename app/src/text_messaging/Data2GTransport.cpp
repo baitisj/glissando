@@ -1498,6 +1498,9 @@ void Data2GTransport::run(Settings settings)
                     if (open)
                     {
                         for (const auto& record : fileRecords) files_.onRecord(sessionPeer_, record, now());
+                        uint8_t number = 0;
+                        size_t partial = stream.partialFileData(number);
+                        if (partial > 0) files_.arriving(sessionPeer_, number, partial);
                     }
                 }
                 for (const auto& frame : streamFrames) deliver(frame, true);

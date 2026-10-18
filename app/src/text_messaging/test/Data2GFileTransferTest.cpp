@@ -813,6 +813,59 @@ void testTheWindowSeesExpiryAndBytesHanded()
     CHECK(last(link.b, false).handed == last(link.b, false).done);
 }
 
+// Progress inside a piece, in steps: the sender's as the far end's modem
+// acknowledges the piece's bytes, the receiver's as they arrive, before
+// the piece is whole and written.
+void testProgressMovesWithinAPiece()
+{
+    Scratch scratch("within");
+    Link link;
+    std::string error;
+    uint64_t id = link.a.offer("VK3ABC", scratch.write("FRED.TXT", 7000), link.nowMs, error);
+    link.turn();
+    CHECK(link.b.accept(last(link.b, false).id, scratch.path("saved.txt"), error));
+    link.turn(); // the Accept reaches A
+
+    std::vector<uint8_t> piece;
+    uint64_t start = link.writtenByA;
+    CHECK(link.a.takePiece("VK3ABC", start, piece));
+    CHECK(piece.size() == 4 + 1 + 4096);
+    const uint64_t dataStart = start + 5; // 'F', type, length, then the number
+
+    // The header acknowledged: nothing of the file yet.
+    link.a.acknowledged("VK3ABC", dataStart);
+    CHECK(transferOf(link.a, id).done == 0);
+    // 1,000 bytes of it: to the step below.
+    link.a.acknowledged("VK3ABC", dataStart + 1000);
+    CHECK(transferOf(link.a, id).done == 768);
+    link.a.acknowledged("VK3ABC", dataStart + 1100);
+    CHECK(transferOf(link.a, id).done == 1024);
+    // All of it: the whole piece, not a step short.
+    link.a.acknowledged("VK3ABC", start + piece.size());
+    CHECK(transferOf(link.a, id).done == 4096);
+
+    // The receiver, the same piece in two reads.
+    std::vector<std::vector<uint8_t>> frames;
+    std::vector<FileRecord> records;
+    CHECK(link.toB.feed(piece.data(), 5 + 600, frames, records) && records.empty());
+    uint8_t number = 0;
+    size_t partial = link.toB.partialFileData(number);
+    CHECK(partial == 600);
+    link.b.arriving("W1AW", number, partial);
+    FileTransfer coming = last(link.b, false);
+    CHECK(coming.done == 0 && coming.handed == 512);
+    // Another number's partial piece is none of this one's.
+    link.b.arriving("W1AW", (uint8_t)(number + 1), 3000);
+    CHECK(last(link.b, false).handed == 512);
+
+    CHECK(link.toB.feed(piece.data() + 5 + 600, (int)piece.size() - 5 - 600, frames, records));
+    CHECK(records.size() == 1 && link.toB.partialFileData(number) == 0);
+    link.b.onRecord("W1AW", records[0], link.nowMs);
+    coming = last(link.b, false);
+    CHECK(coming.done == 4096 && coming.handed == 4096);
+    link.writtenByA += piece.size();
+}
+
 int main()
 {
     testSafeNames();
@@ -840,6 +893,7 @@ int main()
     testInhibitedReceiverEndsTheOffer();
     testOfferRefusesWhatCantBeSent();
     testTheWindowSeesExpiryAndBytesHanded();
+    testProgressMovesWithinAPiece();
 
     if (failures > 0)
     {

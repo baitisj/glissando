@@ -243,7 +243,8 @@ void FileTransferEngine::finish(Entry& entry, FileTransfer::State state, const s
         std::filesystem::remove(entry.part, ec);
     }
     entry.part.clear();
-    entry.pieceEnds.clear();
+    entry.pieces.clear();
+    entry.arriving = 0;
     changed();
 }
 
@@ -464,7 +465,7 @@ std::vector<FileTransfer> FileTransferEngine::transfers(uint64_t nowMs) const
     for (const Entry& entry : entries_)
     {
         FileTransfer& t = out.emplace_back(entry.transfer);
-        t.handed = t.outgoing ? std::max(entry.written, t.done) : t.done;
+        t.handed = t.outgoing ? std::max(entry.written, t.done) : std::min(t.size, t.done + entry.arriving);
         bool open = t.state == FileTransfer::State::Offered || t.state == FileTransfer::State::Asking;
         if (open && nowMs != 0)
         {
@@ -538,8 +539,8 @@ bool FileTransferEngine::takePiece(const std::string& peer, uint64_t streamOffse
 
         std::vector<uint8_t> record = fileRecordEncode(FileRecordType::Data, body);
         out.insert(out.end(), record.begin(), record.end());
+        entry.pieces.push_back({streamOffset + record.size() - length, entry.written, length});
         entry.written += length;
-        entry.pieceEnds.emplace_back(streamOffset + record.size(), entry.written);
         return true;
     }
     return false;
@@ -552,10 +553,18 @@ void FileTransferEngine::acknowledged(const std::string& peer, uint64_t streamAc
         FileTransfer& t = entry.transfer;
         if (!t.outgoing || t.peer != peer || t.state != FileTransfer::State::Sending) continue;
         uint64_t done = t.done;
-        while (!entry.pieceEnds.empty() && entry.pieceEnds.front().first <= streamAcked)
+        while (!entry.pieces.empty() && entry.pieces.front().streamStart + entry.pieces.front().length <= streamAcked)
         {
-            done = entry.pieceEnds.front().second;
-            entry.pieceEnds.pop_front();
+            done = entry.pieces.front().fileStart + entry.pieces.front().length;
+            entry.pieces.pop_front();
+        }
+        // Into the piece now going: to the step, so a fast modem doesn't
+        // redraw the window for every frame.
+        if (!entry.pieces.empty() && streamAcked > entry.pieces.front().streamStart)
+        {
+            const Entry::Piece& piece = entry.pieces.front();
+            uint64_t into = (streamAcked - piece.streamStart) / PROGRESS_STEP * PROGRESS_STEP;
+            done = std::max(done, piece.fileStart + into);
         }
         if (done != t.done)
         {
@@ -563,6 +572,16 @@ void FileTransferEngine::acknowledged(const std::string& peer, uint64_t streamAc
             changed();
         }
     }
+}
+
+void FileTransferEngine::arriving(const std::string& peer, uint8_t number, size_t bytes)
+{
+    Entry* entry = findIncoming(peer, number);
+    if (entry == nullptr || entry->transfer.state != FileTransfer::State::Receiving) return;
+    uint64_t stepped = bytes / PROGRESS_STEP * PROGRESS_STEP;
+    if (stepped == entry->arriving) return;
+    entry->arriving = stepped;
+    changed();
 }
 
 void FileTransferEngine::autoAccept(Entry& entry)
@@ -725,6 +744,7 @@ void FileTransferEngine::receivePiece(Entry& entry, const uint8_t* bytes, size_t
         return;
     }
     t.done += length;
+    entry.arriving = 0;
     changed();
     if (t.done == t.size) completeReceive(entry);
 }
