@@ -278,10 +278,11 @@ void testTheSenderCancels()
     CHECK(transferOf(link.a, id).state == State::Cancelled);
     link.turn();
     CHECK(last(link.b, false).state == State::CancelledThere);
-    CHECK(!exists(saveAs + ".part") && !exists(saveAs));
+    // What came is kept, for the same file sent again.
+    CHECK(exists(saveAs + ".part") && !exists(saveAs) && link.b.keptCount() == 1);
     link.deliver(late, link.toB, link.b, "W1AW"); // dropped
     CHECK(last(link.b, false).state == State::CancelledThere && last(link.b, false).done == 8192);
-    CHECK(!exists(saveAs + ".part"));
+    CHECK(exists(saveAs + ".part") && link.b.keptCount() == 1);
     std::vector<uint8_t> none;
     CHECK(!link.a.takePiece("VK3ABC", link.writtenByA, none) && none.empty());
 }
@@ -298,7 +299,7 @@ void testTheReceiverCancels()
     link.turns(2);
     CHECK(link.b.cancel(last(link.b, false).id));
     CHECK(last(link.b, false).state == State::Cancelled);
-    CHECK(!exists(saveAs + ".part"));
+    CHECK(exists(saveAs + ".part") && link.b.keptCount() == 1);
     link.turn();
     CHECK(transferOf(link.a, id).state == State::CancelledThere);
 }
@@ -349,7 +350,7 @@ void testALostSession()
     link.b.sessionEnded("W1AW", link.nowMs + 5, true);
     CHECK(transferOf(link.a, id).state == State::Failed);
     CHECK(last(link.b, false).state == State::Failed);
-    CHECK(!exists(saveAs + ".part"));
+    CHECK(exists(saveAs + ".part") && link.b.keptCount() == 1);
 
     // The next file waits for the next session, from now.
     std::string peer;
@@ -694,7 +695,7 @@ void testReleasingTheStationInASessionCancelsThere()
     link.turn();
     CHECK(transferOf(link.a, second).state == State::Cancelled);
     CHECK(last(link.b, false).state == State::CancelledThere);
-    CHECK(!exists(saveAs + ".part") && !exists(saveAs));
+    CHECK(exists(saveAs + ".part") && !exists(saveAs) && link.b.keptCount() == 1);
 }
 
 // Sending not allowed here: a file going either way ends, the far end
@@ -719,7 +720,7 @@ void testInhibitedSendsNothingMore()
     link.turns(3);
     CHECK(link.pieces == pieces);
     CHECK(last(link.b, false).state == State::FailedThere);
-    CHECK(!exists(saveAs + ".part"));
+    CHECK(exists(saveAs + ".part") && link.b.keptCount() == 1);
 
     std::string peer;
     uint64_t since = 0;
@@ -866,6 +867,162 @@ void testProgressMovesWithinAPiece()
     link.writtenByA += piece.size();
 }
 
+// A session lost mid-file: the receiver keeps what came, and when the
+// same file comes again from the same station, saved to the same place,
+// only the rest is sent.
+void testALostTransferCarriesOn()
+{
+    Scratch scratch("resume");
+    Link link;
+    std::string source = scratch.write("big.bin", 20000);
+    std::string error;
+    link.a.offer("VK3ABC", source, link.nowMs, error);
+    link.turn();
+    std::string saveAs = scratch.path("got.bin");
+    CHECK(link.b.accept(last(link.b, false).id, saveAs, error));
+    link.turns(3);
+    CHECK(last(link.b, false).done == 8192);
+    link.a.sessionEnded("VK3ABC", link.nowMs, false);
+    link.b.sessionEnded("W1AW", link.nowMs, false);
+    CHECK(link.b.keptCount() == 1 && exists(saveAs + ".part"));
+
+    // A new session; the decoders start again with it.
+    link.toA = StreamDecoder();
+    link.toB = StreamDecoder();
+    uint64_t again = link.a.offer("VK3ABC", source, link.nowMs, error);
+    link.turn();
+    FileTransfer offered = last(link.b, false);
+    CHECK(offered.state == State::Asking && offered.kept == 8192 && offered.keptPath == saveAs);
+    int pieces = link.pieces;
+    CHECK(link.b.accept(offered.id, saveAs, error));
+    CHECK(last(link.b, false).done == 8192 && last(link.b, false).resumedFrom == 8192);
+    CHECK(link.b.keptCount() == 0);
+    link.turns(5);
+    CHECK(transferOf(link.a, again).state == State::Delivered && transferOf(link.a, again).resumedFrom == 8192);
+    CHECK(link.pieces - pieces == 3); // 11,808 bytes, not 20,000
+    CHECK(last(link.b, false).state == State::Saved);
+    CHECK(readFile(saveAs) == readFile(source));
+    CHECK(!exists(saveAs + ".part"));
+}
+
+// Saved somewhere else, it starts again, and what was kept goes.
+void testSavedElsewhereStartsAgain()
+{
+    Scratch scratch("resume-elsewhere");
+    Link link;
+    std::string source = scratch.write("big.bin", 20000);
+    std::string error;
+    link.a.offer("VK3ABC", source, link.nowMs, error);
+    link.turn();
+    std::string first = scratch.path("first.bin");
+    CHECK(link.b.accept(last(link.b, false).id, first, error));
+    link.turns(2);
+    CHECK(link.b.cancel(last(link.b, false).id));
+    link.turn();
+    CHECK(link.b.keptCount() == 1);
+
+    uint64_t again = link.a.offer("VK3ABC", source, link.nowMs, error);
+    link.turn();
+    CHECK(last(link.b, false).kept > 0);
+    std::string second = scratch.path("second.bin");
+    CHECK(link.b.accept(last(link.b, false).id, second, error));
+    CHECK(link.b.keptCount() == 0 && !exists(first + ".part"));
+    CHECK(last(link.b, false).resumedFrom == 0);
+    link.turns(8);
+    CHECK(transferOf(link.a, again).state == State::Delivered);
+    CHECK(readFile(second) == readFile(source));
+}
+
+// A file that changed since is a different file: nothing kept is offered.
+// And one kept that changed on disk is not carried on in.
+void testOnlyTheSameFileCarriesOn()
+{
+    Scratch scratch("resume-changed");
+    Link link;
+    std::string source = scratch.write("big.bin", 20000);
+    std::string error;
+    link.a.offer("VK3ABC", source, link.nowMs, error);
+    link.turn();
+    std::string saveAs = scratch.path("got.bin");
+    CHECK(link.b.accept(last(link.b, false).id, saveAs, error));
+    link.turns(2);
+    link.b.cancel(last(link.b, false).id);
+    link.turn();
+    CHECK(link.b.keptCount() == 1);
+
+    { std::fstream f(pathFromUtf8(source), std::ios::in | std::ios::out | std::ios::binary); f.seekp(100); f.put('X'); }
+    link.a.offer("VK3ABC", source, link.nowMs, error);
+    link.turn();
+    CHECK(last(link.b, false).kept == 0);
+    link.b.decline(last(link.b, false).id);
+    link.turn();
+
+    // The original again, but the kept part was cut short meanwhile.
+    { std::fstream f(pathFromUtf8(source), std::ios::in | std::ios::out | std::ios::binary); f.seekp(100); f.put((char)((100 * 7) & 0xFF)); }
+    link.a.offer("VK3ABC", source, link.nowMs, error);
+    link.turn();
+    CHECK(last(link.b, false).kept == 4096);
+    fs::resize_file(pathFromUtf8(saveAs + ".part"), 1000);
+    CHECK(link.b.accept(last(link.b, false).id, saveAs, error));
+    CHECK(last(link.b, false).resumedFrom == 0 && link.b.keptCount() == 0);
+    link.turns(8);
+    CHECK(last(link.b, false).state == State::Saved && readFile(saveAs) == readFile(source));
+}
+
+// From a station on the auto-accept list, it carries on without asking.
+void testAutoAcceptCarriesOn()
+{
+    Scratch scratch("resume-auto");
+    Link link;
+    fs::create_directories(scratch.dir / "in");
+    link.b.setAutoAccept(utf8FromPath(scratch.dir / "in"), {"W1AW"});
+    std::string source = scratch.write("FRED.TXT", 20000);
+    std::string error;
+    link.a.offer("VK3ABC", source, link.nowMs, error);
+    link.turns(3);
+    std::string saveAs = utf8FromPath(scratch.dir / "in" / "FRED.TXT");
+    CHECK(last(link.b, false).state == State::Receiving && last(link.b, false).path == saveAs);
+    link.a.sessionEnded("VK3ABC", link.nowMs, true);
+    link.b.sessionEnded("W1AW", link.nowMs, true);
+    link.toA = StreamDecoder();
+    link.toB = StreamDecoder();
+
+    link.a.offer("VK3ABC", source, link.nowMs, error);
+    link.turn();
+    CHECK(last(link.b, false).autoAccepted && last(link.b, false).resumedFrom > 0);
+    link.turns(6);
+    CHECK(last(link.b, false).state == State::Saved && last(link.b, false).path == saveAs);
+    CHECK(readFile(saveAs) == readFile(source));
+}
+
+// A sender older than this one sends no fingerprint: nothing is kept.
+// What is kept goes after a day.
+void testWhatIsKeptAndForHowLong()
+{
+    Scratch scratch("resume-older");
+    FileTransferEngine b;
+    b.onRecord("W1AW", offerRecord(7, 200, "x.bin"), 1000);
+    std::string error;
+    std::string saveAs = scratch.path("x.bin");
+    CHECK(b.accept(last(b, false).id, saveAs, error));
+    b.onRecord("W1AW", dataRecord(7, std::string(50, 'a')), 1000);
+    b.sessionEnded("W1AW", 2000, true);
+    CHECK(b.keptCount() == 0 && !exists(saveAs + ".part"));
+
+    Link link;
+    link.a.offer("VK3ABC", scratch.write("big.bin", 20000), link.nowMs, error);
+    link.turn();
+    std::string got = scratch.path("got.bin");
+    CHECK(link.b.accept(last(link.b, false).id, got, error));
+    link.turns(2);
+    link.b.sessionEnded("W1AW", link.nowMs, true);
+    CHECK(link.b.keptCount() == 1);
+    link.b.tick(link.nowMs + FileTransferEngine::KEPT_MS - 1);
+    CHECK(link.b.keptCount() == 1);
+    link.b.tick(link.nowMs + FileTransferEngine::KEPT_MS);
+    CHECK(link.b.keptCount() == 0 && !exists(got + ".part"));
+}
+
 int main()
 {
     testSafeNames();
@@ -894,6 +1051,11 @@ int main()
     testOfferRefusesWhatCantBeSent();
     testTheWindowSeesExpiryAndBytesHanded();
     testProgressMovesWithinAPiece();
+    testALostTransferCarriesOn();
+    testSavedElsewhereStartsAgain();
+    testOnlyTheSameFileCarriesOn();
+    testAutoAcceptCarriesOn();
+    testWhatIsKeptAndForHowLong();
 
     if (failures > 0)
     {

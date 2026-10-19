@@ -1653,10 +1653,11 @@ void testTheSenderCancelsAFile()
     runAcking(hosts, a, b, 1000, [&]() { return newestFile(b.transport, false).state == FileState::CancelledThere; });
     CHECK(newestFile(b.transport, false).state == FileState::CancelledThere);
     CHECK(newestFile(b.transport, false).done < 30000);
-    CHECK(!fileExists(saveAs + ".part") && !fileExists(saveAs));
+    // What came is kept, for the same file sent again.
+    CHECK(fileExists(saveAs + ".part") && !fileExists(saveAs));
     runAcking(hosts, a, b, 100000, [&]() { return false; }, 50);
     CHECK(hosts.unackedBytes(0) == 0);
-    CHECK(!fileExists(saveAs + ".part"));
+    CHECK(fileExists(saveAs + ".part"));
 }
 
 void testTheReceiverCancelsAFile()
@@ -1676,7 +1677,7 @@ void testTheReceiverCancelsAFile()
     runAcking(hosts, a, b, 1000, [&]() { return newestFile(b.transport, false).done >= 4096; });
 
     CHECK(b.transport.cancelFile(newestFile(b.transport, false).id));
-    CHECK(!fileExists(saveAs + ".part"));
+    CHECK(fileExists(saveAs + ".part"));
     runAcking(hosts, a, b, 1000, [&]() { return fileState(a.transport, id) == FileState::CancelledThere; });
     CHECK(fileState(a.transport, id) == FileState::CancelledThere);
     CHECK(newestFile(b.transport, false).state == FileState::Cancelled);
@@ -1707,7 +1708,7 @@ void testALostSessionFailsTheFile()
     });
     CHECK(fileState(a.transport, id) == FileState::Failed);
     CHECK(newestFile(b.transport, false).state == FileState::Failed);
-    CHECK(!fileExists(saveAs + ".part"));
+    CHECK(fileExists(saveAs + ".part"));
 }
 
 // Deselecting the station mid-file ends the session at once: cancelled

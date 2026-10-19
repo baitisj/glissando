@@ -296,6 +296,8 @@ transfer.
 | 4 Data | sender | the next piece of the file, in order, up to 4,096 bytes |
 | 5 Saved | receiver | (the file is on disk under its name: this, not the modem's acknowledgement, is delivery) |
 | 6 Cancel | either | a reason: 1 stopped, 2 couldn't read, 3 expired from the sender; the same with the top bit set (0x81 to 0x83) from the receiver |
+| 7 Fingerprint | sender | the file's SHA-256, first 8 bytes; written just before the Offer (added after 0.9.8) |
+| 8 AcceptFrom | receiver | the bytes it already has (4 bytes, big-endian): Accept, but send only the rest (added after 0.9.8) |
 
 Each station numbers its own transfers; the reason's top bit says whose
 transfer a Cancel ends. Records of a type it doesn't know are ignored, so
@@ -324,10 +326,9 @@ When things go wrong:
   doesn't fire, on either side. An offer unanswered for 4 minutes expires
   on both sides (each side's clock, and a Cancel saying so).
 - The session lost mid-file: `failed` on both sides (why is in the
-  status line), and the receiver deletes its `.part`. No resume in this
-  version.
-- The sender cancels: no more pieces, and a Cancel; the receiver deletes
-  what it has and drops pieces that still come after it. Cancelled once
+  status line). The receiver keeps its `.part` (below).
+- The sender cancels: no more pieces, and a Cancel; the receiver keeps
+  what it has (below) and drops pieces that still come after it. Cancelled once
   every piece is written, the receiver may have saved it already; then
   it ignores the Cancel, and its Saved, crossing it, shows `delivered`.
 - The receiver cancels: a Cancel back; the sender stops and shows
@@ -341,6 +342,25 @@ When things go wrong:
   station asks first while files are going to or from it, in the same
   question as a session's (above). Choosing another station leaves them
   going.
+- **Carrying on** (Jeff, 2026-10-19). A file that ends unfinished on
+  the receiving side, however it ends (the session lost, either side
+  cancelling, Disconnect), keeps its `.part` file, as a group file keeps
+  its pieces. When the same station offers the same file again (the
+  same size and Fingerprint), the offer box says `W1AW offers FRED.TXT
+  again (7,000 bytes, 4,096 of them kept from before). Save it to carry
+  on?`, and Save as... opens where it was going. Saved there, the
+  receiver answers AcceptFrom with what it has, and only the rest comes;
+  both chat lines say `carrying on from 4,096`. From a station on the
+  auto-accept list it carries on without asking. Saved anywhere else, it
+  starts again and the kept part goes. A part file is kept for a day,
+  eight at most (the oldest going first), and only while Glissando runs:
+  closing it deletes them. Nothing is kept of a file that could not be
+  written, or that came from a Glissando of 0.9.8 or older (no
+  Fingerprint), and it starts again if the kept part changed on disk.
+  Once all of it is in, the receiver checks the whole file against the
+  Fingerprint before saving it; a mismatch fails it (`did not match what
+  W1AW sent`). Both stations need this version to carry on; with an
+  older one either way, the file goes from the start as before.
 - A station running an older Glissando takes the `F` for a stream that
   isn't chat and closes the session. A session the far end ends while our
   offer is unanswered so shows `failed: their Glissando can't take
@@ -650,7 +670,11 @@ sitting, the glasses lowered now and then.
   hostile name, direction controls in a name, a part file of the
   operator's left alone, two files refused one name, auto-accept never
   overwriting, a receiver that can't write, more data than offered, and
-  releasing the station; and what the chat window shows besides the
+  releasing the station; carrying on after a lost session with only the
+  rest sent, saved elsewhere starting again, a changed file or a kept
+  part cut short starting again, carrying on under auto-accept, nothing
+  kept from an older sender, and a kept part gone after a day; and what
+  the chat window shows besides the
   state, how long an offer has left and how much of a file has been
   handed to the modem.
   `TextMessagingProtocolTest` covers the protocol's side against a fake

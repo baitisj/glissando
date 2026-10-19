@@ -2595,11 +2595,19 @@ wxString TextMessagingDialog::fileLineHtml(const FileLine& line, const Palette& 
     else if (t.outgoing)
     {
         body = escapeHtml(wxString::Format(_("%s to %s, %s bytes"), name, peer, groupDigits(t.size)));
+        if (t.resumedFrom > 0)
+        {
+            body += escapeHtml(wxString::Format(_(", carrying on from %s"), groupDigits(t.resumedFrom)));
+        }
     }
     else
     {
         body = "<b>" + escapeHtml(t.peer) + "</b> " +
                escapeHtml(wxString::Format(_("offers %s, %s bytes"), name, groupDigits(t.size)));
+        if (t.resumedFrom > 0)
+        {
+            body += escapeHtml(wxString::Format(_(", carrying on from %s"), groupDigits(t.resumedFrom)));
+        }
     }
     wxString tag = t.outgoing ? wxString::Format(_("FILE TO %s"), peer) : wxString(_("FILE"));
     return fileBubble(t.outgoing, body, tag, wxEmptyString, result ? line.endedAt : line.at, colors.text,
@@ -2765,10 +2773,21 @@ void TextMessagingDialog::updateOfferBox()
     m_offerId = id;
     if (offer != nullptr)
     {
-        m_offerText->setText(wxString::Format(_("%s offers %s (%s bytes). Save it?"),
-                                              wxString::FromUTF8(offer->transfer.peer),
-                                              wxString::FromUTF8(offer->transfer.name),
-                                              groupDigits(offer->transfer.size)));
+        const Data2G::FileTransfer& t = offer->transfer;
+        if (t.kept > 0)
+        {
+            // Part of it came before: saved to the same place, only the
+            // rest comes.
+            m_offerText->setText(wxString::Format(_("%s offers %s again (%s bytes, %s of them kept from before). "
+                                                    "Save it to carry on?"),
+                                                  wxString::FromUTF8(t.peer), wxString::FromUTF8(t.name),
+                                                  groupDigits(t.size), groupDigits(t.kept)));
+        }
+        else
+        {
+            m_offerText->setText(wxString::Format(_("%s offers %s (%s bytes). Save it?"), wxString::FromUTF8(t.peer),
+                                                  wxString::FromUTF8(t.name), groupDigits(t.size)));
+        }
     }
     m_offerBox->Show(offer != nullptr);
     Layout();
@@ -3093,11 +3112,19 @@ void TextMessagingDialog::OnOfferSave(wxCommandEvent&)
     Data2G::FileTransfer offer = line->transfer;
 
     wxString folder = frame->chatReceivedFilesFolder();
+    wxString name = wxString::FromUTF8(offer.name);
+    if (offer.kept > 0)
+    {
+        // Where it was going before, so it carries on there.
+        wxFileName kept(wxString::FromUTF8(offer.keptPath));
+        folder = kept.GetPath();
+        name = kept.GetFullName();
+    }
     if (!wxDirExists(folder)) wxFileName::Mkdir(folder, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
 
     wxFileDialog dialog(this, wxString::Format(_("Save %s from %s"), wxString::FromUTF8(offer.name),
                                                wxString::FromUTF8(offer.peer)),
-                        folder, wxString::FromUTF8(offer.name), wxFileSelectorDefaultWildcardStr,
+                        folder, name, wxFileSelectorDefaultWildcardStr,
                         wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
     if (dialog.ShowModal() != wxID_OK)
     {

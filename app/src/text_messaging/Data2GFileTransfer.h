@@ -71,6 +71,12 @@ struct FileTransfer
     std::string path;           // the file sent, or where the one received is saved; UTF-8
     std::string error;          // why it failed, when this side knows
     bool autoAccepted = false;  // taken without asking, from a station on the auto-accept list
+    // Theirs: part of this file, from an earlier transfer from the same
+    // station that ended unfinished, is kept on disk, this much of it,
+    // meant for keptPath; accepted to keptPath, only the rest comes.
+    uint64_t kept = 0;
+    std::string keptPath;
+    uint64_t resumedFrom = 0;   // either way: where in the file this transfer started
 
     // Still going: waiting, offered, being answered or under way.
     bool live() const;
@@ -104,6 +110,13 @@ public:
     // The Offer record's size field.
     static constexpr uint64_t MAX_FILE_BYTES = 0xFFFFFFFFull;
 
+    // The part file of one received from a station that ended unfinished
+    // is kept, for that station to send the same file again, for this
+    // long, and so many at most, the oldest going first. Only while
+    // Glissando runs: closing it deletes them.
+    static constexpr uint64_t KEPT_MS = 24ull * 60 * 60 * 1000;
+    static constexpr size_t KEPT_MAX = 8;
+
     FileTransferEngine() = default;
     ~FileTransferEngine();
 
@@ -122,7 +135,8 @@ public:
     // Answers an offer: the file is written to path plus ".part" (or a
     // numbered part file, if that name is taken), and renamed to path once
     // all of it has come. Refused, the offer left open, if another
-    // transfer is being saved to path.
+    // transfer is being saved to path. To the offer's keptPath, it carries
+    // on in the part file kept from before, and only the rest comes.
     bool accept(uint64_t id, const std::string& path, std::string& error);
     bool decline(uint64_t id);
 
@@ -185,8 +199,11 @@ public:
     // The transport stopped: everything still going failed.
     void stopAll(const std::string& why);
 
-    // Expires offers left unanswered.
+    // Expires offers left unanswered, and part files kept too long.
     void tick(uint64_t nowMs);
+
+    // Part files kept for a transfer to carry on in.
+    size_t keptCount() const { return kept_.size(); }
 
     // Sending is not allowed here (chat's transmit inhibit): every file
     // going either way fails, the far end of one already offered told so
@@ -225,6 +242,23 @@ private:
         };
         std::deque<Piece> pieces;   // ours, written and not yet all acknowledged
         uint64_t arriving = 0;      // theirs: file bytes of the piece coming in, to the step
+        // The file's SHA-256 first bytes: ours, worked out when offered;
+        // theirs, from the Fingerprint before the Offer (a sender of 0.9.8
+        // or older sends none, and then nothing is kept or checked).
+        std::vector<uint8_t> fingerprint;
+        bool spoiled = false;       // theirs: what is written can't be trusted, so it is not kept
+    };
+
+    // A part file kept from a transfer of theirs that ended unfinished.
+    struct Kept
+    {
+        std::string peer;
+        uint64_t size = 0;
+        std::vector<uint8_t> fingerprint;
+        std::string path;               // where it was to be saved
+        std::filesystem::path part;
+        uint64_t bytes = 0;
+        uint64_t keptAtMs = 0;
     };
 
     Entry* find(uint64_t id);
@@ -235,6 +269,11 @@ private:
     void finish(Entry& entry, FileTransfer::State state, const std::string& error = std::string());
     std::filesystem::path freePart(const std::string& path) const;
     bool openPart(Entry& entry, const std::string& path, std::string& error);
+    bool resumePart(Entry& entry, const std::string& path);
+    std::list<Kept>::iterator findKept(const Entry& entry);
+    void keep(Entry& entry);
+    void dropKept(std::list<Kept>::iterator it);
+    void limitKept(uint64_t nowMs);
     void receivePiece(Entry& entry, const uint8_t* bytes, size_t length);
     void completeReceive(Entry& entry);
     void autoAccept(Entry& entry);
@@ -242,6 +281,9 @@ private:
     void changed() { changes_++; }
 
     std::list<Entry> entries_;
+    std::list<Kept> kept_;
+    std::map<std::pair<std::string, uint8_t>, std::vector<uint8_t>> fingerprints_;  // waiting for their Offer
+    uint64_t nowMs_ = 0;    // the latest time given
     std::map<std::string, std::vector<uint8_t>> pending_;   // records waiting for each station's session
     uint64_t nextId_ = 1;
     uint8_t nextNumber_ = 1;
