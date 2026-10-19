@@ -449,6 +449,17 @@ std::string Data2GTransport::keyingHeldBy() const
     return session_ != SessionState::None ? sessionPeer_ : std::string();
 }
 
+// The far end of each session connected, for the heard list: a station
+// that called us after our CQ may not have sent a frame yet.
+bool Data2GTransport::takeStationHeard(std::string& callsign)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (stationsHeard_.empty()) return false;
+    callsign = stationsHeard_.front();
+    stationsHeard_.pop_front();
+    return true;
+}
+
 bool Data2GTransport::takeKeyingLost()
 {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -994,6 +1005,7 @@ void Data2GTransport::run(Settings settings)
                 sessionPeer_ = weCalled ? event.peer : event.text;
                 sessionOurs_ = weCalled;
                 session_ = SessionState::Connected;
+                if (stationsHeard_.size() < 16) stationsHeard_.push_back(sessionPeer_);
                 farewellPeer_.clear();
                 noSessionUntil_.erase(sessionPeer_);
                 sessionActivityMs_ = now();
