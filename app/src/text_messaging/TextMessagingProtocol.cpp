@@ -1746,6 +1746,7 @@ void TextMessagingProtocol::tick()
         purgeStaleReassembliesLocked(nowMs);
         requestMissingFragmentsLocked(nowMs);
         settleReliableKeyingsLocked(events);
+        noteStationsHeardLocked(events);
 
         // Replies queued as frames arrive, retries whose timers ran out and
         // resends that a partial acknowledgement asked for all land in the
@@ -1770,6 +1771,33 @@ void TextMessagingProtocol::tick()
     }
 
     deliver(events);
+}
+
+// A station the transport heard without a frame (a Data2G session it called
+// us for) goes on the heard list, as a frame from it would put it there, so
+// the operator can see and pick who is connected. It has no SNR.
+void TextMessagingProtocol::noteStationsHeardLocked(std::vector<PendingEvent>& events)
+{
+    if (transport_ == nullptr) return;
+    std::string callsign;
+    while (transport_->takeStationHeard(callsign))
+    {
+        std::string normalized = FrameCodec::normalizeCallsign(callsign);
+        if (normalized.empty() || normalized == myCallsign_) continue;
+        std::time_t now = wallClock_();
+        float snr = std::nanf("");
+        stations_.heard(normalized, snr, now);
+
+        HeardStation station;
+        station.callsign = normalized;
+        station.snr = snr;
+        station.lastHeard = now;
+        store_.upsertHeardStation(station);
+
+        PendingEvent stationsChanged;
+        stationsChanged.type = PendingEvent::Type::StationsChanged;
+        events.push_back(stationsChanged);
+    }
 }
 
 void TextMessagingProtocol::serviceOutboxLocked(uint64_t nowMs, bool frozen,

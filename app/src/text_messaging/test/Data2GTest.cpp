@@ -2831,6 +2831,28 @@ void testAStaleChatDropIsNotTheFiles()
 
 } // namespace
 
+// A station that calls us for a session goes on our heard list at once, as
+// it would after our CQ, though nothing it sent yet is a chat frame (a file
+// offer here); with no SNR, as nothing over Data2G has one.
+void testACallerGoesOnTheHeardList()
+{
+    FakeHostPair hosts;
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(sessionsReady(hosts, a, b));
+    FileScratch scratch("caller-listed");
+    CHECK(!a.stations.contains("VK3ABC"));
+
+    std::string error;
+    CHECK(b.transport.sendFile("W1AW", scratch.write("FRED.TXT", 500), error) != 0);
+    runBoth(a, b, [&]() { return a.stations.contains("VK3ABC"); });
+    HeardStation caller;
+    CHECK(a.stations.find("VK3ABC", caller) && caller.lastHeard != 0 && !std::isfinite(caller.snr));
+    // The one who called, listed too on its own side, never itself.
+    runBoth(a, b, [&]() { return b.stations.contains("W1AW"); });
+    CHECK(b.stations.contains("W1AW") && !b.stations.contains("VK3ABC") && !a.stations.contains("W1AW"));
+}
+
 int main()
 {
     testKissPortsAndAckMode();
@@ -2863,6 +2885,7 @@ int main()
     testALostSessionFailsTheFile();
     testDeselectingTheStationCancelsTheFile();
     testDeselectingWhileAnOfferIsUp();
+    testACallerGoesOnTheHeardList();
     testInhibitedStopsSessionFiles();
     testAnUnansweredOfferExpires();
     testAnOddNameIsSavedSafely();

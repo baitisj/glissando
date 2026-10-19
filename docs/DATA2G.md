@@ -219,8 +219,9 @@ How the session itself runs:
   **CONNECTED** lamp, "Session with W1AW" under it, and **Disconnect**,
   which ends the session at once without asking (it lets go of the station
   if it is selected, and otherwise releases it directly). The far end of a
-  session is never aged off the heard-station list while the session
-  lasts. With Data2G off there is never a session, so none of this
+  session goes on the heard-station list as soon as it connects (a
+  station that calls us after our CQ may not have sent a chat frame yet),
+  with no SNR, and is never aged off it while the session lasts. With Data2G off there is never a session, so none of this
   shows.
 - With `LISTEN ON`, the host takes sessions other Glissando stations open
   to us, and frames arriving in them go to the chat protocol.

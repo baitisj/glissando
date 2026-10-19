@@ -110,6 +110,11 @@ public:
     // protocol then reports it NOT SENT, not SENT. Our own modem says no.
     virtual bool takeKeyingLost() { return false; }
 
+    // A station heard by other means than a frame from it, once each: the
+    // far end of a Data2G session it called us for, which may not have sent
+    // a word yet. It goes on the heard list. Our own modem has none.
+    virtual bool takeStationHeard(std::string& callsign) { (void)callsign; return false; }
+
     // A link that acknowledges, retries and paces what it carries by itself,
     // such as a Data2G connected session. Nothing else has one: the defaults
     // say no, and the protocol then works exactly as it does without them.
@@ -478,6 +483,7 @@ private:
     bool channelFrozenLocked(uint64_t nowMs);
     void holdTimersLocked(uint64_t pausedMs);
     uint32_t randomDelayLocked(int maxMs);
+    void noteStationsHeardLocked(std::vector<PendingEvent>& events);
     void serviceOutboxLocked(uint64_t nowMs, bool frozen, std::vector<PendingEvent>& events);
     bool goesReliablyLocked(const PendingTransmission& pending) const;
     void sendReliablyLocked(uint64_t nowMs, std::vector<PendingEvent>& events);

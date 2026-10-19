@@ -116,6 +116,7 @@ public:
     bool withdrawKeying() override;
     std::string keyingHeldBy() const override;
     bool takeKeyingLost() override;
+    bool takeStationHeard(std::string& callsign) override;
     double airTimeScale(int gear) const override;
 
     // Session keyings: with sessions on, a message or ping for one station
@@ -263,6 +264,7 @@ private:
     bool hasKeying_;
     Keying keying_;
     bool keyingLost_;   // the last keying ended without all of it reported sent
+    std::deque<std::string> stationsHeard_;    // far ends of sessions connected, for takeStationHeard()
     bool callsignChanged_;
 
     // Session bookkeeping, read by the thread under mutex_.
