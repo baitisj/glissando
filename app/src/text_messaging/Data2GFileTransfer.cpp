@@ -10,7 +10,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <iterator>
 #include <system_error>
+
+#include "Sha256.h"
 
 namespace TextMessaging
 {
@@ -77,6 +80,27 @@ bool reservedOnWindows(const std::string& stem)
 std::vector<uint8_t> numbered(uint8_t number)
 {
     return std::vector<uint8_t>(1, number);
+}
+
+// The first bytes of the SHA-256 of a file's first size bytes; empty if
+// it can't be read.
+std::vector<uint8_t> fingerprintOf(const std::filesystem::path& path, uint64_t size)
+{
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return {};
+    Sha256 hash;
+    std::vector<uint8_t> buffer(65536);
+    uint64_t left = size;
+    while (left > 0)
+    {
+        size_t want = (size_t)std::min<uint64_t>(buffer.size(), left);
+        in.read((char*)buffer.data(), (std::streamsize)want);
+        if ((size_t)in.gcount() != want) return {};
+        hash.update(buffer.data(), want);
+        left -= want;
+    }
+    Sha256::Digest digest = hash.finish();
+    return std::vector<uint8_t>(digest.begin(), digest.begin() + FILE_FINGERPRINT_BYTES);
 }
 
 } // namespace
@@ -184,6 +208,7 @@ std::filesystem::path freeSavePath(const std::filesystem::path& folder, const st
 FileTransferEngine::~FileTransferEngine()
 {
     stopAll("closed");
+    while (!kept_.empty()) dropKept(kept_.begin());
 }
 
 FileTransferEngine::Entry* FileTransferEngine::find(uint64_t id)
@@ -229,7 +254,7 @@ void FileTransferEngine::queueCancel(Entry& entry, CancelReason reason)
 }
 
 // The transfer is over: files are closed, and a part file of one not
-// saved is deleted.
+// saved is kept for the same file sent again, or deleted.
 void FileTransferEngine::finish(Entry& entry, FileTransfer::State state, const std::string& error)
 {
     FileTransfer& t = entry.transfer;
@@ -239,8 +264,7 @@ void FileTransferEngine::finish(Entry& entry, FileTransfer::State state, const s
     if (entry.out.is_open())
     {
         entry.out.close();
-        std::error_code ec;
-        std::filesystem::remove(entry.part, ec);
+        if (state != FileTransfer::State::Saved) keep(entry);
     }
     entry.part.clear();
     entry.pieces.clear();
@@ -298,10 +322,10 @@ uint64_t FileTransferEngine::offer(const std::string& peer, const std::string& p
         error = "\"" + path + "\" is larger than the 4 GB a transfer can carry.";
         return 0;
     }
-    std::ifstream probe(file, std::ios::binary);
-    if (!probe)
+    std::vector<uint8_t> fingerprint = fingerprintOf(file, size);
+    if (fingerprint.empty())
     {
-        error = "\"" + path + "\" could not be opened.";
+        error = "\"" + path + "\" could not be read.";
         return 0;
     }
 
@@ -315,6 +339,7 @@ uint64_t FileTransferEngine::offer(const std::string& peer, const std::string& p
     t.size = size;
     t.path = path;
     t.state = FileTransfer::State::Waiting;
+    entry.fingerprint = fingerprint;
     entry.sinceMs = nowMs;
     entry.number = nextNumber_;
     nextNumber_ = nextNumber_ == 255 ? 1 : (uint8_t)(nextNumber_ + 1);
@@ -341,6 +366,99 @@ std::filesystem::path FileTransferEngine::freePart(const std::string& path) cons
     return std::filesystem::path();
 }
 
+// A part file kept for the same file from the same station, if any.
+std::list<FileTransferEngine::Kept>::iterator FileTransferEngine::findKept(const Entry& entry)
+{
+    const FileTransfer& t = entry.transfer;
+    if (entry.fingerprint.empty()) return kept_.end();
+    return std::find_if(kept_.begin(), kept_.end(), [&](const Kept& k) {
+        return k.peer == t.peer && k.size == t.size && k.fingerprint == entry.fingerprint;
+    });
+}
+
+// Keeps what has come of a transfer of theirs that ended unfinished, if
+// there is anything and it can be trusted; otherwise its part file goes.
+void FileTransferEngine::keep(Entry& entry)
+{
+    const FileTransfer& t = entry.transfer;
+    std::error_code ec;
+    if (entry.spoiled || entry.fingerprint.empty() || t.done == 0 || t.done >= t.size)
+    {
+        std::filesystem::remove(entry.part, ec);
+        return;
+    }
+    auto older = findKept(entry);
+    if (older != kept_.end()) dropKept(older);
+    Kept& k = kept_.emplace_back();
+    k.peer = t.peer;
+    k.size = t.size;
+    k.fingerprint = entry.fingerprint;
+    k.path = t.path;
+    k.part = entry.part;
+    k.bytes = t.done;
+    k.keptAtMs = nowMs_;
+    limitKept(nowMs_);
+}
+
+void FileTransferEngine::dropKept(std::list<Kept>::iterator it)
+{
+    std::error_code ec;
+    std::filesystem::remove(it->part, ec);
+    kept_.erase(it);
+}
+
+void FileTransferEngine::limitKept(uint64_t nowMs)
+{
+    for (auto it = kept_.begin(); it != kept_.end();)
+    {
+        // Kept where no time was to hand: its day starts now.
+        if (it->keptAtMs == 0) it->keptAtMs = nowMs;
+        bool old = nowMs > it->keptAtMs && nowMs - it->keptAtMs >= KEPT_MS;
+        auto next = std::next(it);
+        if (old) dropKept(it);
+        it = next;
+    }
+    while (kept_.size() > KEPT_MAX) dropKept(kept_.begin());
+}
+
+// Carries on in the part file kept for the offer, with the rest asked for.
+// False, with nothing changed, if it is gone or not as it was left.
+bool FileTransferEngine::resumePart(Entry& entry, const std::string& path)
+{
+    FileTransfer& t = entry.transfer;
+    auto kept = findKept(entry);
+    if (kept == kept_.end() || kept->path != path) return false;
+    std::error_code ec;
+    if (std::filesystem::file_size(kept->part, ec) != kept->bytes || ec)
+    {
+        dropKept(kept);
+        return false;
+    }
+    entry.out.open(kept->part, std::ios::binary | std::ios::app);
+    if (!entry.out)
+    {
+        dropKept(kept);
+        return false;
+    }
+    entry.part = kept->part;
+    t.path = path;
+    t.done = kept->bytes;
+    t.resumedFrom = kept->bytes;
+    t.kept = 0;
+    t.keptPath.clear();
+    t.state = FileTransfer::State::Receiving;
+    kept_.erase(kept);
+
+    std::vector<uint8_t> body = numbered(entry.number);
+    for (int shift = 24; shift >= 0; shift -= 8) body.push_back((uint8_t)(t.done >> shift));
+    queueRecord(t.peer, FileRecordType::AcceptFrom, body);
+    changed();
+
+    // All of it was here already.
+    if (t.done == t.size) completeReceive(entry);
+    return true;
+}
+
 bool FileTransferEngine::openPart(Entry& entry, const std::string& path, std::string& error)
 {
     FileTransfer& t = entry.transfer;
@@ -359,6 +477,8 @@ bool FileTransferEngine::openPart(Entry& entry, const std::string& path, std::st
     entry.part = part;
     t.path = path;
     t.done = 0;
+    t.kept = 0;
+    t.keptPath.clear();
     t.state = FileTransfer::State::Receiving;
     queueRecord(t.peer, FileRecordType::Accept, numbered(entry.number));
     changed();
@@ -393,6 +513,10 @@ bool FileTransferEngine::accept(uint64_t id, const std::string& path, std::strin
             return false;
         }
     }
+    if (resumePart(*entry, path)) return true;
+    // Saved somewhere else: what was kept of it is of no more use.
+    auto kept = findKept(*entry);
+    if (kept != kept_.end()) dropKept(kept);
     if (openPart(*entry, path, error)) return true;
 
     // The far end hears that this side can't take it.
@@ -498,6 +622,13 @@ std::vector<uint8_t> FileTransferEngine::takeRecords(const std::string& peer, ui
         FileTransfer& t = entry.transfer;
         if (!t.outgoing || t.peer != peer || t.state != FileTransfer::State::Waiting) continue;
 
+        // Its fingerprint first, so the far end knows the file when the
+        // offer comes.
+        std::vector<uint8_t> print = numbered(entry.number);
+        print.insert(print.end(), entry.fingerprint.begin(), entry.fingerprint.end());
+        std::vector<uint8_t> printRecord = fileRecordEncode(FileRecordType::Fingerprint, print);
+        out.insert(out.end(), printRecord.begin(), printRecord.end());
+
         std::vector<uint8_t> body;
         body.push_back(entry.number);
         for (int shift = 24; shift >= 0; shift -= 8) body.push_back((uint8_t)(t.size >> shift));
@@ -506,6 +637,8 @@ std::vector<uint8_t> FileTransferEngine::takeRecords(const std::string& peer, ui
         out.insert(out.end(), record.begin(), record.end());
 
         t.state = FileTransfer::State::Offered;
+        t.resumedFrom = 0;
+        t.done = 0;
         entry.sinceMs = nowMs;
         entry.written = 0;
         changed();
@@ -587,6 +720,11 @@ void FileTransferEngine::arriving(const std::string& peer, uint8_t number, size_
 void FileTransferEngine::autoAccept(Entry& entry)
 {
     if (inhibited_ || autoFolder_.empty() || autoCalls_.count(entry.transfer.peer) == 0) return;
+    if (!entry.transfer.keptPath.empty() && resumePart(entry, entry.transfer.keptPath))
+    {
+        entry.transfer.autoAccepted = true;
+        return;
+    }
 
     std::error_code ec;
     std::filesystem::path folder = pathFromUtf8(autoFolder_);
@@ -612,6 +750,7 @@ void FileTransferEngine::onRecord(const std::string& peer, const FileRecord& rec
     if (record.body.empty()) return;
     uint8_t number = record.body[0];
     using State = FileTransfer::State;
+    nowMs_ = nowMs;
 
     switch ((FileRecordType)record.type)
     {
@@ -629,6 +768,18 @@ void FileTransferEngine::onRecord(const std::string& peer, const FileRecord& rec
             t.state = State::Asking;
             entry.number = number;
             entry.sinceMs = nowMs;
+            auto print = fingerprints_.find({peer, number});
+            if (print != fingerprints_.end())
+            {
+                entry.fingerprint = print->second;
+                fingerprints_.erase(print);
+            }
+            auto kept = findKept(entry);
+            if (kept != kept_.end())
+            {
+                t.kept = kept->bytes;
+                t.keptPath = kept->path;
+            }
             changed();
             if (inhibited_)
             {
@@ -643,18 +794,45 @@ void FileTransferEngine::onRecord(const std::string& peer, const FileRecord& rec
             prune();
             break;
         }
+        case FileRecordType::Fingerprint:
+        {
+            if (record.body.size() < 1 + FILE_FINGERPRINT_BYTES) return;
+            // Only the latest few, in case Offers never follow.
+            if (fingerprints_.size() >= 16) fingerprints_.clear();
+            fingerprints_[{peer, number}] =
+                std::vector<uint8_t>(record.body.begin() + 1, record.body.begin() + 1 + FILE_FINGERPRINT_BYTES);
+            break;
+        }
         case FileRecordType::Accept:
+        case FileRecordType::AcceptFrom:
         {
             Entry* entry = findOutgoing(peer, number);
             if (entry == nullptr || entry->transfer.state != State::Offered) return;
-            entry->in.open(pathFromUtf8(entry->transfer.path), std::ios::binary);
+            FileTransfer& t = entry->transfer;
+            uint64_t from = 0;
+            if ((FileRecordType)record.type == FileRecordType::AcceptFrom)
+            {
+                if (record.body.size() < 5) return;
+                for (int i = 1; i <= 4; i++) from = (from << 8) | record.body[(size_t)i];
+            }
+            if (from > t.size)
+            {
+                queueCancel(*entry, CancelReason::SenderFailed);
+                finish(*entry, State::Failed, t.peer + " asked to carry on past the end of the file.");
+                return;
+            }
+            entry->in.open(pathFromUtf8(t.path), std::ios::binary);
+            if (entry->in && from > 0) entry->in.seekg((std::streamoff)from);
             if (!entry->in)
             {
                 queueCancel(*entry, CancelReason::SenderFailed);
-                finish(*entry, State::Failed, "\"" + entry->transfer.path + "\" could not be opened.");
+                finish(*entry, State::Failed, "\"" + t.path + "\" could not be opened.");
                 return;
             }
-            entry->transfer.state = State::Sending;
+            entry->written = from;
+            t.done = from;
+            t.resumedFrom = from;
+            t.state = State::Sending;
             changed();
             break;
         }
@@ -731,6 +909,7 @@ void FileTransferEngine::receivePiece(Entry& entry, const uint8_t* bytes, size_t
     FileTransfer& t = entry.transfer;
     if (t.done + length > t.size)
     {
+        entry.spoiled = true;
         queueCancel(entry, CancelReason::ReceiverFailed);
         finish(entry, FileTransfer::State::Failed, t.peer + " sent more than it offered.");
         return;
@@ -739,6 +918,7 @@ void FileTransferEngine::receivePiece(Entry& entry, const uint8_t* bytes, size_t
     entry.out.write((const char*)bytes, (std::streamsize)length);
     if (!entry.out)
     {
+        entry.spoiled = true;
         queueCancel(entry, CancelReason::ReceiverFailed);
         finish(entry, FileTransfer::State::Failed, "\"" + utf8FromPath(entry.part) + "\" could not be written.");
         return;
@@ -756,6 +936,17 @@ void FileTransferEngine::completeReceive(Entry& entry)
     FileTransfer& t = entry.transfer;
     entry.out.close();
     bool written = !entry.out.fail();
+    if (written && !entry.fingerprint.empty() && fingerprintOf(entry.part, t.size) != entry.fingerprint)
+    {
+        // Not the file offered: pieces from a changed file, say, after
+        // carrying on from a kept part.
+        entry.spoiled = true;
+        std::error_code ec;
+        std::filesystem::remove(entry.part, ec);
+        queueCancel(entry, CancelReason::ReceiverFailed);
+        finish(entry, FileTransfer::State::Failed, "\"" + t.name + "\" did not match what " + t.peer + " sent.");
+        return;
+    }
 
     std::filesystem::path final = pathFromUtf8(t.path);
     std::filesystem::path part = entry.part;
@@ -808,6 +999,7 @@ void FileTransferEngine::completeReceive(Entry& entry)
 void FileTransferEngine::sessionEnded(const std::string& peer, uint64_t nowMs, bool endedThere)
 {
     using State = FileTransfer::State;
+    nowMs_ = nowMs;
     pending_.erase(peer);
     for (Entry& entry : entries_)
     {
@@ -878,6 +1070,8 @@ void FileTransferEngine::stopAll(const std::string& why)
 void FileTransferEngine::tick(uint64_t nowMs)
 {
     using State = FileTransfer::State;
+    nowMs_ = nowMs;
+    limitKept(nowMs);
     for (Entry& entry : entries_)
     {
         FileTransfer& t = entry.transfer;

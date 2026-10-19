@@ -2068,11 +2068,14 @@ void GroupFileEngine::keyingLost(uint64_t nowMs)
     }
 }
 
-bool GroupFileEngine::wantsGroup() const
+bool GroupFileEngine::wantsGroup(uint64_t nowMs) const
 {
     if (retry_.kind != KeyingKind::None || inFlight_.kind != KeyingKind::None) return true;
     const Outgoing* out = liveOutgoing();
-    if (out != nullptr && out->step != Step::WindowOpen) return true;
+    // Neither an open window nor the wait for the next one keys anything.
+    if (out != nullptr && out->step != Step::WindowOpen &&
+        !(out->step == Step::NextWindow && nowMs < out->nextWindowAtMs))
+        return true;
     return std::any_of(incoming_.begin(), incoming_.end(),
                        [](const Incoming& in) { return in.pending || in.lateAtMs != 0; });
 }

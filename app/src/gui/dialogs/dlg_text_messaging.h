@@ -140,19 +140,10 @@ private:
     static std::string stationOf(const TextMessaging::TextMessage& message);
     void selectStation(const std::string& callsign, bool addIfMissing);
 
-    // Letting go of the selected station ends a Data2G session with it and
-    // cancels the files going to or from it, so whatever would change the
-    // selection asks first while either is so. wanted is the station that
-    // would be chosen instead; empty for none.
-    bool needsAskingToLetGo(const std::string& before) const;
-    bool askToLetGo(const std::string& before, const std::string& wanted, const wxString& title);
-    // The same, asked once the event that wanted it is over, and the
-    // selection then changed if the operator agrees. putBack: the list
-    // has moved the selection by itself (the keyboard, say); it is put
-    // back first, once the list has finished, and the question is about
-    // where it went.
-    void askToLetGoLater(const std::string& before, const std::string& wanted, bool putBack = false);
-    void chooseStation(const std::string& before, const std::string& wanted);
+    // Removing a station ends a Data2G session with it and cancels the files
+    // going to or from it, so the removal asks first while either is so.
+    // Choosing another station, or none, leaves both alone.
+    bool askToLetGo(const std::string& callsign, const wxString& title);
 
     // The Data2G session's far end as the station list names it, or as
     // data2g-host does when it is not listed; empty with no session.
@@ -328,14 +319,6 @@ private:
     // when an item is chosen, since the list may have changed underneath.
     std::string m_menuCallsign;
 
-    // The selection is being changed with the operator's leave (or for
-    // a reason that needs none), so letting go of a station asks nothing.
-    bool m_lettingGo = false;
-    // The selection is being put back while the operator is asked.
-    bool m_restoringSelection = false;
-    bool m_letGoAsked = false;      // a question is on its way
-    bool m_letGoClicked = false;    // and the operator asked for it, for m_letGoWanted
-    std::string m_letGoWanted;
 
     // The message the chat log's menu was opened on, by store id; 0 when it
     // offered nothing to remove or abort.

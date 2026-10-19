@@ -179,7 +179,13 @@ enum class FileRecordType : uint8_t
     Data = 4,       // number, the next piece of the file, in order
     Saved = 5,      // number: the receiver has the whole file on disk
     Cancel = 6,     // number, and a reason (CancelReason)
+    // Added after 0.9.8; an older Glissando ignores both, so a transfer with
+    // one goes on as before, from the start.
+    Fingerprint = 7,    // number, the file's SHA-256 first 8 bytes: just before its Offer
+    AcceptFrom = 8,     // number, the bytes already held (4, big-endian): send the rest
 };
+
+constexpr size_t FILE_FINGERPRINT_BYTES = 8;
 
 // Why a transfer was cancelled. The receiver's reasons have the top bit
 // set, so a Cancel says which side's transfer it ends: each station

@@ -1653,10 +1653,11 @@ void testTheSenderCancelsAFile()
     runAcking(hosts, a, b, 1000, [&]() { return newestFile(b.transport, false).state == FileState::CancelledThere; });
     CHECK(newestFile(b.transport, false).state == FileState::CancelledThere);
     CHECK(newestFile(b.transport, false).done < 30000);
-    CHECK(!fileExists(saveAs + ".part") && !fileExists(saveAs));
+    // What came is kept, for the same file sent again.
+    CHECK(fileExists(saveAs + ".part") && !fileExists(saveAs));
     runAcking(hosts, a, b, 100000, [&]() { return false; }, 50);
     CHECK(hosts.unackedBytes(0) == 0);
-    CHECK(!fileExists(saveAs + ".part"));
+    CHECK(fileExists(saveAs + ".part"));
 }
 
 void testTheReceiverCancelsAFile()
@@ -1676,7 +1677,7 @@ void testTheReceiverCancelsAFile()
     runAcking(hosts, a, b, 1000, [&]() { return newestFile(b.transport, false).done >= 4096; });
 
     CHECK(b.transport.cancelFile(newestFile(b.transport, false).id));
-    CHECK(!fileExists(saveAs + ".part"));
+    CHECK(fileExists(saveAs + ".part"));
     runAcking(hosts, a, b, 1000, [&]() { return fileState(a.transport, id) == FileState::CancelledThere; });
     CHECK(fileState(a.transport, id) == FileState::CancelledThere);
     CHECK(newestFile(b.transport, false).state == FileState::Cancelled);
@@ -1707,7 +1708,7 @@ void testALostSessionFailsTheFile()
     });
     CHECK(fileState(a.transport, id) == FileState::Failed);
     CHECK(newestFile(b.transport, false).state == FileState::Failed);
-    CHECK(!fileExists(saveAs + ".part"));
+    CHECK(fileExists(saveAs + ".part"));
 }
 
 // Deselecting the station mid-file ends the session at once: cancelled
@@ -2853,6 +2854,31 @@ void testACallerGoesOnTheHeardList()
     CHECK(b.stations.contains("W1AW") && !b.stations.contains("VK3ABC") && !a.stations.contains("W1AW"));
 }
 
+// A session we opened, with a broadcast of ours waiting: it stays open a
+// while once our message is through, since the far end may still be
+// sending into it, and closes once it has been quiet that long.
+void testOurSessionWaitsForTheFarEnd()
+{
+    FakeHostPair hosts;
+    Station a("W1AW", hosts.sides[0], 3);
+    Station b("VK3ABC", hosts.sides[1], 3);
+    CHECK(settled(hosts, a, b));
+    CHECK(waitFor([&]() { return hosts.heardCommand(1, "LISTEN ON"); }));
+
+    std::string error;
+    CHECK(a.protocol.sendMessage("are you there", "VK3ABC", error));
+    int64_t id = a.observer.lastAddedId();
+    runBoth(a, b, [&]() { return a.transport.status().sessionPeer == "VK3ABC"; });
+    CHECK(a.protocol.sendMessage("CQ the group", "", error));
+    runBoth(a, b, [&]() { return a.observer.statusOf(id) == MessageStatus::Acknowledged; });
+    CHECK(a.observer.statusOf(id) == MessageStatus::Acknowledged);
+    uint64_t through = a.nowMs.load();
+
+    runBoth(a, b, [&]() { return hosts.heardCommand(0, "DISCONNECT"); }, 4000);
+    CHECK(hosts.heardCommand(0, "DISCONNECT"));
+    CHECK(a.nowMs.load() - through >= Data2GTransport::SESSION_IDLE_MS - 5000);
+}
+
 int main()
 {
     testKissPortsAndAckMode();
@@ -2878,6 +2904,7 @@ int main()
     testABroadcastHeldByASessionSaysSo();
     testABroadcastGoesWhenTheSessionEnds();
     testABroadcastNeverSentEndsNotSent();
+    testOurSessionWaitsForTheFarEnd();
     testAFileGoesThroughASession();
     testAFileDeclined();
     testTheSenderCancelsAFile();

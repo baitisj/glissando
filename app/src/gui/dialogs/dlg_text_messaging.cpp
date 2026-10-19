@@ -1318,41 +1318,18 @@ void TextMessagingDialog::setStationSelected(long item, bool selected)
 // is cleared.
 void TextMessagingDialog::updateSelectionControls()
 {
-    if (m_restoringSelection) return;
-
     std::string callsign = selectedCallsign();
     bool selected = !callsign.empty();
 
-    // A change nothing here asked about (the keyboard, say) that would let
-    // go of a station in a session, or with files going: the selection is
-    // put back, and the operator asked.
-    // Put back only once the list has finished: put back from in here,
-    // wxGTK's list goes on to light the row it moved to as well, and two
-    // rows show selected.
-    if (callsign != m_mapPick && !m_lettingGo && !m_mapPick.empty() && needsAskingToLetGo(m_mapPick) &&
-        stationItem(m_mapPick) >= 0)
-    {
-        askToLetGoLater(m_mapPick, callsign, true);
-        return;
-    }
-
+    // Choosing another station, or none to broadcast, leaves a Data2G
+    // session with the one before as it is: group bursts go out while it
+    // is idle, and choosing the station again goes straight back into it.
+    // Disconnect, or removing the station, ends it.
     if (callsign != m_mapPick)
     {
-        std::string released = m_mapPick;
         m_mapPick = callsign;
         TextMessagingSession::instance().protocol().setMapSelection(callsign);
         if (uiLogEnabled()) log_info("UI: map follows \"%s\"", callsign.c_str());
-
-        // Letting go of a station ends a Data2G session with it, so the
-        // group is free again, and drops what is still outstanding for it.
-        // Over any other modem this changes nothing.
-        int dropped = released.empty() ? 0 : TextMessagingSession::instance().protocol().releaseStation(released);
-        if (dropped > 0)
-        {
-            setStatus(wxString::Format(wxPLURAL("%d message to %s aborted.", "%d messages to %s aborted.", dropped),
-                                       dropped, wxString::FromUTF8(released)));
-            if (uiLogEnabled()) log_info("UI: %s deselected, %d outstanding dropped", released.c_str(), dropped);
-        }
     }
 
     bool pingable = selected && m_inhibitReason.empty();
@@ -1495,19 +1472,8 @@ void TextMessagingDialog::OnStationLeftDown(wxMouseEvent& event)
     }
 
     // Clicking the selected station again clears it; clicking another
-    // chooses that one. Either lets go of the station selected, which is
-    // asked about first while that ends a session or cancels files, and
-    // then the press is not passed on: the list would change the selection
-    // under the question.
+    // chooses that one.
     bool selected = m_stationList->GetItemState(item, wxLIST_STATE_SELECTED) != 0;
-    std::string wanted = selected ? std::string() : m_stationList->GetItemText(item).ToStdString();
-    std::string before = selectedCallsign();
-    if (!before.empty() && before != wanted && needsAskingToLetGo(before))
-    {
-        askToLetGoLater(before, wanted);
-        return;
-    }
-
     if (selected)
     {
         // Not passed on, or the list would select it straight back.
@@ -1575,29 +1541,21 @@ void TextMessagingDialog::OnMenuSelectStation(wxCommandEvent&)
     if (item < 0) return; // aged out while the menu was open
 
     bool selected = m_stationList->GetItemState(item, wxLIST_STATE_SELECTED) != 0;
-    std::string before = selectedCallsign();
-    std::string wanted = selected ? std::string() : m_menuCallsign;
-    if (!before.empty() && before != wanted && !askToLetGo(before, wanted, _("Choose Station"))) return;
-
-    item = stationItem(m_menuCallsign);
-    if (item < 0) return;
-    m_lettingGo = true;
     setStationSelected(item, !selected);
-    m_lettingGo = false;
 }
 
 void TextMessagingDialog::OnMenuRemoveStation(wxCommandEvent&)
 {
-    // Removing the selected station lets go of it.
-    bool selected = m_menuCallsign == selectedCallsign();
-    if (selected && !askToLetGo(m_menuCallsign, std::string(), _("Remove Station"))) return;
+    // Removing a station lets go of it: a Data2G session with it ends, and
+    // what is outstanding for it is dropped. Asked first while that ends a
+    // session or cancels files.
+    if (!askToLetGo(m_menuCallsign, _("Remove Station"))) return;
     if (!TextMessagingSession::instance().stations().remove(m_menuCallsign)) return;
+    TextMessagingSession::instance().protocol().releaseStation(m_menuCallsign);
 
     // The rebuild cannot restore a selection the list no longer holds, so a
     // removed selected station leaves the send button on Broadcast.
-    m_lettingGo = true;
     refreshStations();
-    m_lettingGo = false;
     setStatus(wxString::Format(_("%s removed from the station list."),
                                wxString::FromUTF8(m_menuCallsign)));
     if (uiLogEnabled()) log_info("UI: station %s removed", m_menuCallsign.c_str());
@@ -1703,37 +1661,24 @@ void TextMessagingDialog::OnChatDoubleClick(wxMouseEvent& event)
     std::string callsign = line.file ? m_fileLines[line.index].transfer.peer : stationOf(m_messages[line.index]);
     if (callsign.empty()) return;
 
-    std::string before = selectedCallsign();
-    if (!before.empty() && before != callsign && needsAskingToLetGo(before))
-    {
-        askToLetGoLater(before, callsign);
-        return;
-    }
     selectStation(callsign, true);
 }
 
-// A session with the station, or files going to or from it.
-bool TextMessagingDialog::needsAskingToLetGo(const std::string& before) const
+// Asked before letting go of a station ends a session with it or cancels
+// files going to or from it, with No the default; nothing to ask, true.
+bool TextMessagingDialog::askToLetGo(const std::string& callsign, const wxString& title)
 {
-    return !before.empty() && (sessionWith(before) || liveFilesWith(before) > 0);
-}
-
-// One question, whichever of the two it is about, with No the default.
-bool TextMessagingDialog::askToLetGo(const std::string& before, const std::string& wanted, const wxString& title)
-{
-    bool session = sessionWith(before);
-    int live = liveFilesWith(before);
+    bool session = sessionWith(callsign);
+    int live = liveFilesWith(callsign);
     if (!session && live == 0) return true;
 
-    wxString was = wxString::FromUTF8(before);
-    wxString will = wxString::FromUTF8(wanted);
+    wxString was = wxString::FromUTF8(callsign);
     wxString text;
     if (session)
     {
         text = wxString::Format(_("End the session with %s?"), was);
         text += "\n\n";
-        text += wanted.empty() ? wxString::Format(_("Letting go of %s ends it."), was)
-                               : wxString::Format(_("Choosing %s ends it."), will);
+        text += wxString::Format(_("Removing %s ends it."), was);
         if (live > 0)
         {
             text += " ";
@@ -1742,93 +1687,18 @@ bool TextMessagingDialog::askToLetGo(const std::string& before, const std::strin
                                      live, was);
         }
     }
-    else if (wanted.empty())
-    {
-        text = wxString::Format(wxPLURAL("%d file is going to or from %s. Letting go of %s cancels it. Go ahead?",
-                                         "%d files are going to or from %s. Letting go of %s cancels them. Go ahead?",
-                                         live),
-                                live, was, was);
-    }
     else
     {
-        text = wxString::Format(wxPLURAL("%d file is going to or from %s. Choosing %s lets go of %s, which "
-                                         "cancels it. Go ahead?",
-                                         "%d files are going to or from %s. Choosing %s lets go of %s, which "
-                                         "cancels them. Go ahead?",
+        text = wxString::Format(wxPLURAL("%d file is going to or from %s. Removing %s cancels it. Go ahead?",
+                                         "%d files are going to or from %s. Removing %s cancels them. Go ahead?",
                                          live),
-                                live, was, will, was);
+                                live, was, was);
     }
 
     wxMessageDialog confirm(this, text, title, wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
     bool yes = confirm.ShowModal() == wxID_YES;
-    if (uiLogEnabled()) log_info("UI: let go of %s for \"%s\"? %s", before.c_str(), wanted.c_str(), yes ? "yes" : "no");
+    if (uiLogEnabled()) log_info("UI: let go of %s? %s", callsign.c_str(), yes ? "yes" : "no");
     return yes;
-}
-
-void TextMessagingDialog::askToLetGoLater(const std::string& before, const std::string& wanted, bool putBack)
-{
-    // One question at a time; a click while it is on its way says what
-    // the operator wants.
-    if (!putBack)
-    {
-        m_letGoClicked = true;
-        m_letGoWanted = wanted;
-    }
-    if (m_letGoAsked) return;
-    m_letGoAsked = true;
-    CallAfter([this, before]() {
-        m_letGoAsked = false;
-        bool clicked = m_letGoClicked;
-        std::string chosen = m_letGoWanted;
-        m_letGoClicked = false;
-        m_letGoWanted.clear();
-
-        long keep = stationItem(before);
-        if (keep < 0 || m_mapPick != before)
-        {
-            // Gone from the list, or let go of meanwhile.
-            updateSelectionControls();
-            return;
-        }
-
-        // Whatever the list moved the selection to is put back, and that is
-        // the station the question is about.
-        bool moved = false;
-        m_restoringSelection = true;
-        for (long item = 0; item < m_stationList->GetItemCount(); item++)
-        {
-            if (item == keep || m_stationList->GetItemState(item, wxLIST_STATE_SELECTED) == 0) continue;
-            if (!moved) chosen = m_stationList->GetItemText(item).ToStdString();
-            moved = true;
-            m_stationList->SetItemState(item, 0, wxLIST_STATE_SELECTED);
-        }
-        if (m_stationList->GetItemState(keep, wxLIST_STATE_SELECTED) == 0)
-        {
-            if (!moved) chosen.clear();
-            moved = true;
-            m_stationList->SetItemState(keep, wxLIST_STATE_SELECTED, wxLIST_STATE_SELECTED);
-        }
-        m_restoringSelection = false;
-        if (!moved && !clicked) return; // the list came back by itself
-
-        if (askToLetGo(before, chosen, _("Choose Station"))) chooseStation(before, chosen);
-    });
-}
-
-// The operator has agreed: the selection moves to wanted, or is cleared.
-void TextMessagingDialog::chooseStation(const std::string& before, const std::string& wanted)
-{
-    m_lettingGo = true;
-    if (wanted.empty())
-    {
-        long item = stationItem(before);
-        if (item >= 0) setStationSelected(item, false);
-    }
-    else
-    {
-        selectStation(wanted, true);
-    }
-    m_lettingGo = false;
 }
 
 std::string TextMessagingDialog::sessionStation() const
@@ -1864,8 +1734,9 @@ void TextMessagingDialog::updateSessionPlate()
     if (up)
     {
         m_sessionText->setText(wxString::Format(_("Session with %s"), wxString::FromUTF8(station)));
-        m_sessionLamp->SetToolTip(wxString::Format(_("A Data2G session with %s is connected. Choosing another "
-                                                     "station, or none, ends it; you are asked first."),
+        m_sessionLamp->SetToolTip(wxString::Format(_("A Data2G session with %s is connected. It stays while "
+                                                     "you choose another station, or none to broadcast; "
+                                                     "Disconnect ends it."),
                                                    wxString::FromUTF8(station)));
     }
     m_stationSizer->Show(m_sessionSizer, up, true);
@@ -1879,19 +1750,7 @@ void TextMessagingDialog::OnDisconnect(wxCommandEvent&)
     std::string station = sessionStation();
     if (station.empty()) return;
 
-    long item = stationItem(station);
-    int dropped = 0;
-    if (item >= 0 && m_stationList->GetItemState(item, wxLIST_STATE_SELECTED) != 0)
-    {
-        // Letting go of the selected station is what ends its session.
-        m_lettingGo = true;
-        setStationSelected(item, false);
-        m_lettingGo = false;
-    }
-    else
-    {
-        dropped = TextMessagingSession::instance().protocol().releaseStation(station);
-    }
+    int dropped = TextMessagingSession::instance().protocol().releaseStation(station);
     setStatus(dropped > 0 ? wxString::Format(wxPLURAL("Ending the session with %s; %d message aborted.",
                                                       "Ending the session with %s; %d messages aborted.", dropped),
                                              wxString::FromUTF8(station), dropped)
@@ -2736,11 +2595,19 @@ wxString TextMessagingDialog::fileLineHtml(const FileLine& line, const Palette& 
     else if (t.outgoing)
     {
         body = escapeHtml(wxString::Format(_("%s to %s, %s bytes"), name, peer, groupDigits(t.size)));
+        if (t.resumedFrom > 0)
+        {
+            body += escapeHtml(wxString::Format(_(", carrying on from %s"), groupDigits(t.resumedFrom)));
+        }
     }
     else
     {
         body = "<b>" + escapeHtml(t.peer) + "</b> " +
                escapeHtml(wxString::Format(_("offers %s, %s bytes"), name, groupDigits(t.size)));
+        if (t.resumedFrom > 0)
+        {
+            body += escapeHtml(wxString::Format(_(", carrying on from %s"), groupDigits(t.resumedFrom)));
+        }
     }
     wxString tag = t.outgoing ? wxString::Format(_("FILE TO %s"), peer) : wxString(_("FILE"));
     return fileBubble(t.outgoing, body, tag, wxEmptyString, result ? line.endedAt : line.at, colors.text,
@@ -2906,10 +2773,21 @@ void TextMessagingDialog::updateOfferBox()
     m_offerId = id;
     if (offer != nullptr)
     {
-        m_offerText->setText(wxString::Format(_("%s offers %s (%s bytes). Save it?"),
-                                              wxString::FromUTF8(offer->transfer.peer),
-                                              wxString::FromUTF8(offer->transfer.name),
-                                              groupDigits(offer->transfer.size)));
+        const Data2G::FileTransfer& t = offer->transfer;
+        if (t.kept > 0)
+        {
+            // Part of it came before: saved to the same place, only the
+            // rest comes.
+            m_offerText->setText(wxString::Format(_("%s offers %s again (%s bytes, %s of them kept from before). "
+                                                    "Save it to carry on?"),
+                                                  wxString::FromUTF8(t.peer), wxString::FromUTF8(t.name),
+                                                  groupDigits(t.size), groupDigits(t.kept)));
+        }
+        else
+        {
+            m_offerText->setText(wxString::Format(_("%s offers %s (%s bytes). Save it?"), wxString::FromUTF8(t.peer),
+                                                  wxString::FromUTF8(t.name), groupDigits(t.size)));
+        }
     }
     m_offerBox->Show(offer != nullptr);
     Layout();
@@ -2942,11 +2820,13 @@ wxString rateText(double bytesPerSecond)
     return wxString::Format(_("%.1f kB/s"), bytesPerSecond / 1000.0);
 }
 
-// "45 s left", "12 min left".
-wxString timeLeftText(double seconds)
+// When it should be done, as a clock time and how long that is from now,
+// in one: "done about 13:43, in 13 min", "done about 13:31, in 45 s".
+wxString finishText(double seconds)
 {
-    if (seconds < 90) return wxString::Format(_("%d s left"), (int)std::ceil(seconds));
-    return wxString::Format(_("%d min left"), (int)std::ceil(seconds / 60.0));
+    wxString in = seconds < 90 ? wxString::Format(_("%d s"), (int)std::ceil(seconds))
+                               : wxString::Format(_("%d min"), (int)std::ceil(seconds / 60.0));
+    return wxString::Format(_("done about %s, in %s"), clockIn(seconds), in);
 }
 
 wxString joinMeta(const std::vector<wxString>& parts)
@@ -3061,8 +2941,7 @@ void TextMessagingDialog::describeTransfer(const FileLine& line, double now, Tra
                 double rate = (moved - shown->rateBytes) / elapsed;
                 double left = (t.size - moved) / rate;
                 meta.push_back(rateText(rate));
-                meta.push_back(timeLeftText(left));
-                meta.push_back(wxString::Format(_("ETA %s"), clockIn(left)));
+                meta.push_back(finishText(left));
             }
         }
         else
@@ -3099,8 +2978,7 @@ void TextMessagingDialog::describeTransfer(const FileLine& line, double now, Tra
                 return;
             }
             double left = (f.pieces - f.have) / ((f.have - shown->rateBytes) / elapsed);
-            meta.push_back(timeLeftText(left));
-            meta.push_back(wxString::Format(_("ETA %s"), clockIn(left)));
+            meta.push_back(finishText(left));
         };
         if (f.outgoing)
         {
@@ -3234,11 +3112,19 @@ void TextMessagingDialog::OnOfferSave(wxCommandEvent&)
     Data2G::FileTransfer offer = line->transfer;
 
     wxString folder = frame->chatReceivedFilesFolder();
+    wxString name = wxString::FromUTF8(offer.name);
+    if (offer.kept > 0)
+    {
+        // Where it was going before, so it carries on there.
+        wxFileName kept(wxString::FromUTF8(offer.keptPath));
+        folder = kept.GetPath();
+        name = kept.GetFullName();
+    }
     if (!wxDirExists(folder)) wxFileName::Mkdir(folder, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
 
     wxFileDialog dialog(this, wxString::Format(_("Save %s from %s"), wxString::FromUTF8(offer.name),
                                                wxString::FromUTF8(offer.peer)),
-                        folder, wxString::FromUTF8(offer.name), wxFileSelectorDefaultWildcardStr,
+                        folder, name, wxFileSelectorDefaultWildcardStr,
                         wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
     if (dialog.ShowModal() != wxID_OK)
     {
@@ -3320,16 +3206,9 @@ void TextMessagingDialog::sendFileTo(const std::string& callsign)
         if (confirm.ShowModal() != wxID_YES) return;
     }
 
-    std::string before = selectedCallsign();
-    if (!before.empty() && before != callsign && !askToLetGo(before, callsign, _("Send File"))) return;
     long item = stationItem(callsign);
     if (item < 0) return; // aged out while the dialogs were open
-    if (m_stationList->GetItemState(item, wxLIST_STATE_SELECTED) == 0)
-    {
-        m_lettingGo = true;
-        setStationSelected(item, true);
-        m_lettingGo = false;
-    }
+    if (m_stationList->GetItemState(item, wxLIST_STATE_SELECTED) == 0) setStationSelected(item, true);
 
     wxString error;
     if (frame->chatSendFile(callsign, path, error) == 0)

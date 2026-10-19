@@ -170,8 +170,8 @@ group, so the protocol stands aside (Jeff, 2026-10-08):
 - **Cancelling.** A message the app has not yet written into the session
   can be cancelled, and is dropped when sending is inhibited (outside the
   US data segments). One already written is the modem's to finish: it
-  ends OK or NO ACK as the modem decides. Deselecting the station (below)
-  ends the session itself.
+  ends OK or NO ACK as the modem decides. Disconnect, or removing the
+  station (below), ends the session itself.
 
 An older data2g-host (before PR #51) reports only 1 for "something is
 unacknowledged". The app tells the two apart from the first `BUFFER` after
@@ -192,33 +192,37 @@ How the session itself runs:
   and the frame, so a stream from a program that is not Glissando is told
   apart and the session dropped.
 - A session the app opened is closed once nothing of ours is waiting on
-  it and nothing has gone either way for 45 s, or straight away when
-  something for another station, or for the group, is waiting (a group
-  keying the host holds counts). data2g-host sends no broadcasts during a
-  session, or since PR #59 only while it is idle. A session the far end
-  opened is left to it, unless something else has waited 45 s.
-- Deselecting the station in the call roster (clicking it again, picking
-  another station, or removing it) ends the session with it at once and
-  aborts every message and ping still outstanding for it, so the group is
-  free for broadcasts straight away. With nothing of ours unacknowledged
-  the app sends `DISCONNECT`, which tells the far end; otherwise `ABORT`,
-  since `DISCONNECT` would wait for the acknowledgements, and the far end
-  then finds the session gone when it stops hearing us. Over Glissando's
-  own modem deselecting changes nothing, as before.
-- **Harder to drop by accident** (Jeff, 2026-10-09). While a session is
-  connected with the selected station, anything that would change or
-  clear the selection asks first, **End the session with W1AW?**, with No
-  the default: clicking the selected station again, picking another,
-  Deselect Station or Remove in its menu, Send File to another station,
-  a double click on another station's line in the chat, or the keyboard.
-  The same question covers files going to or from the station (it says
-  they are cancelled); with files but no session it asks only about the
-  files, as before. A single click on a chat line no longer selects its
+  it and nothing has gone either way for 45 s. A session the far end
+  opened is left to it, unless something for another station or for the
+  group is waiting (a group keying the host holds counts, and so does a
+  group file of ours, except while a repair window is open or the next
+  one is not due) and nothing has gone either way for 45 s.
+  data2g-host sends no broadcasts during a session, or since PR #59 only
+  while it is idle. Until 2026-10-19 a session the app opened closed the
+  moment something else was waiting, even while the far end was still
+  sending into it: in deep fading, with a group file of ours being
+  served, KC2G kept being disconnected mid-message.
+- Choosing another station in the call roster, or none to broadcast,
+  leaves the session alone (Jeff, 2026-10-19; before, it ended the
+  session and asked first every time, which got in the way of a
+  broadcast in the middle of a QSO). Since data2g-host PR #59 the host
+  sends a broadcast while the session is idle, so there is no need to
+  let go of it. A session we opened still closes by itself when the
+  broadcast waits, as above, and the next message to the station opens
+  another; one the far end opened waits for the 45 s.
+- **Disconnect** on the station plate, or **Remove** in the station's
+  menu, ends the session with it at once and aborts every message and
+  ping still outstanding for it. Remove asks first, **End the session
+  with W1AW?**, with No the default; Disconnect doesn't. With nothing of
+  ours unacknowledged the app sends `DISCONNECT`, which tells the far
+  end; otherwise `ABORT`, since `DISCONNECT` would wait for the
+  acknowledgements, and the far end then finds the session gone when it
+  stops hearing us. A single click on a chat line doesn't select its
   station; a double click does.
 - While a session is connected, the station plate shows a lit
   **CONNECTED** lamp, "Session with W1AW" under it, and **Disconnect**,
-  which ends the session at once without asking (it lets go of the station
-  if it is selected, and otherwise releases it directly). The far end of a
+  which ends the session at once without asking and leaves the selection
+  as it is. The far end of a
   session goes on the heard-station list as soon as it connects (a
   station that calls us after our CQ may not have sent a chat frame yet),
   with no SNR, and is never aged off it while the session lasts. With Data2G off there is never a session, so none of this
@@ -243,9 +247,7 @@ Glissando's own modem. A file to everybody on the group is below.
 File...** (dark, with a line under it saying why, unless Data2G is the
 chat modem with sessions on and data2g-host's ports are up). The file
 picked is queued for the station, which is then selected, as for a
-message. A file over 100 kB asks first, and so does selecting the station
-when a file is still going to or from the one selected before, as letting
-go of that one cancels it. The session opens as for a message, and the
+message. A file over 100 kB asks first. The session opens as for a message, and the
 offer is the first thing written into it. One file goes to a station at
 a time; another waits its turn. The chat shows a line when it starts,
 `FRED.TXT to W1AW, 7,000 bytes`, and another when it ends: `FRED.TXT:
@@ -294,6 +296,8 @@ transfer.
 | 4 Data | sender | the next piece of the file, in order, up to 4,096 bytes |
 | 5 Saved | receiver | (the file is on disk under its name: this, not the modem's acknowledgement, is delivery) |
 | 6 Cancel | either | a reason: 1 stopped, 2 couldn't read, 3 expired from the sender; the same with the top bit set (0x81 to 0x83) from the receiver |
+| 7 Fingerprint | sender | the file's SHA-256, first 8 bytes; written just before the Offer (added after 0.9.8) |
+| 8 AcceptFrom | receiver | the bytes it already has (4 bytes, big-endian): Accept, but send only the rest (added after 0.9.8) |
 
 Each station numbers its own transfers; the reason's top bit says whose
 transfer a Cancel ends. Records of a type it doesn't know are ignored, so
@@ -322,22 +326,41 @@ When things go wrong:
   doesn't fire, on either side. An offer unanswered for 4 minutes expires
   on both sides (each side's clock, and a Cancel saying so).
 - The session lost mid-file: `failed` on both sides (why is in the
-  status line), and the receiver deletes its `.part`. No resume in this
-  version.
-- The sender cancels: no more pieces, and a Cancel; the receiver deletes
-  what it has and drops pieces that still come after it. Cancelled once
+  status line). The receiver keeps its `.part` (below).
+- The sender cancels: no more pieces, and a Cancel; the receiver keeps
+  what it has (below) and drops pieces that still come after it. Cancelled once
   every piece is written, the receiver may have saved it already; then
   it ignores the Cancel, and its Saved, crossing it, shows `delivered`.
 - The receiver cancels: a Cancel back; the sender stops and shows
   `cancelled by W1AW`.
-- Deselecting the station ends the session at once, as before, and its
-  files are cancelled on our side. With nothing of ours unacknowledged,
+- Disconnect, or removing the station, ends the session at once and
+  cancels its files on our side. With nothing of ours unacknowledged,
   a Cancel for each file offered in the session goes first, and the
   `DISCONNECT` once data2g-host has read it, so the far end shows
   `cancelled by VK3ABC` (an offer it made, still unanswered, included);
-  otherwise `ABORT`, and the far end sees the session gone. Anything that
-  would choose another station asks first while files are going to or
-  from the one chosen now, in the same question as a session's (above).
+  otherwise `ABORT`, and the far end sees the session gone. Removing the
+  station asks first while files are going to or from it, in the same
+  question as a session's (above). Choosing another station leaves them
+  going.
+- **Carrying on** (Jeff, 2026-10-19). A file that ends unfinished on
+  the receiving side, however it ends (the session lost, either side
+  cancelling, Disconnect), keeps its `.part` file, as a group file keeps
+  its pieces. When the same station offers the same file again (the
+  same size and Fingerprint), the offer box says `W1AW offers FRED.TXT
+  again (7,000 bytes, 4,096 of them kept from before). Save it to carry
+  on?`, and Save as... opens where it was going. Saved there, the
+  receiver answers AcceptFrom with what it has, and only the rest comes;
+  both chat lines say `carrying on from 4,096`. From a station on the
+  auto-accept list it carries on without asking. Saved anywhere else, it
+  starts again and the kept part goes. A part file is kept for a day,
+  eight at most (the oldest going first), and only while Glissando runs:
+  closing it deletes them. Nothing is kept of a file that could not be
+  written, or that came from a Glissando of 0.9.8 or older (no
+  Fingerprint), and it starts again if the kept part changed on disk.
+  Once all of it is in, the receiver checks the whole file against the
+  Fingerprint before saving it; a mismatch fails it (`did not match what
+  W1AW sent`). Both stations need this version to carry on; with an
+  older one either way, the file goes from the start as before.
 - A station running an older Glissando takes the `F` for a stream that
   isn't chat and closes the session. A session the far end ends while our
   offer is unanswered so shows `failed: their Glissando can't take
@@ -540,12 +563,14 @@ bone for what has been written). Both move every 256 bytes, inside a
 4,096-byte piece as well as at its end: the sender counts the bytes of
 the piece the far end's modem has acknowledged, the receiver the bytes
 of the piece that have arrived before the piece is whole. Its figures are
-the bytes, the rate since bytes began to move, the time left at that
-rate, and the clock time it should be done (`ETA 14:32`). A group file's bar has a segment per piece: lit
+the bytes, the rate since bytes began to move, and when it should be
+done at that rate, as a clock time and how long from now in one item
+(`done about 14:32, in 13 min`; until 2026-10-19 these were two items,
+`13 min left` and `ETA 14:32`, which read as two different things). A group file's bar has a segment per piece: lit
 when held (or, ours, sent), dark red where one was missed (passed by in
 the stream, or still lacking once a window opens; ours, the pieces the
 round's Grant resends), dark where none has come yet. Its figures are
-the pieces, the time left and ETA at the pieces' pace so far (ours,
+the pieces, when it should be done at the pieces' pace so far (ours,
 while the stream goes; theirs, until all have come), the tempo, and
 until when the sender serves repairs. A
 finished transfer keeps its row for 30 seconds saying how it ended, then
@@ -616,7 +641,8 @@ sitting, the glasses lowered now and then.
   directed message through a session settled by the modem with no chat
   acknowledgement, three messages each settled as its bytes are
   acknowledged, an older host settling them together, a lost session
-  failing a message, a ping through a session, deselecting the station
+  failing a message, a ping through a session, a session we opened staying
+  open 45 s for the far end with a broadcast waiting, releasing the station
   ending its session (ABORT with messages outstanding, DISCONNECT without), a station without sessions
   getting the group instead, a lost command port, and a callsign change
   reopening the group; a broadcast held by a session (the fake host holds
@@ -630,7 +656,7 @@ sitting, the glasses lowered now and then.
   without asking, a message overtaking a large file, a message whose read
   is answered together with an acknowledgement, counts sent before the host
   reads a piece settling nothing of it, an offer crossing the far end's
-  DISCONNECT, deselecting the station mid-file, a far end running an older
+  DISCONNECT, releasing the station mid-file, a far end running an older
   Glissando, a lost command port failing an offer, two files for one
   station going in turn, a file through an older host, and an offer
   expiring on one side's clock. Clean under ThreadSanitizer.
@@ -644,7 +670,11 @@ sitting, the glasses lowered now and then.
   hostile name, direction controls in a name, a part file of the
   operator's left alone, two files refused one name, auto-accept never
   overwriting, a receiver that can't write, more data than offered, and
-  releasing the station; and what the chat window shows besides the
+  releasing the station; carrying on after a lost session with only the
+  rest sent, saved elsewhere starting again, a changed file or a kept
+  part cut short starting again, carrying on under auto-accept, nothing
+  kept from an older sender, and a kept part gone after a day; and what
+  the chat window shows besides the
   state, how long an offer has left and how much of a file has been
   handed to the modem.
   `TextMessagingProtocolTest` covers the protocol's side against a fake

@@ -1244,19 +1244,21 @@ void Data2GTransport::run(Settings settings)
             }
 
             // Nothing of ours left in it: one we opened closes once it has
-            // been quiet a while, or at once if something else is waiting
-            // (data2g-host holds the group during a session, all of it or
-            // until the session idles); one the far end opened is left to
-            // it, unless something else has waited a while.
+            // been quiet a while; one the far end opened is left to it,
+            // unless something else is waiting (data2g-host holds the group
+            // during a session, all of it or until the session idles) and it
+            // has been quiet as long. Never at once: the far end may still
+            // be sending, and in deep fading its frames take a while to get
+            // through.
             // A file under way with the station, or an offer waiting for an
             // answer either way, keeps it open.
             bool forPeer = std::any_of(sessionKeyings_.begin(), sessionKeyings_.end(),
                                        [&](const SessionKeying& k) { return k.peer == sessionPeer_; }) ||
                            files_.busyWith(sessionPeer_);
-            bool otherWork = groupWaiting || groupFiles_.wantsGroup() || unwrittenFor(sessionPeer_, true) ||
+            bool otherWork = groupWaiting || groupFiles_.wantsGroup(t) || unwrittenFor(sessionPeer_, true) ||
                              (fileWaiting && filePeer != sessionPeer_);
             bool idle = t - sessionActivityMs_ >= SESSION_IDLE_MS;
-            bool close = !forPeer && (sessionOurs_ ? otherWork || idle : otherWork && idle);
+            bool close = !forPeer && idle && (sessionOurs_ || otherWork);
             if (close && !commandPending(Command::Kind::Disconnect))
             {
                 session_ = SessionState::Disconnecting;
