@@ -192,11 +192,16 @@ How the session itself runs:
   and the frame, so a stream from a program that is not Glissando is told
   apart and the session dropped.
 - A session the app opened is closed once nothing of ours is waiting on
-  it and nothing has gone either way for 45 s, or straight away when
-  something for another station, or for the group, is waiting (a group
-  keying the host holds counts). data2g-host sends no broadcasts during a
-  session, or since PR #59 only while it is idle. A session the far end
-  opened is left to it, unless something else has waited 45 s.
+  it and nothing has gone either way for 45 s. A session the far end
+  opened is left to it, unless something for another station or for the
+  group is waiting (a group keying the host holds counts, and so does a
+  group file of ours, except while a repair window is open or the next
+  one is not due) and nothing has gone either way for 45 s.
+  data2g-host sends no broadcasts during a session, or since PR #59 only
+  while it is idle. Until 2026-10-19 a session the app opened closed the
+  moment something else was waiting, even while the far end was still
+  sending into it: in deep fading, with a group file of ours being
+  served, KC2G kept being disconnected mid-message.
 - Choosing another station in the call roster, or none to broadcast,
   leaves the session alone (Jeff, 2026-10-19; before, it ended the
   session and asked first every time, which got in the way of a
@@ -614,7 +619,8 @@ sitting, the glasses lowered now and then.
   directed message through a session settled by the modem with no chat
   acknowledgement, three messages each settled as its bytes are
   acknowledged, an older host settling them together, a lost session
-  failing a message, a ping through a session, releasing the station
+  failing a message, a ping through a session, a session we opened staying
+  open 45 s for the far end with a broadcast waiting, releasing the station
   ending its session (ABORT with messages outstanding, DISCONNECT without), a station without sessions
   getting the group instead, a lost command port, and a callsign change
   reopening the group; a broadcast held by a session (the fake host holds

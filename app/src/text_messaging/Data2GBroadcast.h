@@ -407,7 +407,7 @@ public:
 
     // Anything of ours that wants the group soon, so a session of ours
     // should not stay open idle.
-    bool wantsGroup() const;
+    bool wantsGroup(uint64_t nowMs) const;
 
     // The transport stopped: a file of ours ends; nothing is transmitted.
     void stopAll(const std::string& why);
