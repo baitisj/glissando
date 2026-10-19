@@ -2801,11 +2801,13 @@ wxString rateText(double bytesPerSecond)
     return wxString::Format(_("%.1f kB/s"), bytesPerSecond / 1000.0);
 }
 
-// "45 s left", "12 min left".
-wxString timeLeftText(double seconds)
+// When it should be done, as a clock time and how long that is from now,
+// in one: "done about 13:43, in 13 min", "done about 13:31, in 45 s".
+wxString finishText(double seconds)
 {
-    if (seconds < 90) return wxString::Format(_("%d s left"), (int)std::ceil(seconds));
-    return wxString::Format(_("%d min left"), (int)std::ceil(seconds / 60.0));
+    wxString in = seconds < 90 ? wxString::Format(_("%d s"), (int)std::ceil(seconds))
+                               : wxString::Format(_("%d min"), (int)std::ceil(seconds / 60.0));
+    return wxString::Format(_("done about %s, in %s"), clockIn(seconds), in);
 }
 
 wxString joinMeta(const std::vector<wxString>& parts)
@@ -2920,8 +2922,7 @@ void TextMessagingDialog::describeTransfer(const FileLine& line, double now, Tra
                 double rate = (moved - shown->rateBytes) / elapsed;
                 double left = (t.size - moved) / rate;
                 meta.push_back(rateText(rate));
-                meta.push_back(timeLeftText(left));
-                meta.push_back(wxString::Format(_("ETA %s"), clockIn(left)));
+                meta.push_back(finishText(left));
             }
         }
         else
@@ -2958,8 +2959,7 @@ void TextMessagingDialog::describeTransfer(const FileLine& line, double now, Tra
                 return;
             }
             double left = (f.pieces - f.have) / ((f.have - shown->rateBytes) / elapsed);
-            meta.push_back(timeLeftText(left));
-            meta.push_back(wxString::Format(_("ETA %s"), clockIn(left)));
+            meta.push_back(finishText(left));
         };
         if (f.outgoing)
         {

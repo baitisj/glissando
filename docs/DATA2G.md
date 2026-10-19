@@ -543,12 +543,14 @@ bone for what has been written). Both move every 256 bytes, inside a
 4,096-byte piece as well as at its end: the sender counts the bytes of
 the piece the far end's modem has acknowledged, the receiver the bytes
 of the piece that have arrived before the piece is whole. Its figures are
-the bytes, the rate since bytes began to move, the time left at that
-rate, and the clock time it should be done (`ETA 14:32`). A group file's bar has a segment per piece: lit
+the bytes, the rate since bytes began to move, and when it should be
+done at that rate, as a clock time and how long from now in one item
+(`done about 14:32, in 13 min`; until 2026-10-19 these were two items,
+`13 min left` and `ETA 14:32`, which read as two different things). A group file's bar has a segment per piece: lit
 when held (or, ours, sent), dark red where one was missed (passed by in
 the stream, or still lacking once a window opens; ours, the pieces the
 round's Grant resends), dark where none has come yet. Its figures are
-the pieces, the time left and ETA at the pieces' pace so far (ours,
+the pieces, when it should be done at the pieces' pace so far (ours,
 while the stream goes; theirs, until all have come), the tempo, and
 until when the sender serves repairs. A
 finished transfer keeps its row for 30 seconds saying how it ended, then
