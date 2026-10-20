@@ -249,6 +249,7 @@ Data2GTransport::Data2GTransport()
     , hasKeying_(false)
     , keyingLost_(false)
     , callsignChanged_(false)
+    , bandwidthChanged_(false)
     , session_(SessionState::None)
     , sessionOurs_(false)
     , sessionActivityMs_(0)
@@ -401,6 +402,7 @@ void Data2GTransport::setNarrowModesOnly(bool narrowOnly)
     std::lock_guard<std::mutex> lock(mutex_);
     if (narrowOnly == narrowOnly_) return;
     narrowOnly_ = narrowOnly;
+    bandwidthChanged_ = true;
     updateModesLocked();
 }
 
@@ -877,14 +879,18 @@ void Data2GTransport::run(Settings settings)
         else
         {
             lines.reset();
+            bool narrow = false;
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 status_.commandConnected = true;
                 myCall = myCallsign_;
                 callsignChanged_ = false;
+                narrow = narrowOnly_;
+                bandwidthChanged_ = false;
             }
-            // Who we are, sessions answered, our group opened (naming us in
-            // every burst), and the modes this host offers.
+            // Who we are, sessions answered, sessions kept to 500 Hz modes
+            // if asked, our group opened (naming us in every burst), and the
+            // modes this host offers.
             if (!myCall.empty())
             {
                 queueCommand(Command::Kind::Plain, "MYCALL " + myCall);
@@ -894,6 +900,7 @@ void Data2GTransport::run(Settings settings)
                     queueCommand(Command::Kind::Plain, "LISTEN ON");
                 }
             }
+            if (narrow) queueCommand(Command::Kind::Plain, "BW500");
             std::string open = std::string("BCAST OPEN ") + Data2G::GROUP;
             if (!myCall.empty()) open += " FROM " + myCall;
             queueCommand(Command::Kind::BcastOpen, open);
@@ -1128,6 +1135,16 @@ void Data2GTransport::run(Settings settings)
             lock.unlock();
             closeSocket_(command, "callsign changed");
             return;
+        }
+
+        // "500 Hz wide modes only" switched: BW500 keeps the sessions
+        // data2g-host connects inside 500 Hz and narrows its MODES; BW2300
+        // lifts the cap. MODES again for the list that now applies.
+        if (bandwidthChanged_ && command.fd >= 0)
+        {
+            bandwidthChanged_ = false;
+            queueCommand(Command::Kind::Plain, narrowOnly_ ? "BW500" : "BW2300");
+            queueCommand(Command::Kind::Modes, "MODES");
         }
 
         // A station the operator let go of: its session ends now. A clean

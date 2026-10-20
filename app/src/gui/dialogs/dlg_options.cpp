@@ -373,7 +373,7 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     m_ckboxData2GNarrowModes->SetToolTip(
         _("Every tempo, and files to the GLISS group, use Data2G's modes no wider than 500 Hz: Adagio and "
           "Andante as before, Allegro, Presto and Duet in the 500 Hz OFDM modes. For a narrow filter or a "
-          "crowded band. Sessions negotiate their own modes in data2g-host."));
+          "crowded band. data2g-host is told BW500, so the sessions it opens stay within 500 Hz too."));
     sbSizer_textChat->Add(m_ckboxData2GNarrowModes, 0, static_cast<int>(wxLEFT | wxTOP) | wxALIGN_LEFT, 25);
 
     // Files through a session: where they are saved, and from whom they
