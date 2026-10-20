@@ -53,6 +53,71 @@ python3 bench.py --backend pulse --null-sink --gears 4 --snr -16 -14 -12
 python3 -m pytest                    # tests (the PulseAudio test skips without a server)
 ```
 
+## Building the app
+
+The desktop app builds on Linux with CMake. These steps are tested on
+Ubuntu 24.04; other distributions need the same libraries under their own
+package names. [docs/APP.md](docs/APP.md) has the details, the Windows
+cross-compile and the AppImage.
+
+Install the build tools and libraries (Debian or Ubuntu):
+
+```sh
+sudo apt install build-essential cmake git autoconf automake libtool \
+    libwxgtk3.2-dev libgtk-3-dev libpulse-dev libspeexdsp-dev libsndfile1-dev \
+    libhamlib-dev libasound2-dev libao-dev libgsm1-dev
+```
+
+`libgtk-3-dev` is easy to miss: without it the build still succeeds, but the
+console quietly forgets where you left its windows.
+
+Configure, build and run, from the top of the repository:
+
+```sh
+cmake -S app -B build-release -DUSE_NATIVE_AUDIO=1 -DCMAKE_BUILD_TYPE=Release
+cmake --build build-release -j$(nproc)
+./build-release/src/glissando
+```
+
+Always give a build type. Without `-DCMAKE_BUILD_TYPE=Release` the build is
+Debug, and an unoptimised receiver cannot keep up with listening on every
+tempo at once. The first configure clones libsamplerate from GitHub, so it
+needs a network connection.
+
+**Clean rebuild.** After pulling a large change, or if the app misbehaves
+after an update, delete the build directory and build again from scratch:
+
+```sh
+rm -rf build-release
+cmake -S app -B build-release -DUSE_NATIVE_AUDIO=1 -DCMAKE_BUILD_TYPE=Release
+cmake --build build-release -j$(nproc)
+```
+
+This leaves your settings (`~/.glissando.conf`) and chat history alone.
+
+**Tests.** Add `-DUNITTEST=ON` when configuring, then run only the Glissando
+and chat tests (some tests inherited from FreeDV hang):
+
+```sh
+cmake -S app -B build-release -DUSE_NATIVE_AUDIO=1 -DCMAKE_BUILD_TYPE=Release -DUNITTEST=ON
+cmake --build build-release -j$(nproc)
+ctest --test-dir build-release -R "glissando|text_messaging" --output-on-failure
+```
+
+The C++ modem also builds and tests on its own, with no wxWidgets or codec2:
+
+```sh
+cmake -S modem -B build-modem -DUNITTEST=ON
+cmake --build build-modem -j$(nproc)
+ctest --test-dir build-modem --output-on-failure
+```
+
+**Compilers.** Most of the app and the modem are built with
+`-Wall -Wextra -Werror`, so any warning stops the build. A compiler newer
+than the one CI uses (GCC 13 on Ubuntu 24.04) can find warnings CI never
+saw, and the build then fails on code that is otherwise fine. Please report
+it with the compiler version and the first error line.
+
 ## Scales
 
 The alphabet of eight notes is a parameter (`--scale` on `sim.py` and
