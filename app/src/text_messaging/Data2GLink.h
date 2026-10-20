@@ -100,6 +100,12 @@ const std::vector<ModeInfo>& knownModes();
 // a fast 2.3 kHz one; a host capped at 500 Hz gets narrow modes throughout.
 ModeInfo modeForGear(int gear, const std::vector<ModeInfo>& offered);
 
+// The operator's "500 Hz wide modes only": of the modes offered (or, none
+// listed yet, the known ones), those no wider than this. The tempos' own
+// choices then fall to their narrow ones.
+constexpr int NARROW_MODE_MAX_HZ = 500;
+std::vector<ModeInfo> narrowModes(const std::vector<ModeInfo>& offered);
+
 // Protocol timers for chat sent in a mode: a whole keying is one Data2G
 // burst, decoded once all of it has arrived. The command port's PTT, BUSY
 // and transmitted reports keep the protocol from waiting on these in the

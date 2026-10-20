@@ -171,6 +171,20 @@ void testTemposMapToModes()
     }
     CHECK(Data2G::modeForGear(5, narrow).name == "n10-16qam-r1/2");
 
+    // The operator's 500 Hz wide modes only, from a wide host's list or
+    // the known one: each tempo falls to its narrow choice.
+    for (const auto& offered : {full, std::vector<Data2G::ModeInfo>()})
+    {
+        std::vector<Data2G::ModeInfo> only = Data2G::narrowModes(offered);
+        CHECK(!only.empty());
+        for (const Data2G::ModeInfo& mode : only) CHECK(mode.bandwidthHz <= Data2G::NARROW_MODE_MAX_HZ);
+        CHECK(Data2G::modeForGear(1, only).name == "fsk16r25-r1/3");
+        CHECK(Data2G::modeForGear(2, only).name == "fsk8r50-r1/3");
+        CHECK(Data2G::modeForGear(3, only).name == "n10-qpsk-r1/3");
+        CHECK(Data2G::modeForGear(4, only).name == "n10-qpsk-r1/2");
+        CHECK(Data2G::modeForGear(5, only).name == "n10-16qam-r1/2");
+    }
+
     // Slower tempos take longer on the air, and wait longer for an answer.
     std::vector<int> message(1, TEXT_FRAME_BYTES);
     double previous = 1e9;
@@ -1024,6 +1038,13 @@ void testDuetUsesAFastWideModeOrTheNarrowHostsBest()
     Station b("VK3ABC", hosts.sides[1], 5);
     CHECK(settled(hosts, a, b));
     CHECK(waitFor([&]() { return b.transport.modeForGear(5).name == "n10-16qam-r1/2"; }));
+    CHECK(a.transport.modeForGear(5).name == "w48-16qam-r1/2");
+
+    // The operator asks for 500 Hz wide modes only, and then not.
+    a.transport.setNarrowModesOnly(true);
+    CHECK(a.transport.modeForGear(5).name == "n10-16qam-r1/2");
+    CHECK(a.transport.modeForGear(3).name == "n10-qpsk-r1/3");
+    a.transport.setNarrowModesOnly(false);
     CHECK(a.transport.modeForGear(5).name == "w48-16qam-r1/2");
 
     std::string error;

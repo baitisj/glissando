@@ -368,6 +368,14 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
           "message goes to the GLISS group instead. Unchecked, everything goes to the group."));
     sbSizer_textChat->Add(m_ckboxData2GSessions, 0, static_cast<int>(wxLEFT) | wxALIGN_LEFT, 25);
 
+    m_ckboxData2GNarrowModes = new wxCheckBox(sb_textChat, wxID_ANY, _("500 Hz wide modes only"), wxDefaultPosition,
+                                              wxDefaultSize, wxCHK_2STATE);
+    m_ckboxData2GNarrowModes->SetToolTip(
+        _("Every tempo, and files to the GLISS group, use Data2G's modes no wider than 500 Hz: Adagio and "
+          "Andante as before, Allegro, Presto and Duet in the 500 Hz OFDM modes. For a narrow filter or a "
+          "crowded band. Sessions negotiate their own modes in data2g-host."));
+    sbSizer_textChat->Add(m_ckboxData2GNarrowModes, 0, static_cast<int>(wxLEFT | wxTOP) | wxALIGN_LEFT, 25);
+
     // Files through a session: where they are saved, and from whom they
     // are taken without asking.
     wxFlexGridSizer* filesSizer = new wxFlexGridSizer(2, 5, 5);
@@ -643,6 +651,7 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         m_txtData2GKissPort->SetValue(wxString::Format("%d", wxGetApp().appConfiguration.data2gKissPort.get()));
         m_txtData2GCommandPort->SetValue(wxString::Format("%d", wxGetApp().appConfiguration.data2gCommandPort.get()));
         m_ckboxData2GSessions->SetValue(wxGetApp().appConfiguration.data2gSessions);
+        m_ckboxData2GNarrowModes->SetValue(wxGetApp().appConfiguration.data2gNarrowModesOnly);
         m_dirData2GReceivedFiles->SetPath(wxGetApp().frame != nullptr
                                               ? wxGetApp().frame->chatReceivedFilesFolder()
                                               : (wxString)wxGetApp().appConfiguration.data2gReceivedFilesFolder);
@@ -740,6 +749,7 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         wxGetApp().appConfiguration.data2gKissPort = port(m_txtData2GKissPort, 8100);
         wxGetApp().appConfiguration.data2gCommandPort = port(m_txtData2GCommandPort, 8300);
         wxGetApp().appConfiguration.data2gSessions = m_ckboxData2GSessions->GetValue();
+        wxGetApp().appConfiguration.data2gNarrowModesOnly = m_ckboxData2GNarrowModes->GetValue();
         wxString receivedFiles = m_dirData2GReceivedFiles->GetPath().Strip(wxString::both);
         if (!receivedFiles.IsEmpty()) wxGetApp().appConfiguration.data2gReceivedFilesFolder = receivedFiles;
         wxGetApp().appConfiguration.data2gAutoAcceptFilesFrom =
@@ -1064,6 +1074,7 @@ void OptionsDlg::updateData2GControls_()
     m_txtData2GKissPort->Enable(on);
     m_txtData2GCommandPort->Enable(on);
     m_ckboxData2GSessions->Enable(on);
+    m_ckboxData2GNarrowModes->Enable(on);
     m_dirData2GReceivedFiles->Enable(on);
     m_txtData2GAutoAcceptFiles->Enable(on);
     m_ckboxData2GReceiveGroupFiles->Enable(on);

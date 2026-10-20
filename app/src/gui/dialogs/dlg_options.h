@@ -132,6 +132,7 @@ class OptionsDlg : public wxDialog
         wxTextCtrl*  m_txtData2GKissPort;
         wxTextCtrl*  m_txtData2GCommandPort;
         wxCheckBox*  m_ckboxData2GSessions;
+        wxCheckBox*  m_ckboxData2GNarrowModes;
         wxDirPickerCtrl* m_dirData2GReceivedFiles;
         wxTextCtrl*  m_txtData2GAutoAcceptFiles;
         wxCheckBox*  m_ckboxData2GReceiveGroupFiles;

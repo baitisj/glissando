@@ -82,6 +82,7 @@ public:
     ConfigurationDataElement<int> data2gKissPort;
     ConfigurationDataElement<int> data2gCommandPort;
     ConfigurationDataElement<bool> data2gSessions;
+    ConfigurationDataElement<bool> data2gNarrowModesOnly;
 
     // Files through a Data2G session: where received ones are saved (empty
     // for the default under Documents), kept as the folder last saved to;
