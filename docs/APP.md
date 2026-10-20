@@ -173,9 +173,21 @@ A Glissando frame carries 77 bits. `modem/GlissandoLink.h` cuts each
 chat burst (a 14 byte signalling frame or a 54 byte text frame) into 9 byte
 segments with a 5 bit header (mode, index, last), dropping trailing zero
 padding, so a short message costs fewer frames. The duet gear carries two
-segments per frame. The receiver puts segments back together in order; a
-missing segment loses the burst and the chat protocol retries it, as it does
-a faded codec2 burst.
+segments per frame. The receiver puts segments back together in order.
+
+A segment lost to a fade no longer loses the whole burst. HamText codes
+never cross a segment, so each segment's text reads on its own, and a text
+burst that arrives with its first two segments (the header: who sent it, and
+which message and fragment it is) is shown once the keying ends, with "..."
+where a segment is missing, as JTTY prints a message with a frame lost. A
+message to us still counts that fragment as missing, and at the end of the
+keying the sender is asked for it as before. When the retry comes the copies
+are merged, each filling the other's gaps (`PartialCopies`), and the chat
+line fills in where it stands; it can read whole before any one copy
+arrives whole. A segment decoded late, from under another station's frame,
+fills its gap too. Pings, pongs and acknowledgements are not read in part.
+Nothing changes on the air, so this works whatever the sender runs; the
+log says `partial copy (segments missing)` for such a burst.
 
 A Glissando burst takes tens of seconds, so the protocol's timers
 (acknowledgement timeout, reservation for fragments still to come, reply

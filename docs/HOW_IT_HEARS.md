@@ -29,7 +29,10 @@ the opening chord, in [GlissandoChord.cpp](../modem/GlissandoChord.cpp).
 Lesson 7 returns to it, for the bits a receiver can guess before it
 decodes, and Lesson 8 is about the chat text itself: how the ham table and
 Huffman coding spend fewer bits on it. Lesson 9 adds up the copies of a
-frame that is sent more than once (all October 2026).
+frame that is sent more than once. Lessons 10 to 12 take three ideas from
+JTTY, the keyboard mode in WSJT-X 3.2: trying the decoder's runners-up,
+taking decoded frames out of the audio to hear what was under them, and
+showing a message with a segment missing (all October 2026).
 
 ## Lesson 1: a matched filter is a stencil
 
@@ -339,8 +342,8 @@ the air. Teal bits are guessed; white bits must be decoded.*
 
 **The CRC is the referee.** A guess is never simply trusted. The receiver
 first decodes the frame with no guesses. Only if the CRC fails does it try
-each guess in turn ([GlissandoDemod.cpp
-L1068–L1083](../modem/GlissandoDemod.cpp#L1068-L1083)). A wrong guess
+each guess in turn (`decodeWithGuesses()` in
+[GlissandoDemod.cpp](../modem/GlissandoDemod.cpp)). A wrong guess
 forces the decoder onto wrong answers, and the 14-bit CRC rejects the result
 16,383 times in 16,384. That last 1 in 16,384 is the price: every guess is
 another lottery ticket for pure noise to pass the CRC. So the receiver holds
@@ -558,6 +561,155 @@ its share. And each copy must still be found on its own: the sync search of
 Lesson 3 has to pick it out of the noise before there is anything to stack.
 A slower "Largo" gear, on the roadmap, could stack copies whose timing is
 already known, which avoids the second loss.
+
+## Lesson 10: the runners-up, and a referee who knows the rules
+
+Lesson 7 ended with the CRC as referee: the decoder picks the single most
+likely 91 bits, and the 14-bit CRC says yes or no. When it says no, the
+frame used to be lost. JTTY, the keyboard mode in WSJT-X 3.2, does
+something better, and Glissando now does it too.
+
+**Second-best answers.** The Viterbi decoder of Lesson 7 walks the trellis
+and, at each of the 64 states, keeps only the best path into it. A *list*
+Viterbi decoder keeps the best 16 paths into every state instead
+(`decodeFrameList()`, [GlissandoFec.cpp](../modem/GlissandoFec.cpp); the
+method is Seshadri and Sundberg's, 1994). At the end it has the 16 most
+likely 91-bit answers, best first. Near the threshold the right answer is
+often not the best one but the second or the fifth: noise has flipped a
+short run of bits, and the path that un-flips them scores a little worse.
+The CRC finds it: the decoder tries each runner-up in turn and takes the
+first whose CRC passes.
+
+**Every runner-up is another lottery ticket.** That is the catch. Through
+noise, each path the decoder tries passes a 14-bit CRC by luck one time in
+16,384, so trying 16 paths instead of one would make sixteen times as many
+false decodes. Three things keep that down:
+
+- **List only what never decoded, once.** The streaming receiver tries the
+  runners-up only for candidates it kept (Lesson 9) that no search decoded,
+  and only once, when every search that could have found a better copy has
+  gone past (`listMature()` in
+  [GlissandoReceiver.cpp](../modem/GlissandoReceiver.cpp)).
+- **A runner-up must sound like what was heard.** This one needs a closer
+  look, below.
+- **A grammar check.** JTTY's decoder throws out a runner-up that is not a
+  message its sender could have written. Glissando's link layer has rules
+  too: a segment's index must fit its frame, the last segment must say it
+  is last, the bytes past the end of a frame are zero, and the first
+  segment of a burst must start with a frame type in use and a callsign
+  that packs. Only about 11 random payloads in 32 pass
+  (`couldBeChatSegment()` in
+  [TextMessagingModem.cpp](../app/src/pipeline/TextMessagingModem.cpp)).
+  The best path is not held to it, so nothing a sender of any version
+  sends is turned away when it decodes plainly.
+
+**Counting objections, or weighing them.** Take a payload, re-encode it,
+and compare its 195 coded bits with what the receiver heard. Each soft bit
+of Lesson 5 is a witness: its sign says 0 or 1, its size how sure it is.
+FT8 decoders count the witnesses who disagree, the *hard errors*, and turn
+away a payload with too many. Glissando does that for the best path (44 at
+most, `MAX_HARD_ERRORS`). For runners-up that test proved too blunt: a
+right runner-up near the threshold and a path through pure noise both
+disagree with 30 to 40 witnesses. The difference is *who* disagrees. A
+right payload is contradicted by doubtful witnesses, the bits a fade or a
+noise spike blurred; a payload made of noise is contradicted by confident
+ones too. So the receiver weighs the objections instead: the share of all
+the witnesses' certainty, the sum of |LLR|, that sits with the ones who
+disagree (`disagreement()` in
+[GlissandoDemod.cpp](../modem/GlissandoDemod.cpp)). A runner-up may carry
+at most 7.5% of it against itself.
+
+Measured, right runners-up carry 2% to 9% against them, and in fading
+under 7.5%: a fade crushes the certainty of the stretch it blurs, so the
+errors there weigh almost nothing. Paths through noise carry 4.5% to 12%,
+most over 8%. In 160 minutes of simulated busy traffic at every tempo,
+about 7,000 runners-up an hour got under the ceiling: about one false
+decode every two hours before the grammar check, and three times fewer
+after it. A ceiling of 40 hard errors let in 89,000 an hour, and in fading
+fewer right ones.
+
+**What it buys.** One frame per trial at each tempo's 50% point, the
+batch receiver trying the runners-up of the candidates it could not
+decode (`decodeByList()`):
+
+| Tempo and path | Signal (dB in 2500 Hz) | Best path alone | With runners-up |
+|---|---|---|---|
+| Allegro, AWGN | -20.4 | 162 of 300 | 208 (+28%) |
+| Allegro, CCIR poor | -17.6 | 139 of 300 | 207 (+49%) |
+| Presto, CCIR poor | -14.2 | 162 of 300 | 213 (+31%) |
+| Andante, CCIR moderate | -21.0 | 92 of 160 | 120 (+30%) |
+| Adagio, CCIR poor | -23.0 | 59 of 100 | 78 (+32%) |
+
+Fading tends to gain more (at Allegro 49% against 28%) for the same
+reason the weighing works: a fade blurs a short stretch of the frame, a
+short run of wrong bits is exactly what a runner-up's detour through the
+trellis puts right, and the CRC says which detour.
+
+## Lesson 11: taking one station out to hear the one under it
+
+Two stations that key at once used to cost both their messages, or the
+weaker one's. FT8 and JTTY decoders get the weaker one back by
+*subtraction*: once the stronger frame is decoded, they know exactly what
+it sounded like, so they take it out of the audio and listen again.
+
+**Knowing the tune.** A decoded payload says every note the frame sang,
+and the receiver can synthesise the whole melody, glides, phase and all
+(`sentFrame()` in [GlissandoDemod.cpp](../modem/GlissandoDemod.cpp)). The
+sync search only knew where the frame started to within a few samples;
+against the whole melody it can be timed to the sample and tuned to a
+fraction of a hertz (`refineFrame()`).
+
+**The channel's fingerprint.** What arrived is not the clean melody: HF
+fades it up and down, and two paths a millisecond apart cancel at some
+notes and add at others. So `subtractFrame()` measures a gain for every
+note of the scale, symbol by symbol, by least squares over about a quarter
+second at a time, which follows CCIR poor fading and averages the noise
+down. As a glide moves between two notes, the gain moves between theirs.
+It subtracts the melody scaled by those gains. What is left is the noise
+and anything else that was on the air.
+
+**Search again.** Every frame that decodes is kept while the audio it
+overlaps may still be searched, and taken out before every later search at
+every tempo. A search that decodes a frame takes it out and searches the
+same stretch again, up to three frames deep. And the candidates kept for
+averaging that a new decode overlapped are tried again without it: of two
+frames that collide, the one that started first was searched while the
+other was still on the air, and is often the one lost.
+
+**What it buys.** Two stations keyed over each other, the second starting
+anywhere from half a frame before the first to half a frame after. The
+first is 4 dB over its tempo's 50% point (6 dB in fading) and the second
+3 dB less (2 dB less in the mixed pair). Out of 60 trials (40 for the
+mixed pair), how often the second decodes:
+
+| Collision | Before | With subtraction |
+|---|---|---|
+| Two at Presto, same scale, AWGN | 8 | 50 |
+| Two at Presto, pentatonic and diminished, AWGN | 19 | 51 |
+| Two at Presto, same scale, CCIR poor | 1 | 23 |
+| Presto over an Allegro frame, same scale, AWGN | 29 of 40 | 39 of 40 |
+
+The first station decoded as often as before or more. The cost is
+CPU: each search first subtracts the frames already heard over its
+stretch. In 80 minutes of busy simulated traffic, every tempo and scale
+at once, frames often overlapping, the receiver took about 4% more CPU
+than before and decoded 106 frames instead of 98. It made the same three
+false decodes as before, all of them best paths, none a runner-up.
+
+## Lesson 12: reading a message with a hole in it
+
+A text fragment is up to six segments, one frame each. Lose one to a fade
+and the burst used to be thrown away, and nothing showed until a retry got
+all six through. JTTY prints what it has, with "..." for a lost frame.
+
+Glissando can do the same because of a choice made in Lesson 8: Huffman
+codes never cross a segment boundary, so every segment's text decodes on
+its own. A burst whose first two segments arrived (they hold the header:
+who sent it, and which message and fragment it is) is shown with "..."
+where the missing segments were (`FrameCodec::decodePartial()`). A copy
+is never taken as received, so a message to us still asks for the
+fragment, and when the retry comes the two copies are merged, each filling
+the other's gaps (`PartialCopies`). The chat line fills in where it stands.
 
 ## What glide-then-hold gains and gives up
 
