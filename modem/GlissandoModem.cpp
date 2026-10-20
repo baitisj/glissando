@@ -337,6 +337,7 @@ std::vector<Decode> receive(const float* audio, size_t numSamples, const ModemSe
         }
         detail::VoiceDecode result =
             detail::receiveVoice(z, gear, hypotheses, searchFrom, searchTo, maxOffsetHz, candidates, settings.knownBits);
+        detail::decodeByList(z, gear, hypotheses, settings.knownBits, settings.payloadCheck, result);
         decodes[(size_t)voice] = result.decode;
         decodes[(size_t)voice].voice = voice;
         decodes[(size_t)voice].scale = scales[(size_t)result.hypothesis];

@@ -351,11 +351,12 @@ void testAnyScale()
 
 // A frame too weak to decode, sent twice with another frame between. The
 // second copy, added to the first, often decodes when neither does alone,
-// and is reported as two copies. Whatever decodes is the right frame, once
-// (the frame between is a different payload, so its soft bits do not agree
-// with either copy). Several seeds, since which trials decode depends on
-// the noise and, a little, on how the compiler rounds.
-std::vector<StreamDecode> averagingRun(uint64_t seed, Payload& sent, long long& secondStart)
+// and is reported as two copies. Whatever decodes is one of the frames that
+// was sent, once; the frame between is a different payload, so its soft
+// bits do not agree with either copy, and it decodes only on its own. Several
+// seeds, since which trials decode depends on the noise and, a little, on
+// how the compiler rounds.
+std::vector<StreamDecode> averagingRun(uint64_t seed, Payload& sent, Payload& betweenSent, long long& secondStart)
 {
     Random rng(seed);
     const double sigma = 0.02;
@@ -369,7 +370,8 @@ std::vector<StreamDecode> averagingRun(uint64_t seed, Payload& sent, long long& 
     std::vector<float> stream((size_t)total);
     for (float& v : stream) v = (float)(sigma * rng.gaussian());
     place(stream, {4, first, {repeated}}, AVERAGING_SNR_DB, sigma);
-    place(stream, {4, between, {rng.payload()}}, AVERAGING_SNR_DB, sigma);
+    Payload other = rng.payload();
+    place(stream, {4, between, {other}}, AVERAGING_SNR_DB, sigma);
     place(stream, {4, second, {repeated}}, AVERAGING_SNR_DB, sigma);
 
     StreamingReceiver receiver;
@@ -381,6 +383,7 @@ std::vector<StreamDecode> averagingRun(uint64_t seed, Payload& sent, long long& 
     receiver.flush();
     receiver.stop();
     sent = repeated;
+    betweenSent = other;
     secondStart = second;
     return collector.decodes();
 }
@@ -390,13 +393,19 @@ void testAveraging()
     int averaged = 0;
     for (uint64_t seed = 1; seed <= AVERAGING_TRIALS; seed++)
     {
-        Payload sent;
+        Payload sent, betweenSent;
         long long second = 0;
-        std::vector<StreamDecode> decodes = averagingRun(seed, sent, second);
-        CHECK(decodes.size() <= 1);
+        std::vector<StreamDecode> decodes = averagingRun(seed, sent, betweenSent, second);
+        int repeats = 0;
         for (const StreamDecode& d : decodes)
         {
+            if (d.decode.payload == betweenSent)
+            {
+                CHECK(d.decode.copies == 1);
+                continue;
+            }
             CHECK(d.decode.payload == sent);
+            repeats++;
             if (d.decode.copies == 2)
             {
                 averaged++;
@@ -404,6 +413,8 @@ void testAveraging()
             }
             CHECK(d.decode.copies == 1 || d.decode.copies == 2);
         }
+        CHECK(repeats <= 1);
+        CHECK(decodes.size() <= 2);
     }
     printf("averaging: %d of %d repeats decoded only by adding the two copies\n", averaged, (int)AVERAGING_TRIALS);
     CHECK(averaged >= 2);

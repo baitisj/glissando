@@ -119,6 +119,17 @@ struct SoftFrame
     ChannelReport report;
 };
 
+// Where on the decoder's ladder a payload was found: the guess (0 as
+// heard, then the zero padding guesses, then knownBits in order), the rank
+// of its path in that guess's list (0 the most likely), and how many of the
+// soft bits disagree with it re-encoded.
+struct LadderStep
+{
+    int guess = 0;
+    int rank = 0;
+    int hardErrors = 0;
+};
+
 // Everything the receiver works out about one voice of one frame.
 struct VoiceDecode
 {
@@ -127,16 +138,50 @@ struct VoiceDecode
     double syncScore = 0.0;     // sync peak over the median sync score
     double esOverN0 = 0.0;      // signal to noise ratio per symbol, measured on the sync symbols
     int hypothesis = 0;         // index into the voices searched: which scale the frame was heard in
+    LadderStep step;            // how the decoder found the payload, when it decoded
 
     // Candidates that were searched but did not decode, strongest sync
     // first, when no candidate decoded. Empty when one did.
     std::vector<SoftFrame> failed;
 };
 
-// The decoder's full ladder on one set of soft bits: as heard, then on the
-// zero padding guesses, then on each of knownBits. Never reports the
-// all-zero payload.
-bool decodeWithGuesses(const FrameLlrs& llrs, const std::vector<KnownBits>& knownBits, Payload& payloadOut);
+// The decoder's ladder on one set of soft bits: the most likely path as
+// heard, then on the zero padding guesses, then on each of knownBits.
+// Never reports the all-zero payload.
+bool decodeWithGuesses(const FrameLlrs& llrs, const std::vector<KnownBits>& knownBits, Payload& payloadOut,
+                       LadderStep* stepOut = nullptr);
+
+// List decoding, for soft bits decodeWithGuesses() failed on: the
+// runners-up of each of the same guesses in the same order, held to a
+// ceiling on their disagreement() and, when it is set, to check. Every
+// runner-up is another chance for noise to pass the CRC, so a receiver
+// lists each frame it hears once, on its best copy.
+bool decodeListWithGuesses(const FrameLlrs& llrs, const std::vector<KnownBits>& knownBits, const PayloadCheck& check,
+                           Payload& payloadOut, LadderStep* stepOut = nullptr);
+
+// How many of the soft bits disagree in sign with this payload re-encoded
+// (bits with no information either way are not counted).
+int hardErrors(const FrameLlrs& llrs, const Payload& payload);
+
+// The share of the soft bits' weight (the sum of |LLR|) that is in the bits
+// disagreeing in sign with this payload re-encoded: 0 when every bit
+// agrees, 1 when there is no weight at all. Unlike hardErrors() it counts
+// a confident bit against a payload for more than a doubtful one.
+double disagreement(const FrameLlrs& llrs, const Payload& payload);
+
+// Signal subtraction, as JTTY and FT8 decoders do it: a decoded frame is
+// taken back out of the audio so that a weaker frame under it can be heard.
+//
+// refineFrame() times a decoded frame against the whole melody its payload
+// sings, which is much sharper than the sync search (start in z's
+// numbering, the offset in Hz; both are updated). subtractFrame()
+// re-synthesises that melody at that start and offset, measures the
+// channel's gain on it, note by note and symbol by symbol, and subtracts it.
+// Parts of the frame outside z are left out.
+void refineFrame(const ComplexSignal& z, const VoiceTemplates& voice, const GearInfo& gear, const Payload& payload,
+                 long long& start, double& dfHz);
+void subtractFrame(ComplexSignal& z, const VoiceTemplates& voice, const GearInfo& gear, long long start, double dfHz,
+                   const Payload& payload);
 
 // How alike two candidates' soft bits are: the normalised correlation of
 // their LLRs, 1 for identical, near 0 for unrelated frames or noise (about
@@ -160,6 +205,23 @@ VoiceDecode receiveVoice(const ComplexSignal& z, const GearInfo& gear, const Voi
 VoiceDecode receiveVoice(const ComplexSignal& z, const GearInfo& gear, const std::vector<const VoiceTemplates*>& voices,
                          long long searchFrom, long long searchTo, double maxOffsetHz, int candidates,
                          const std::vector<KnownBits>& knownBits = std::vector<KnownBits>());
+
+// Decodes the frame of one voice that starts near `start`, offset near dfHz
+// (a candidate an earlier search found and could not decode), without a
+// sync search: refinement, soft demodulation and the decoder's ladder.
+VoiceDecode receiveAt(const ComplexSignal& z, const GearInfo& gear, const VoiceTemplates& voice, long long start,
+                      double dfHz, double maxOffsetHz, const std::vector<KnownBits>& knownBits);
+
+// The Doppler spread of a decoded frame, sounded on its whole melody at
+// this start and offset (soundChannel()), or -1 when that cannot be done.
+double soundDecoded(const ComplexSignal& z, const GearInfo& gear, const VoiceTemplates& voice, long long start,
+                    double dfHz, const Payload& payload);
+
+// After a receiveVoice() that decoded nothing: list decoding on each of the
+// candidates it tried, strongest sync first, filling in result as a decode
+// does. voices are the ones receiveVoice() searched.
+bool decodeByList(const ComplexSignal& z, const GearInfo& gear, const std::vector<const VoiceTemplates*>& voices,
+                  const std::vector<KnownBits>& knownBits, const PayloadCheck& check, VoiceDecode& result);
 
 } // namespace detail
 } // namespace Glissando

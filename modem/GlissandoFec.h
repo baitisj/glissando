@@ -17,6 +17,7 @@
 
 #include <array>
 #include <cstdint>
+#include <vector>
 
 #include "GlissandoModem.h"
 
@@ -55,6 +56,24 @@ bool decodeFrame(const FrameLlrs& llrs, Payload& payloadOut, int knownZeroTailBi
 // The same with any payload bits known (KnownBits: -1 for unknown): the
 // decoder never considers the other value of a known bit.
 bool decodeFrame(const FrameLlrs& llrs, Payload& payloadOut, const KnownBits& known);
+
+// List decoding. The decoder above keeps one path into each state of the
+// trellis and so returns the single most likely payload; when that fails the
+// CRC, the right one is often the second or third most likely. This keeps
+// the listSize most likely paths (at most MAX_LIST_SIZE) and returns, most
+// likely first, those whose CRC matches, each with its rank: 0 is the path
+// decodeFrame() picks. Every path tried is another chance for noise to pass
+// the CRC, so a caller tries the extra ranks only when rank 0 has failed,
+// and checks what they give.
+constexpr int MAX_LIST_SIZE = 16;
+
+struct ListDecode
+{
+    int rank = 0;
+    Payload payload{};
+};
+
+std::vector<ListDecode> decodeFrameList(const FrameLlrs& llrs, const KnownBits& known, int listSize);
 
 } // namespace Glissando
 
