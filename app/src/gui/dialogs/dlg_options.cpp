@@ -20,7 +20,10 @@
 //==========================================================================
 
 #include <algorithm>
+#include <wx/display.h>
 #include <wx/gbsizer.h>
+#include <wx/scrolwin.h>
+#include <wx/settings.h>
 #include <wx/numformatter.h>
 #include "GlissandoCw.h"
 #include "pipeline/TextMessagingModem.h"
@@ -54,7 +57,11 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     
     sessionActive_ = false;
     
-    wxPanel* panel = new wxPanel(this);
+    // The tabs scroll and the buttons stay below them, so the dialog fits a
+    // short screen: squeezed by the window manager, it left the buttons
+    // a few pixels high and unclickable.
+    wxScrolledWindow* panel = new wxScrolledWindow(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVSCROLL);
+    panel->SetScrollRate(0, 10);
     
     wxBoxSizer* bSizer30;
     bSizer30 = new wxBoxSizer(wxVERTICAL);
@@ -515,21 +522,28 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
 
     wxBoxSizer* bSizer31 = new wxBoxSizer(wxHORIZONTAL);
 
-    m_sdbSizer5OK = new wxButton(panel, wxID_OK);
+    m_sdbSizer5OK = new wxButton(this, wxID_OK);
     bSizer31->Add(m_sdbSizer5OK, 0, static_cast<int>(wxALL), 2);
 
-    m_sdbSizer5Cancel = new wxButton(panel, wxID_CANCEL);
+    m_sdbSizer5Cancel = new wxButton(this, wxID_CANCEL);
     bSizer31->Add(m_sdbSizer5Cancel, 0, static_cast<int>(wxALL), 2);
 
-    m_sdbSizer5Apply = new wxButton(panel, wxID_APPLY);
+    m_sdbSizer5Apply = new wxButton(this, wxID_APPLY);
     bSizer31->Add(m_sdbSizer5Apply, 0, static_cast<int>(wxALL), 2);
 
-    bSizer30->Add(bSizer31, 0, static_cast<int>(wxALL) | wxALIGN_CENTER, 5);
-
     panel->SetSizer(bSizer30);
-    
+
+    // Open tall enough to show the tallest tab when the screen has room,
+    // and no taller than most of it otherwise; the rest scrolls.
+    wxSize content = bSizer30->CalcMin();
+    int scrollbarWidth = wxSystemSettings::GetMetric(wxSYS_VSCROLL_X, panel);
+    wxDisplay display(this);
+    int maxHeight = std::max(display.GetClientArea().GetHeight(), display.GetGeometry().GetHeight()) * 3 / 4;
+    panel->SetMinSize(wxSize(content.GetWidth() + scrollbarWidth, std::min(content.GetHeight(), maxHeight)));
+
     wxBoxSizer* winSizer = new wxBoxSizer(wxVERTICAL);
-    winSizer->Add(panel, 0, static_cast<int>(wxEXPAND));
+    winSizer->Add(panel, 1, static_cast<int>(wxEXPAND));
+    winSizer->Add(bSizer31, 0, static_cast<int>(wxALL) | wxALIGN_CENTER, 5);
     
     this->SetSizerAndFit(winSizer);
     this->Layout();
