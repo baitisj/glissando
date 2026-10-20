@@ -141,6 +141,10 @@ public:
     bool declineFile(uint64_t id);
     bool cancelFile(uint64_t id);
     void setFileAutoAccept(const std::string& folder, const std::vector<std::string>& calls);
+
+    // Only modes 500 Hz wide or narrower, for every tempo and for files on
+    // the group, from the next keying on. Unless the host offers none.
+    void setNarrowModesOnly(bool narrowOnly);
     std::vector<Data2G::FileTransfer> fileTransfers() const;
     uint64_t fileTransferChanges() const;
 
@@ -256,7 +260,10 @@ private:
 
     mutable std::mutex mutex_;
     Status status_;
-    std::vector<Data2G::ModeInfo> modes_;   // the host's MODES, once it has said
+    std::vector<Data2G::ModeInfo> hostModes_;   // the host's MODES, once it has said
+    std::vector<Data2G::ModeInfo> modes_;       // those the tempos choose from
+    bool narrowOnly_ = false;
+    void updateModesLocked();
     std::string myCallsign_;
     int gear_;
     bool pttOn_;

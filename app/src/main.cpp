@@ -24,6 +24,7 @@
 #include <inttypes.h>
 #include <time.h>
 #include <ctime>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 #include <iomanip>
@@ -1067,6 +1068,7 @@ void MainFrame::applyChatModem_()
     wxStringTokenizer calls(config.data2gAutoAcceptFilesFrom.get(), " ,;\t");
     while (calls.HasMoreTokens()) autoAccept.push_back(calls.GetNextToken().ToStdString());
     m_data2gTransport->setFileAutoAccept(std::string(chatReceivedFilesFolder().utf8_str()), autoAccept);
+    m_data2gTransport->setNarrowModesOnly(config.data2gNarrowModesOnly);
     chatApplyGroupFileAutoReceive();
     m_data2gTransport->setFilesInhibited(!protocol.transmitInhibitedReason().empty());
 
@@ -1082,7 +1084,18 @@ void MainFrame::applyChatModem_()
                        settings.kissPort != appliedData2GSettings_.kissPort ||
                        settings.commandPort != appliedData2GSettings_.commandPort ||
                        settings.useSessions != appliedData2GSettings_.useSessions;
-        if (!changed) return;
+        if (!changed)
+        {
+            // The modes may have narrowed or widened, and the timers follow
+            // the tempo's mode.
+            TextMessaging::AirTiming timing = m_data2gTransport->airTiming();
+            if (std::memcmp(&timing, &appliedAirTiming_, sizeof(timing)) != 0)
+            {
+                protocol.setAirTiming(timing);
+                appliedAirTiming_ = timing;
+            }
+            return;
+        }
 
         log_info("Text chat now goes through data2g-host at %s (KISS %d, commands %d)%s", settings.host.c_str(),
                  settings.kissPort, settings.commandPort,

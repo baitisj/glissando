@@ -66,6 +66,7 @@ FreeDVConfiguration::FreeDVConfiguration()
     , data2gKissPort("/Data2G/KissPort", 8100)
     , data2gCommandPort("/Data2G/CommandPort", 8300)
     , data2gSessions("/Data2G/Sessions", true)
+    , data2gNarrowModesOnly("/Data2G/NarrowModesOnly", false)
     , data2gReceivedFilesFolder("/Data2G/ReceivedFilesFolder", "")
     , data2gAutoAcceptFilesFrom("/Data2G/AutoAcceptFilesFrom", "")
     , data2gReceiveGroupFiles("/Data2G/ReceiveGroupFiles", false)
@@ -152,6 +153,7 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     load_(config, data2gKissPort);
     load_(config, data2gCommandPort);
     load_(config, data2gSessions);
+    load_(config, data2gNarrowModesOnly);
     load_(config, data2gReceivedFilesFolder);
     load_(config, data2gAutoAcceptFilesFrom);
     load_(config, data2gReceiveGroupFiles);
@@ -246,6 +248,7 @@ void FreeDVConfiguration::save(wxConfigBase* config)
     save_(config, data2gKissPort);
     save_(config, data2gCommandPort);
     save_(config, data2gSessions);
+    save_(config, data2gNarrowModesOnly);
     save_(config, data2gReceivedFilesFolder);
     save_(config, data2gAutoAcceptFilesFrom);
     save_(config, data2gReceiveGroupFiles);

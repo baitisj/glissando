@@ -396,6 +396,27 @@ Data2GTransport::Status Data2GTransport::status() const
     return status;
 }
 
+void Data2GTransport::setNarrowModesOnly(bool narrowOnly)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (narrowOnly == narrowOnly_) return;
+    narrowOnly_ = narrowOnly;
+    updateModesLocked();
+}
+
+// Empty when no narrowing is asked and the host hasn't listed its modes:
+// the known ones are used then.
+void Data2GTransport::updateModesLocked()
+{
+    modes_ = hostModes_;
+    if (narrowOnly_)
+    {
+        std::vector<Data2G::ModeInfo> narrow = Data2G::narrowModes(hostModes_);
+        if (!narrow.empty()) modes_ = narrow;
+    }
+    groupFiles_.setModes(modes_);
+}
+
 Data2G::ModeInfo Data2GTransport::modeForGear(int gear) const
 {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -909,9 +930,9 @@ void Data2GTransport::run(Settings settings)
             case Command::Kind::Modes:
             {
                 std::lock_guard<std::mutex> lock(mutex_);
-                if (!modeLines.empty()) modes_ = modeLines;
+                if (!modeLines.empty()) hostModes_ = modeLines;
                 modeLines.clear();
-                groupFiles_.setModes(modes_);
+                updateModesLocked();
                 break;
             }
             case Command::Kind::Connect:

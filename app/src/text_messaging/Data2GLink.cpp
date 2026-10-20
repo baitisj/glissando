@@ -234,6 +234,17 @@ ModeInfo modeForGear(int gear, const std::vector<ModeInfo>& offered)
     return ModeInfo();
 }
 
+std::vector<ModeInfo> narrowModes(const std::vector<ModeInfo>& offered)
+{
+    const std::vector<ModeInfo>& modes = offered.empty() ? knownModes() : offered;
+    std::vector<ModeInfo> narrow;
+    for (const ModeInfo& mode : modes)
+    {
+        if (mode.bandwidthHz > 0 && mode.bandwidthHz <= NARROW_MODE_MAX_HZ) narrow.push_back(mode);
+    }
+    return narrow;
+}
+
 AirTiming airTiming(const ModeInfo& mode)
 {
     // The longest keying chat sends at once: a reply and a whole message.

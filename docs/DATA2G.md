@@ -112,6 +112,14 @@ list offers:
 | Presto | `qpsk-r1/3` (1.2 kHz) | `n10-qpsk-r1/2` | -2.8 dB |
 | Duet | `w48-16qam-r1/2` (2.4 kHz) | `n10-16qam-r1/2` | +7.6 dB |
 
+Preferences, Modem tab, under the Data2G settings: **500 Hz wide modes
+only** (off by default; Jeff, 2026-10-20) gives every tempo the 500 Hz
+host's column with a 2400 Hz host too, for a narrow filter or a crowded
+band. Group files announced while it is on are cut for those modes. It
+takes effect from the next keying, without reconnecting, and the chat
+timers follow. A host offering nothing that narrow keeps its own list.
+Sessions are data2g-host's to pace and are left alone.
+
 Thresholds are Data2G's own, from its `mode_thresholds.json`. The old
 broadcast default, `qpsk-r1/5`, sits at -4.9 dB, so Adagio is about 7 dB
 more sensitive than what chat used before.
