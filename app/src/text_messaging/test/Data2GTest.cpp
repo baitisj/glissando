@@ -339,6 +339,7 @@ public:
         std::vector<Data2G::ModeInfo> modes = Data2G::knownModes();
         std::string call;
         bool listening = false;
+        bool bw500 = false;                     // BW500: sessions and MODES kept to 500 Hz
         int groupPort = 0;
         std::string groupMode = "qpsk-r1/5";
         std::vector<std::string> commands;      // every command line heard
@@ -624,10 +625,16 @@ private:
             if (offered) side.groupMode = w[3];
             say(side, offered ? "OK" : "WRONG");
         }
+        else if (w[0] == "BW500" || w[0] == "BW2300")
+        {
+            side.bw500 = w[0] == "BW500";
+            say(side, "OK");
+        }
         else if (w[0] == "MODES")
         {
             for (const Data2G::ModeInfo& m : side.modes)
             {
+                if (side.bw500 && m.bandwidthHz > 500) continue;
                 char text[200];
                 snprintf(text, sizeof(text), "MODE %s %d %d %d %.2f %.2f", m.name.c_str(), m.bandwidthHz,
                          m.bytesPerCodeword, m.maxCodewords, m.secondsAtOne, m.secondsAtMax);
@@ -1027,6 +1034,25 @@ void testBroadcastGoesToTheGroupAtAdagio()
     CHECK(a.transport.status().groupMode == "fsk16r25-r1/3");
 }
 
+// "500 Hz wide modes only" set as the app starts: data2g-host hears BW500
+// once, before it lists its modes, and the tempos pick from narrow ones.
+void testNarrowModesOnlyTellsTheHost()
+{
+    FakeHostPair hosts;
+    Station a("W1AW", hosts.sides[0], 5);
+    a.transport.setNarrowModesOnly(true);
+    Station b("VK3ABC", hosts.sides[1], 5);
+    CHECK(settled(hosts, a, b));
+    CHECK(waitFor([&]() { return hosts.heardCommand(0, "BW500"); }));
+    CHECK(waitFor([&]() { return a.transport.modeForGear(5).bandwidthHz <= 500; }));
+    std::vector<std::string> heard = hosts.with([&]() { return hosts.sides[0].commands; });
+    CHECK(std::count(heard.begin(), heard.end(), std::string("BW500")) == 1);
+    auto bw = std::find(heard.begin(), heard.end(), std::string("BW500"));
+    CHECK(std::find(bw, heard.end(), std::string("MODES")) != heard.end());
+    CHECK(!hosts.heardCommand(0, "BW2300"));
+    CHECK(!hosts.heardCommand(1, "BW"));
+}
+
 void testDuetUsesAFastWideModeOrTheNarrowHostsBest()
 {
     FakeHostPair hosts;
@@ -1040,12 +1066,24 @@ void testDuetUsesAFastWideModeOrTheNarrowHostsBest()
     CHECK(waitFor([&]() { return b.transport.modeForGear(5).name == "n10-16qam-r1/2"; }));
     CHECK(a.transport.modeForGear(5).name == "w48-16qam-r1/2");
 
-    // The operator asks for 500 Hz wide modes only, and then not.
+    // The operator asks for 500 Hz wide modes only, and then not. The
+    // tempos narrow at once; data2g-host hears BW500 (its sessions narrow
+    // too) and is asked for its MODES again, then BW2300 lifts the cap.
     a.transport.setNarrowModesOnly(true);
     CHECK(a.transport.modeForGear(5).name == "n10-16qam-r1/2");
     CHECK(a.transport.modeForGear(3).name == "n10-qpsk-r1/3");
+    CHECK(waitFor([&]() { return hosts.heardCommand(0, "BW500"); }));
+    CHECK(waitFor([&]() {
+        return hosts.with([&]() {
+            const std::vector<std::string>& c = hosts.sides[0].commands;
+            return !c.empty() && c.back() == "MODES";
+        });
+    }));
+    CHECK(a.transport.modeForGear(5).name == "n10-16qam-r1/2");
+    CHECK(!hosts.heardCommand(1, "BW")); // the other station wasn't asked
     a.transport.setNarrowModesOnly(false);
-    CHECK(a.transport.modeForGear(5).name == "w48-16qam-r1/2");
+    CHECK(waitFor([&]() { return hosts.heardCommand(0, "BW2300"); }));
+    CHECK(waitFor([&]() { return a.transport.modeForGear(5).name == "w48-16qam-r1/2"; }));
 
     std::string error;
     CHECK(a.protocol.sendMessage("quick one", "", error));
@@ -2911,6 +2949,7 @@ int main()
     testNotConnectedRefusesToTransmit();
     testBroadcastGoesToTheGroupAtAdagio();
     testDuetUsesAFastWideModeOrTheNarrowHostsBest();
+    testNarrowModesOnlyTellsTheHost();
     testDirectedMessageGoesThroughASession();
     testEachMessageIsSettledAsItsBytesAreAcknowledged();
     testAnOlderHostSettlesTheBatchTogether();

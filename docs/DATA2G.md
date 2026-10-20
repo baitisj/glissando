@@ -31,7 +31,7 @@ way to carry chat, next to Glissando and the codec2 data modes.
 | Port | What chat uses it for |
 |---|---|
 | 8100, KISS | Chat frames to and from the GLISS group, on the KISS port `BCAST OPEN` gives it, with ACKMODE so the host says when each burst has been transmitted. |
-| 8300, commands | `MYCALL`, `LISTEN ON`, `CHAT ON`, `BCAST OPEN GLISS FROM call`, `BCAST MODE`, `MODES`, `CONNECT`, `DISCONNECT`, `ABORT`. Reports read: `PTT`, `BUSY`, `MODE`, `BCAST n HEARD/LOST/DROPPED`, `CONNECTED`, `DISCONNECTED`, `BUFFER`. |
+| 8300, commands | `MYCALL`, `LISTEN ON`, `CHAT ON`, `BCAST OPEN GLISS FROM call`, `BCAST MODE`, `BW500`/`BW2300`, `MODES`, `CONNECT`, `DISCONNECT`, `ABORT`. Reports read: `PTT`, `BUSY`, `MODE`, `BCAST n HEARD/LOST/DROPPED`, `CONNECTED`, `DISCONNECTED`, `BUFFER`. |
 | 8301, session data | The byte stream of a connected session (always the command port + 1). |
 
 All three ports can be changed in Preferences; the session data port
@@ -118,7 +118,11 @@ host's column with a 2400 Hz host too, for a narrow filter or a crowded
 band. Group files announced while it is on are cut for those modes. It
 takes effect from the next keying, without reconnecting, and the chat
 timers follow. A host offering nothing that narrow keeps its own list.
-Sessions are data2g-host's to pace and are left alone.
+The app also sends data2g-host `BW500` on the command port, when it
+connects and whenever the box changes, and then asks for `MODES` again.
+`BW500` caps the sessions data2g-host opens at 500 Hz and narrows the
+`MODES` it lists; switching the box off sends `BW2300`, which lifts the
+cap. A session already connected keeps the width it started with.
 
 Thresholds are Data2G's own, from its `mode_thresholds.json`. The old
 broadcast default, `qpsk-r1/5`, sits at -4.9 dB, so Adagio is about 7 dB

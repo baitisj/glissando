@@ -273,6 +273,7 @@ private:
     bool keyingLost_;   // the last keying ended without all of it reported sent
     std::deque<std::string> stationsHeard_;    // far ends of sessions connected, for takeStationHeard()
     bool callsignChanged_;
+    bool bandwidthChanged_;   // narrowOnly_ switched since the host was told
 
     // Session bookkeeping, read by the thread under mutex_.
     SessionState session_;
