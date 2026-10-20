@@ -951,6 +951,76 @@ void TextMessagingProtocol::requestMissingFragmentsLocked(uint64_t nowMs)
     }
 }
 
+// A message heard in part during a keying that is now over is shown for
+// what arrived, with "..." for what did not, rather than not at all: under
+// QSB the operator reads most of it while the rest is asked for and resent.
+// It is one line in the window, filled in as more arrives.
+void TextMessagingProtocol::showPartialCopiesLocked(uint64_t nowMs, std::vector<PendingEvent>& events)
+{
+    for (auto& entry : inbox_)
+    {
+        Reassembly& reassembly = entry.second;
+        if (!reassembly.showPending || nowMs < reassembly.keyingEndsMs) continue;
+        reassembly.showPending = false;
+
+        Frame frame;
+        frame.type = reassembly.broadcast ? FrameType::Broadcast : FrameType::Message;
+        frame.originCallsign = entry.first.first;
+        frame.airId = entry.first.second;
+        TextMessage message = receivedMessageLocked(frame, reassembly);
+
+        PendingEvent event;
+        if (reassembly.shownId == 0)
+        {
+            if (!store_.addMessage(message)) continue;
+            reassembly.shownId = message.id;
+            reassembly.shownAt = message.timestamp;
+            event.type = PendingEvent::Type::MessageAdded;
+        }
+        else
+        {
+            if (!store_.updateMessageText(reassembly.shownId, message.text, message.status)) continue;
+            event.type = PendingEvent::Type::MessageUpdated;
+        }
+        event.message = message;
+        events.push_back(event);
+    }
+}
+
+TextMessage TextMessagingProtocol::receivedMessageLocked(const Frame& frame, const Reassembly& reassembly) const
+{
+    TextMessage message;
+    message.kind = MessageKind::Chat;
+    message.airId = frame.airId;
+    message.originCallsign = frame.originCallsign;
+    message.broadcast = reassembly.broadcast;
+    message.destCallsign = reassembly.broadcast ? "" : myCallsign_;
+    message.direction = MessageDirection::Received;
+    message.status = MessageStatus::Received;
+    message.snr = reassembly.snr;
+    message.id = reassembly.shownId;
+    message.timestamp = reassembly.shownId != 0 ? reassembly.shownAt : wallClock_();
+
+    // Every fragment in order: as received, as heard in part, or "..." when
+    // nothing of it came. Neighbouring gaps read as one.
+    const std::string GAP = "...";
+    bool gap = false;
+    for (size_t i = 0; i < reassembly.fragments.size(); i++)
+    {
+        std::string piece;
+        if (reassembly.receivedMask & (1u << i)) piece = reassembly.fragments[i];
+        else if (i < reassembly.partialFragments.size() && !reassembly.partialFragments[i].empty())
+            piece = reassembly.partialFragments[i];
+        else piece = GAP;
+        if (gap && piece.compare(0, GAP.size(), GAP) == 0) piece.erase(0, GAP.size());
+        message.text += piece;
+        gap = message.text.size() >= GAP.size() &&
+              message.text.compare(message.text.size() - GAP.size(), GAP.size(), GAP) == 0 &&
+              !(reassembly.receivedMask & (1u << i));
+    }
+    return message;
+}
+
 void TextMessagingProtocol::queuePongLocked(const std::string& destination, float snr)
 {
     std::vector<uint8_t> payload{encodeSnr(snr)};
@@ -1153,6 +1223,9 @@ void TextMessagingProtocol::handleIncomingFragmentLocked(const Frame& frame, flo
     // fragment that differs under the same ID is a new message from a sender
     // whose IDs started over, and is taken in as one.
     auto completed = recentlyCompleted_.find(key);
+    // A copy with segments missing of a message we have whole already adds
+    // nothing; the sender will hear our acknowledgement on a whole copy.
+    if (frame.partial && completed != recentlyCompleted_.end()) return;
     if (completed != recentlyCompleted_.end())
     {
         const std::vector<std::string>& fragments = completed->second.fragments;
@@ -1174,14 +1247,24 @@ void TextMessagingProtocol::handleIncomingFragmentLocked(const Frame& frame, flo
     if (reassembly.fragmentCount != frame.fragmentCount)
     {
         reassembly.fragments.assign(frame.fragmentCount, "");
+        reassembly.partialFragments.assign(frame.fragmentCount, "");
         reassembly.fragmentCount = frame.fragmentCount;
         reassembly.receivedMask = 0;
         reassembly.snr = snr;
         reassembly.broadcast = broadcast;
     }
 
-    reassembly.fragments[frame.fragmentIndex].assign(frame.payload.begin(), frame.payload.end());
-    reassembly.receivedMask |= (1u << frame.fragmentIndex);
+    const bool already = (reassembly.receivedMask & (1u << frame.fragmentIndex)) != 0;
+    if (frame.partial)
+    {
+        // Shown, but not received: the sender is still asked for it.
+        if (!already) reassembly.partialFragments[frame.fragmentIndex].assign(frame.payload.begin(), frame.payload.end());
+    }
+    else
+    {
+        reassembly.fragments[frame.fragmentIndex].assign(frame.payload.begin(), frame.payload.end());
+        reassembly.receivedMask |= (1u << frame.fragmentIndex);
+    }
     reassembly.lastHeardMs = nowMs;
     reassembly.heardThisKeying = !viaReliableLink;
     reassembly.keyingEndsMs =
@@ -1189,28 +1272,31 @@ void TextMessagingProtocol::handleIncomingFragmentLocked(const Frame& frame, flo
     reassembly.snr = (reassembly.snr + snr) / 2.0f;
 
     uint32_t completeMask = (1u << frame.fragmentCount) - 1u;
-    if (reassembly.receivedMask != completeMask) return;
+    if (reassembly.receivedMask != completeMask)
+    {
+        // A link that delivers every fragment or none is never shown in part.
+        if (!viaReliableLink && !(frame.partial && already)) reassembly.showPending = true;
+        return;
+    }
 
-    TextMessage message;
-    message.kind = MessageKind::Chat;
-    message.airId = frame.airId;
-    message.originCallsign = frame.originCallsign;
-    message.destCallsign = broadcast ? "" : myCallsign_;
-    message.broadcast = broadcast;
-    for (const std::string& fragment : reassembly.fragments) message.text += fragment;
-    message.timestamp = wallClock_();
-    message.direction = MessageDirection::Received;
-    message.status = MessageStatus::Received;
-    message.snr = reassembly.snr;
+    TextMessage message = receivedMessageLocked(frame, reassembly);
 
     Completed& done = recentlyCompleted_[key];
     done.atMs = nowMs;
     done.fragments = reassembly.fragments;
+    const int64_t shownId = reassembly.shownId;
     inbox_.erase(key);
 
-    if (store_.addMessage(message))
+    // Shown in part already: that line now reads in full.
+    PendingEvent event;
+    event.message = message;
+    if (shownId != 0)
     {
-        PendingEvent event;
+        event.type = PendingEvent::Type::MessageUpdated;
+        if (store_.updateMessageText(shownId, message.text, message.status)) events.push_back(event);
+    }
+    else if (store_.addMessage(message))
+    {
         event.type = PendingEvent::Type::MessageAdded;
         event.message = message;
         events.push_back(event);
@@ -1744,6 +1830,7 @@ void TextMessagingProtocol::tick()
 
         uint64_t nowMs = monotonicMs_();
         purgeStaleReassembliesLocked(nowMs);
+        showPartialCopiesLocked(nowMs, events);
         requestMissingFragmentsLocked(nowMs);
         settleReliableKeyingsLocked(events);
         noteStationsHeardLocked(events);

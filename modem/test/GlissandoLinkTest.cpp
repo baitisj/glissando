@@ -45,6 +45,14 @@ bool sameBurst(const LinkBurst& a, const LinkBurst& b)
     return a.text == b.text && a.bytes == b.bytes;
 }
 
+// A burst as it arrives with the bytes [from, to) lost.
+LinkBurst holed(const LinkBurst& burst, size_t from, size_t to)
+{
+    LinkBurst out = burst;
+    for (size_t i = from; i < to && i < out.bytes.size(); i++) out.bytes[i] = 0;
+    return out;
+}
+
 void testRoundTrip()
 {
     Random rng(1);
@@ -156,13 +164,23 @@ void testOutOfOrder()
     std::vector<Payload> p = segmentBursts({text}, 1);
     Reassembler r(SIGNALLING_BYTES, TEXT_BYTES);
 
-    // Segment 2 missing: the partial burst is abandoned, and the segments
-    // after the gap complete nothing.
-    CHECK(reassemble(r, {p[0], p[1], p[3], p[4], p[5]}).empty());
-    // Starting without segment 0 completes nothing either.
+    // Segment 2 missing: the burst still arrives when its last segment
+    // does, with segment 2 marked missing and its bytes zero.
+    std::vector<LinkBurst> out = reassemble(r, {p[0], p[1], p[3], p[4], p[5]});
+    CHECK(out.size() == 1);
+    if (out.size() == 1) CHECK(out[0].missingSegments == 1u << 2 && sameBurst(out[0], holed(text, 18, 27)));
+    CHECK(!r.inProgress(0));
+    // Decoded late, the missing segment makes it whole, and it comes again.
+    LinkBurst burst;
+    CHECK(r.add(p[2], 200000, DUPLICATE_SAMPLES, burst));
+    CHECK(burst.missingSegments == 0 && sameBurst(burst, text));
+    CHECK(r.takeIncomplete().empty());
+
+    // Starting without segment 0 completes nothing: nothing says whose it is.
     CHECK(reassemble(r, {p[1], p[2], p[3], p[4], p[5]}, 10000000).empty());
+    CHECK(r.takeIncomplete().empty());
     // The retried burst, whole, arrives.
-    std::vector<LinkBurst> out = reassemble(r, p, 20000000);
+    out = reassemble(r, p, 20000000);
     CHECK(out.size() == 1 && sameBurst(out[0], text));
 
     // A signalling burst in the middle of a text burst has its own partial.
@@ -203,6 +221,69 @@ void testDuplicates()
     CHECK(!r.add(p[0], 600000, DUPLICATE_SAMPLES, burst));
     r.reset();
     CHECK(!r.add(p[1], 700000, DUPLICATE_SAMPLES, burst));
+}
+
+// A burst whose last segment never comes is cut short: by the next burst in
+// its stream, or once even its last segment would have been heard. It is
+// handed over with every segment not heard missing.
+void testCutShort()
+{
+    Random rng(9);
+    LinkBurst first = makeBurst(true, TEXT_BYTES, rng);
+    LinkBurst second = makeBurst(true, 30, rng);
+    std::vector<Payload> p = segmentBursts({first}, 1);
+    std::vector<Payload> q = segmentBursts({second}, 1);
+    Reassembler r(SIGNALLING_BYTES, TEXT_BYTES);
+
+    // The next burst begins: the first is cut short at segment 5.
+    std::vector<LinkBurst> out = reassemble(r, {p[0], p[1], p[2], p[3], p[4], q[0], q[1], q[2], q[3]});
+    CHECK(out.size() == 1 && sameBurst(out[0], second));
+    std::vector<LinkBurst> cut = r.takeIncomplete();
+    CHECK(cut.size() == 1);
+    if (cut.size() == 1) CHECK(cut[0].missingSegments == 1u << 5 && sameBurst(cut[0], holed(first, 45, TEXT_BYTES)));
+    CHECK(r.takeIncomplete().empty());
+
+    // Nothing more is heard: expire() cuts it short once segment 5 would
+    // have begun and a frame and a half has passed. Segments 2 to 5 are
+    // missing.
+    const long long F = 110000; // an Allegro frame
+    LinkBurst burst;
+    CHECK(!r.add(p[0], 1000000, DUPLICATE_SAMPLES, burst, nullptr, 0, F, 1));
+    CHECK(!r.add(p[1], 1000000 + F, DUPLICATE_SAMPLES, burst, nullptr, 0, F, 1));
+    const long long over = 1000000 + F + 4 * F + 3 * F / 2;
+    r.expire(over);
+    CHECK(r.takeIncomplete().empty() && r.inProgress(0));
+    r.expire(over + 1);
+    cut = r.takeIncomplete();
+    CHECK(cut.size() == 1 && !r.inProgress(0));
+    if (cut.size() == 1) CHECK(cut[0].missingSegments == 0x3C);
+
+    // Segment 3 of a later burst, whose first segments were lost, does not
+    // fill this one's gap: it came far too late to be this burst's.
+    CHECK(!r.add(p[0], 3000000, DUPLICATE_SAMPLES, burst, nullptr, 0, F, 1));
+    CHECK(!r.add(p[1], 3000000 + F, DUPLICATE_SAMPLES, burst, nullptr, 0, F, 1));
+    CHECK(!r.add(q[3], 3000000 + 9 * F, DUPLICATE_SAMPLES, burst, nullptr, 0, F, 1));
+    cut = r.takeIncomplete();
+    CHECK(cut.size() == 1);
+    if (cut.size() == 1) CHECK(cut[0].missingSegments == 0x3C);
+    // On time, it would have.
+    CHECK(!r.add(p[0], 4000000, DUPLICATE_SAMPLES, burst, nullptr, 0, F, 1));
+    CHECK(!r.add(p[3], 4000000 + 3 * F + 50, DUPLICATE_SAMPLES, burst, nullptr, 0, F, 1));
+    CHECK(r.inProgress(0) && r.takeIncomplete().empty());
+    r.reset();
+
+    // A segment decoded again out of turn is a duplicate, not a new burst.
+    SegmentProgress progress;
+    CHECK(!r.add(p[0], 5000000, DUPLICATE_SAMPLES, burst));
+    CHECK(!r.add(p[2], 5000000 + 2 * F, DUPLICATE_SAMPLES, burst, &progress));
+    CHECK(progress.knownFrom == 2 * SEGMENT_DATA_BYTES && progress.bytes.size() == 3 * SEGMENT_DATA_BYTES);
+    CHECK(!r.add(p[1], 5000000 + F, DUPLICATE_SAMPLES, burst, &progress));
+    CHECK(progress.knownFrom == 0);
+    CHECK(!r.add(p[2], 5000000 + 2 * F + 3, 0, burst, &progress));
+    CHECK(progress.duplicate);
+    out = reassemble(r, {p[3], p[4], p[5]}, 5000000 + 3 * F);
+    CHECK(out.size() == 1 && out[0].missingSegments == 0 && sameBurst(out[0], first));
+    CHECK(r.takeIncomplete().empty());
 }
 
 // A whole burst from a faster station heard between two frames of a slower
@@ -339,14 +420,87 @@ void testFirstSegmentKnownBits()
     }
 }
 
+// Every segment segmentBursts() cuts reads back as it was written and
+// passes isLinkSegment(); random payloads mostly do not.
+void testLinkSegments()
+{
+    Random rng(6);
+    for (int used : {1, 9, 10, 14, 30, 54})
+    {
+        for (bool text : {false, true})
+        {
+            if (!text && used > SIGNALLING_BYTES) continue;
+            LinkBurst burst = makeBurst(text, used, rng);
+            std::vector<Payload> payloads = segmentBursts({burst}, 2, {0x5A});
+            size_t segments = payloads.size();
+            if (readSegment(payloads.back()).index == FILLER_SEGMENT_INDEX) segments--;
+            for (size_t i = 0; i < payloads.size(); i++)
+            {
+                const Payload& p = payloads[i];
+                CHECK(isLinkSegment(p, SIGNALLING_BYTES, TEXT_BYTES));
+                Segment segment = readSegment(p);
+                if (segment.index == FILLER_SEGMENT_INDEX)
+                {
+                    CHECK(i == payloads.size() - 1 && !segment.text && !segment.last);
+                    CHECK(segment.bytes[0] == 0x5A);
+                    continue;
+                }
+                CHECK(segment.text == text && segment.index == (int)i);
+                CHECK(segment.last == (i == segments - 1));
+                for (int b = 0; b < SEGMENT_DATA_BYTES; b++)
+                {
+                    size_t at = i * SEGMENT_DATA_BYTES + (size_t)b;
+                    CHECK(segment.bytes[(size_t)b] == (at < burst.bytes.size() ? burst.bytes[at] : 0));
+                }
+            }
+        }
+    }
+
+    // Segments no sender cuts: an index past the frame, the last segment
+    // not flagged last, bytes past the end of a frame, a text filler.
+    uint8_t bytes[SEGMENT_DATA_BYTES] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
+    auto segment = [&](bool text, int index, bool last, int length) {
+        Payload p{};
+        int at = 0;
+        auto put = [&](unsigned v, int n) {
+            for (int b = n - 1; b >= 0; b--) p[(size_t)at++] = (uint8_t)((v >> b) & 1);
+        };
+        put(text ? 1 : 0, 1);
+        put((unsigned)index, 3);
+        put(last ? 1 : 0, 1);
+        for (int i = 0; i < SEGMENT_DATA_BYTES; i++) put(i < length ? bytes[i] : 0, 8);
+        return p;
+    };
+    CHECK(isLinkSegment(segment(false, 1, true, 5), SIGNALLING_BYTES, TEXT_BYTES));
+    CHECK(!isLinkSegment(segment(false, 1, true, 6), SIGNALLING_BYTES, TEXT_BYTES));
+    CHECK(!isLinkSegment(segment(false, 1, false, 5), SIGNALLING_BYTES, TEXT_BYTES));
+    CHECK(!isLinkSegment(segment(false, 2, true, 5), SIGNALLING_BYTES, TEXT_BYTES));
+    CHECK(isLinkSegment(segment(true, 5, true, 9), SIGNALLING_BYTES, TEXT_BYTES));
+    CHECK(!isLinkSegment(segment(true, 5, false, 9), SIGNALLING_BYTES, TEXT_BYTES));
+    CHECK(!isLinkSegment(segment(true, 6, true, 9), SIGNALLING_BYTES, TEXT_BYTES));
+    CHECK(isLinkSegment(segment(false, FILLER_SEGMENT_INDEX, false, 9), SIGNALLING_BYTES, TEXT_BYTES));
+    CHECK(!isLinkSegment(segment(true, FILLER_SEGMENT_INDEX, false, 9), SIGNALLING_BYTES, TEXT_BYTES));
+    CHECK(!isLinkSegment(segment(false, FILLER_SEGMENT_INDEX, true, 0), SIGNALLING_BYTES, TEXT_BYTES));
+
+    int passed = 0;
+    for (int trial = 0; trial < 3200; trial++)
+    {
+        if (isLinkSegment(rng.payload(), SIGNALLING_BYTES, TEXT_BYTES)) passed++;
+    }
+    // About 14 in 32.
+    CHECK(passed > 1200 && passed < 1600);
+}
+
 int main()
 {
     testRoundTrip();
     testFirstSegmentKnownBits();
+    testLinkSegments();
     testTrailingZeros();
     testDuetFiller();
     testFillerFrame();
     testOutOfOrder();
+    testCutShort();
     testDuplicates();
     testInterleavedStations();
     testOverTheModem();

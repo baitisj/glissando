@@ -32,6 +32,7 @@
 //
 //=========================================================================
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -789,6 +790,126 @@ void testFeatureByte()
 
 } // namespace
 
+// A text frame that lost some of its blocks (Glissando segments) reads for
+// the blocks that came, with "..." for each run of them lost: each block's
+// text decodes on its own. One that lost any of its header does not read.
+void testPartialFrames()
+{
+    Frame original = makeMessageFrame();
+    const std::string sentence = "The quick brown fox jumps over the lazy dog, 73 de W1AW";
+    original.payload.assign(sentence.begin(), sentence.end());
+    std::vector<uint8_t> encoded = FrameCodec::encode(original, TEXT_FRAME_BYTES);
+    CHECK((int)encoded.size() == TEXT_FRAME_BYTES);
+    CHECK(sentBytes(encoded) > 4 * 9); // five blocks or more
+
+    Frame frame;
+    CHECK(FrameCodec::decodePartial(encoded.data(), (int)encoded.size(), 0, frame));
+    CHECK(!frame.partial && text(frame) == sentence);
+
+    auto lose = [&](uint8_t blocks) {
+        std::vector<uint8_t> bytes = encoded;
+        for (int b = 0; b < 6; b++)
+        {
+            if (blocks & (1u << b)) std::fill(bytes.begin() + 9 * b, bytes.begin() + 9 * (b + 1), 0);
+        }
+        return bytes;
+    };
+    const int header = FrameCodec::headerBits(FrameType::Message, true);
+    auto blockText = [&](int from, int to) { return HamText::decode(encoded.data(), from, to); };
+
+    // Block 2 lost: blocks 0 and 1 begin the sentence, blocks 3 on end it.
+    std::vector<uint8_t> holed = lose(1u << 2);
+    CHECK(FrameCodec::decodePartial(holed.data(), (int)holed.size(), 1u << 2, frame));
+    CHECK(frame.partial);
+    CHECK(frame.originCallsign == "W1AW" && frame.airId == 0x2EF && frame.fragmentIndex == 1 &&
+          frame.fragmentCount == 3 && frame.destinationCrc == original.destinationCrc);
+    std::string before = blockText(header, 144);
+    std::string after = blockText(216, 8 * TEXT_FRAME_BYTES);
+    CHECK(!before.empty() && !after.empty());
+    CHECK(text(frame) == before + "..." + after);
+    CHECK(sentence.compare(0, before.size(), before) == 0);
+    CHECK(sentence.size() > after.size() &&
+          sentence.compare(sentence.size() - after.size(), after.size(), after) == 0);
+
+    // Two blocks lost together are one gap; two apart are two.
+    holed = lose(0x0C);
+    CHECK(FrameCodec::decodePartial(holed.data(), (int)holed.size(), 0x0C, frame));
+    CHECK(text(frame) == before + "..." + blockText(288, 8 * TEXT_FRAME_BYTES));
+    holed = lose(0x14);
+    CHECK(FrameCodec::decodePartial(holed.data(), (int)holed.size(), 0x14, frame));
+    CHECK(text(frame) == before + "..." + blockText(216, 288) + "..." + blockText(360, 8 * TEXT_FRAME_BYTES));
+
+    // The end never came.
+    holed = lose(0x38);
+    CHECK(FrameCodec::decodePartial(holed.data(), (int)holed.size(), 0x38, frame));
+    CHECK(text(frame) == before + blockText(144, 216) + "...");
+
+    // The header is in block 0 and, by one bit, block 1: without either,
+    // nothing says whose frame it is or which message it belongs to.
+    holed = lose(1u << 0);
+    CHECK(!FrameCodec::decodePartial(holed.data(), (int)holed.size(), 1u << 0, frame));
+    holed = lose(1u << 1);
+    CHECK(!FrameCodec::decodePartial(holed.data(), (int)holed.size(), 1u << 1, frame));
+
+    // Signalling frames are not read in part.
+    std::vector<uint8_t> ping = FrameCodec::encode(makePingFrame(), SIGNALLING_FRAME_BYTES);
+    CHECK(!ping.empty());
+    CHECK(!FrameCodec::decodePartial(ping.data(), (int)ping.size(), 1u << 1, frame));
+}
+
+// The first nine bytes of a frame, a Glissando burst's first segment, are
+// checked as far as they go.
+void testCouldBeginFrame()
+{
+    const int first = 9;
+    for (const char* call : {"W1AW", "VK3ABC/P", "VE3/W1ABC"})
+    {
+        Frame message = makeMessageFrame();
+        message.originCallsign = call;
+        std::vector<uint8_t> encoded = FrameCodec::encode(message, TEXT_FRAME_BYTES);
+        CHECK(!encoded.empty());
+        CHECK(FrameCodec::couldBeginFrame(encoded.data(), first, false));
+        CHECK(!FrameCodec::couldBeginFrame(encoded.data(), first, true));
+
+        Frame ping = makePingFrame();
+        ping.originCallsign = call;
+        encoded = FrameCodec::encode(ping, SIGNALLING_FRAME_BYTES);
+        CHECK(!encoded.empty());
+        CHECK(FrameCodec::couldBeginFrame(encoded.data(), first, true));
+        CHECK(!FrameCodec::couldBeginFrame(encoded.data(), first, false));
+
+        Frame locator;
+        locator.type = FrameType::Locator;
+        locator.originCallsign = call;
+        locator.locator = "CN87";
+        encoded = FrameCodec::encodeShortLocator(locator, SIGNALLING_FRAME_BYTES);
+        CHECK(!encoded.empty());
+        CHECK(FrameCodec::couldBeginFrame(encoded.data(), first, true));
+    }
+
+    // Type codes no frame uses.
+    std::vector<uint8_t> encoded = FrameCodec::encode(makeMessageFrame(), TEXT_FRAME_BYTES);
+    for (uint8_t code : {0x0, 0x1, 0x2, 0x9, 0xA})
+    {
+        std::vector<uint8_t> bytes = encoded;
+        bytes[0] = (uint8_t)((code << 4) | (bytes[0] & 0x0F));
+        CHECK(!FrameCodec::couldBeginFrame(bytes.data(), first, false));
+        CHECK(!FrameCodec::couldBeginFrame(bytes.data(), first, true));
+    }
+
+    // A standard callsign past the alphabets' range: its 28 bits follow
+    // the form bit at ORIGIN_BIT (24), so they are the low four bits of
+    // byte 3 and all of bytes 4 to 6.
+    std::vector<uint8_t> bytes = encoded;
+    CHECK((bytes[3] & 0x10) == 0);
+    bytes[3] |= 0x0F;
+    bytes[4] = bytes[5] = bytes[6] = 0xFF;
+    CHECK(!FrameCodec::couldBeginFrame(bytes.data(), first, false));
+    // Cut short before the callsign ends, it cannot be ruled out.
+    CHECK(FrameCodec::couldBeginFrame(bytes.data(), 6, false));
+    CHECK(!FrameCodec::couldBeginFrame(nullptr, first, false));
+}
+
 int main()
 {
     testCallsignEncoding();
@@ -808,6 +929,8 @@ int main()
     testLocatorFrame();
     testShortLocatorFrame();
     testFeatureByte();
+    testPartialFrames();
+    testCouldBeginFrame();
 
     if (failures > 0)
     {

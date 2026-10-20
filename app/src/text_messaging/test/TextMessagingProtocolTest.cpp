@@ -200,6 +200,17 @@ public:
         return nullptr;
     }
 
+    // What the window shows for a message now: as last updated, or as added.
+    std::string textNow(int64_t id) const
+    {
+        if (const TextMessage* update = lastUpdateFor(id)) return update->text;
+        for (const TextMessage& message : added)
+        {
+            if (message.id == id) return message.text;
+        }
+        return std::string();
+    }
+
     std::vector<TextMessage> added;
     std::vector<TextMessage> updated;
     int stationsChanged = 0;
@@ -1903,8 +1914,12 @@ void testRetriesFillInAMessageOverTime()
     receiver.nowMs += step;
     receiver.protocol.tick();
     decodeInto(receiver, 2);
+    // Shown for what it had once the first attempt was over, and that line
+    // filled in as the rest came.
     CHECK(receiver.observer.added.size() == 1);
-    CHECK(!receiver.observer.added.empty() && receiver.observer.added[0].text == body);
+    CHECK(!receiver.observer.added.empty() &&
+          receiver.observer.added[0].text == std::string(perFragment('A'), 'A') + "...");
+    CHECK(!receiver.observer.added.empty() && receiver.observer.textNow(receiver.observer.added[0].id) == body);
 
     // Silence for longer than the timeout still drops what was held.
     Station quiet("VK3ABC");
@@ -1979,6 +1994,101 @@ void testReservationFollowsTheBurstsStillToCome()
     CHECK(waited <= (uint64_t)MAX_TURNAROUND_MILLISECONDS);
 }
 
+// A fragment heard with segments missing (Glissando's partial copy) is
+// shown with the rest of the message once the sender's keying is over. It
+// is not taken as received, so the sender is asked for it again, and the
+// line it is shown on reads in full when a whole copy arrives.
+void testPartialFragmentIsShownAndFilledIn()
+{
+    Station sender("W1AW");
+    Station receiver("VK3ABC");
+
+    std::string error;
+    std::string body(perFragment('A') * 2 + 10, 'A'); // three fragments
+    CHECK(sender.protocol.sendMessage(body, "VK3ABC", error));
+    sender.completeOneTransmission();
+    std::vector<std::vector<uint8_t>> first = sender.transport.transmissions.back();
+    CHECK(first.size() == 3);
+
+    auto textOf = [](const Frame& frame) { return std::string(frame.payload.begin(), frame.payload.end()); };
+    Frame middle = decodeOne(first[1]);
+    const std::string heard = std::string(10, 'A') + "..." + std::string(10, 'A');
+    middle.partial = true;
+    middle.payload.assign(heard.begin(), heard.end());
+    receiver.protocol.onFrameReceived(decodeOne(first[0]), 5.0f);
+    receiver.protocol.onFrameReceived(middle, 5.0f);
+    receiver.protocol.onFrameReceived(decodeOne(first[2]), 5.0f);
+    CHECK(receiver.observer.added.empty());
+
+    // The keying is over: shown for what came, and fragment two asked for.
+    receiver.completeOneTransmission();
+    CHECK(receiver.observer.added.size() == 1);
+    const std::string shown = textOf(decodeOne(first[0])) + heard + textOf(decodeOne(first[2]));
+    CHECK(!receiver.observer.added.empty() && receiver.observer.added[0].text == shown);
+    CHECK(!receiver.observer.added.empty() && receiver.observer.added[0].status == MessageStatus::Received);
+    CHECK(receiver.transport.transmissions.size() == 1);
+    Frame ask = decodeOne(receiver.transport.transmissions.back()[0]);
+    CHECK(ask.type == FrameType::MessagePartialAck);
+    CHECK(ask.payload.size() == 1 && ask.payload[0] == 0x05);
+
+    // The resend comes whole: the same line reads in full, in the window and
+    // in the store, and one acknowledgement goes back.
+    sender.receiveFrom(receiver.transport);
+    sender.completeOneTransmission();
+    receiver.receiveFrom(sender.transport);
+    CHECK(receiver.observer.added.size() == 1);
+    int64_t line = receiver.observer.added.empty() ? 0 : receiver.observer.added[0].id;
+    CHECK(receiver.observer.textNow(line) == body);
+    bool stored = false;
+    for (const TextMessage& message : receiver.store.recentMessages(10))
+    {
+        if (message.id == line) stored = message.text == body && message.status == MessageStatus::Received;
+    }
+    CHECK(stored);
+    receiver.completeOneTransmission();
+    CHECK(decodeOne(receiver.transport.transmissions.back()[0]).type == FrameType::MessageAck);
+
+    // A partial copy of a message held whole already changes nothing.
+    Frame late = middle;
+    receiver.protocol.onFrameReceived(late, 5.0f);
+    receiver.completeOneTransmission();
+    CHECK(receiver.observer.added.size() == 1 && receiver.observer.textNow(line) == body);
+}
+
+// A broadcast heard in part is shown too, and nobody is asked for anything.
+void testPartialBroadcastIsShown()
+{
+    Station sender("W1AW");
+    Station listener("VK3ABC");
+
+    std::string error;
+    std::string body(perFragment('B') + 10, 'B'); // two fragments
+    CHECK(sender.protocol.sendMessage(body, "", error));
+    sender.completeOneTransmission();
+    std::vector<std::vector<uint8_t>> frames = sender.transport.transmissions.back();
+    CHECK(frames.size() == 2);
+
+    Frame second = decodeOne(frames[1]);
+    second.partial = true;
+    const std::string heard = "BBB...";
+    second.payload.assign(heard.begin(), heard.end());
+    listener.protocol.onFrameReceived(decodeOne(frames[0]), 5.0f);
+    listener.protocol.onFrameReceived(second, 5.0f);
+    listener.completeOneTransmission();
+    CHECK(listener.observer.added.size() == 1);
+    CHECK(!listener.observer.added.empty() && listener.observer.added[0].broadcast);
+    CHECK(!listener.observer.added.empty() &&
+          listener.observer.added[0].text == std::string(perFragment('B'), 'B') + heard);
+    CHECK(listener.transport.transmissions.empty());
+
+    // A message missing a whole fragment shows "..." for it.
+    Station other("VK3XYZ");
+    other.protocol.onFrameReceived(decodeOne(frames[1]), 5.0f);
+    other.completeOneTransmission();
+    CHECK(other.observer.added.size() == 1);
+    CHECK(!other.observer.added.empty() && other.observer.added[0].text == "..." + std::string(10, 'B'));
+}
+
 // A receiver that heard part of a message tells the sender which fragments
 // arrived once the sender's keying is over, and the sender resends just the
 // rest, at once, without counting a retry.
@@ -2024,10 +2134,11 @@ void testMissingFragmentsAreAskedForAndResent()
     CHECK(resent.burstsFollowing == 0);
     CHECK(!everUpdatedTo(sender.observer, id, MessageStatus::Retrying));
 
-    // The resend completes the message; one plain acknowledgement goes back.
+    // The resend completes the message, on the line that showed it in part;
+    // one plain acknowledgement goes back.
     receiver.receiveFrom(sender.transport);
     CHECK(receiver.observer.added.size() == 1);
-    CHECK(!receiver.observer.added.empty() && receiver.observer.added[0].text == body);
+    CHECK(!receiver.observer.added.empty() && receiver.observer.textNow(receiver.observer.added[0].id) == body);
     CHECK(receiver.protocol.pendingCount() == 1);
     receiver.completeOneTransmission();
     CHECK(decodeOne(receiver.transport.transmissions.back()[0]).type == FrameType::MessageAck);
@@ -2173,7 +2284,7 @@ void testProgressDoesNotUseUpRetries()
     }
 
     CHECK(receiver.observer.added.size() == 1);
-    CHECK(!receiver.observer.added.empty() && receiver.observer.added[0].text == body);
+    CHECK(!receiver.observer.added.empty() && receiver.observer.textNow(receiver.observer.added[0].id) == body);
     receiver.completeOneTransmission();
     sender.receiveFrom(receiver.transport);
 
@@ -3460,6 +3571,8 @@ int main()
     testMessageIdsStartAtRandom();
     testRetriesFillInAMessageOverTime();
     testMissingFragmentsAreAskedForAndResent();
+    testPartialFragmentIsShownAndFilledIn();
+    testPartialBroadcastIsShown();
     testLostLastFragmentStillAsksForTheRest();
     testQueuedReportsStayCurrent();
     testQueuedTransmissionsAreReported();

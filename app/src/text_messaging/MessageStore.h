@@ -70,6 +70,9 @@ public:
 
     bool updateMessageStatus(int64_t id, MessageStatus status, int retryCount);
 
+    // A received message shown in part and filled in since (partial copy).
+    bool updateMessageText(int64_t id, const std::string& text, MessageStatus status);
+
     // Most recent messages first in the database, returned oldest first so the
     // chat window can append them in order.
     std::vector<TextMessage> recentMessages(int limit);
