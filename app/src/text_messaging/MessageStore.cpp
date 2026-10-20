@@ -331,6 +331,36 @@ bool MessageStore::updateMessageStatus(int64_t id, MessageStatus status, int ret
     return ok;
 }
 
+bool MessageStore::updateMessageText(int64_t id, const std::string& text, MessageStatus status)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (db_ == nullptr)
+    {
+        lastError_ = "database is not open";
+        return false;
+    }
+
+    const char* sql = "UPDATE messages SET body = ?, status = ? WHERE id = ?;";
+
+    sqlite3_stmt* statement = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &statement, nullptr) != SQLITE_OK)
+    {
+        setError("preparing text update");
+        return false;
+    }
+
+    sqlite3_bind_text(statement, 1, text.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(statement, 2, statusToInt(status));
+    sqlite3_bind_int64(statement, 3, (sqlite3_int64)id);
+
+    bool ok = sqlite3_step(statement) == SQLITE_DONE;
+    if (!ok) setError("updating message text");
+    sqlite3_finalize(statement);
+
+    return ok;
+}
+
 std::vector<TextMessage> MessageStore::recentMessages(int limit)
 {
     std::lock_guard<std::mutex> lock(mutex_);

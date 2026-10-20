@@ -7,8 +7,10 @@
 #include <cmath>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "../GlissandoFec.h"
+#include "../GlissandoInternal.h"
 #include "GlissandoTestUtil.h"
 #include "GlissandoVectors.h"
 
@@ -189,6 +191,108 @@ void testKnownBits()
     CHECK(wrongPasses <= 1);
 }
 
+// List decoding: rank 0 is the path decodeFrame() picks, every payload
+// listed passes the CRC, and the runners-up rescue some frames the best
+// path gets wrong. Through noise each runner-up passes the CRC by luck one
+// time in 16384, as the best path does.
+void testListDecode()
+{
+    Random rng(17);
+    const double sigma = std::sqrt(1.0 / (2.0 * std::pow(10.0, -3.0 / 10.0)));
+    int plain = 0;
+    int listed = 0;
+    for (int trial = 0; trial < 200; trial++)
+    {
+        Payload payload = rng.payload();
+        CodedFrame coded = encodeFrame(payload);
+        FrameLlrs noisy;
+        for (int i = 0; i < FRAME_BITS; i++)
+        {
+            double y = (coded[i] ? -1.0 : 1.0) + sigma * rng.gaussian();
+            noisy[i] = (float)(2.0 * y / (sigma * sigma));
+        }
+
+        Payload decoded{};
+        bool best = decodeFrame(noisy, decoded);
+        std::vector<ListDecode> list = decodeFrameList(noisy, noKnownBits(), MAX_LIST_SIZE);
+        CHECK(best == (!list.empty() && list[0].rank == 0));
+        if (best) CHECK(list[0].payload == decoded);
+        int lastRank = -1;
+        for (const ListDecode& d : list)
+        {
+            CHECK(d.rank > lastRank && d.rank < MAX_LIST_SIZE);
+            lastRank = d.rank;
+            Payload again{};
+            CHECK(decodeFrame(cleanLlrs(encodeFrame(d.payload), 4.0f), again) && again == d.payload);
+        }
+        if (best && decoded == payload) plain++;
+        for (const ListDecode& d : list)
+        {
+            if (d.payload == payload)
+            {
+                listed++;
+                break;
+            }
+        }
+
+        // Known bits hold on every path.
+        KnownBits known = noKnownBits();
+        for (int i = 0; i < 8; i++) known[(size_t)i] = (int8_t)payload[(size_t)i];
+        for (const ListDecode& d : decodeFrameList(noisy, known, MAX_LIST_SIZE))
+        {
+            for (int i = 0; i < 8; i++) CHECK(d.payload[(size_t)i] == payload[(size_t)i]);
+        }
+    }
+    printf("list of %d, noisy: %d/200 decoded by the best path, %d/200 somewhere on the list\n", MAX_LIST_SIZE,
+           plain, listed);
+    CHECK(listed >= plain + 30);
+
+    int luckyPaths = 0;
+    const int noiseFrames = 2000;
+    for (int trial = 0; trial < noiseFrames; trial++)
+    {
+        FrameLlrs random;
+        for (auto& l : random) l = (float)(rng.gaussian() * 3.0);
+        for (const ListDecode& d : decodeFrameList(random, noKnownBits(), MAX_LIST_SIZE))
+        {
+            if (d.rank > 0) luckyPaths++;
+        }
+    }
+    // Expected 2000 x 15 / 16384, about 1.8.
+    CHECK(luckyPaths <= 8);
+}
+
+// How much of what was heard argues against a payload: nothing for the
+// payload sent, everything without any evidence, and a confident wrong bit
+// more than a doubtful one.
+void testDisagreement()
+{
+    Random rng(19);
+    Payload payload = rng.payload();
+    CodedFrame coded = encodeFrame(payload);
+    FrameLlrs llrs = cleanLlrs(coded, 2.0f);
+    CHECK(detail::disagreement(llrs, payload) == 0.0);
+    CHECK(detail::hardErrors(llrs, payload) == 0);
+
+    FrameLlrs none{};
+    CHECK(detail::disagreement(none, payload) == 1.0);
+
+    FrameLlrs doubtful = llrs;
+    FrameLlrs confident = llrs;
+    doubtful[0] = -0.2f * llrs[0];
+    confident[0] = -4.0f * llrs[0];
+    CHECK(detail::hardErrors(doubtful, payload) == 1 && detail::hardErrors(confident, payload) == 1);
+    double small = detail::disagreement(doubtful, payload);
+    double large = detail::disagreement(confident, payload);
+    CHECK(small > 0.0 && small < large && large < 1.0);
+    // 0.4 of the 388.4 total weight.
+    CHECK(std::fabs(small - 0.4 / (194 * 2.0 + 0.4)) < 1e-6);
+
+    // Another payload, re-encoded, disagrees with about half the weight.
+    double other = detail::disagreement(llrs, rng.payload());
+    CHECK(other > 0.3 && other < 0.7);
+}
+
 } // namespace
 
 int main()
@@ -197,6 +301,8 @@ int main()
     testDecode();
     testKnownZeroTail();
     testKnownBits();
+    testListDecode();
+    testDisagreement();
     if (failures == 0) printf("glissando FEC tests passed\n");
     return failures == 0 ? 0 : 1;
 }

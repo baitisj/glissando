@@ -7,6 +7,7 @@
 #include "GlissandoFec.h"
 
 #include <algorithm>
+#include <vector>
 
 namespace Glissando
 {
@@ -56,6 +57,56 @@ void encoderOutput(int state, int input, int out[2])
 int nextState(int state, int input)
 {
     return ((state << 1) | input) & (NUM_STATES - 1);
+}
+
+constexpr int STEPS = CODED_BITS / 2; // 97
+constexpr double UNREACHABLE = -1e18;
+
+// Predecessors of each state. State ns is reached with input u = ns & 1
+// from ns >> 1 and from (ns >> 1) | 32, listed in that order, the order
+// the prototype's table has them (it matters only for exact ties).
+struct Trellis
+{
+    int prevState[NUM_STATES][2];
+    int prevSign[NUM_STATES][2][2]; // +1 for a coded 0, -1 for a coded 1
+
+    Trellis()
+    {
+        for (int ns = 0; ns < NUM_STATES; ns++)
+        {
+            for (int p = 0; p < 2; p++)
+            {
+                int s = (ns >> 1) | (p ? NUM_STATES / 2 : 0);
+                int out[2];
+                encoderOutput(s, ns & 1, out);
+                prevState[ns][p] = s;
+                prevSign[ns][p][0] = 1 - 2 * out[0];
+                prevSign[ns][p][1] = 1 - 2 * out[1];
+            }
+        }
+    }
+
+    // The correlation of the two coded bits of the branch from predecessor
+    // p into ns with their LLRs.
+    double branch(int ns, int p, double l0, double l1) const
+    {
+        return 0.5 * (prevSign[ns][p][0] * l0 + prevSign[ns][p][1] * l1);
+    }
+};
+
+const Trellis& theTrellis()
+{
+    static const Trellis trellis;
+    return trellis;
+}
+
+// Payload and CRC check of a decoded path's information bits.
+bool finishPayload(const uint8_t* bits, Payload& payloadOut)
+{
+    for (int i = 0; i < PAYLOAD_BITS; i++) payloadOut[i] = bits[i];
+    uint16_t crc = 0;
+    for (int i = 0; i < CRC_BITS; i++) crc = (uint16_t)((crc << 1) | bits[PAYLOAD_BITS + i]);
+    return crc14(bits, PAYLOAD_BITS) == crc;
 }
 
 } // namespace
@@ -111,31 +162,13 @@ bool decodeFrame(const FrameLlrs& llrs, Payload& payloadOut, const KnownBits& kn
 {
     double deinterleaved[FRAME_BITS];
     for (int i = 0; i < FRAME_BITS; i++) deinterleaved[INTERLEAVE[i]] = llrs[i];
-
-    // Predecessors of each state. State ns is reached with input u = ns & 1
-    // from ns >> 1 and from (ns >> 1) | 32, listed in that order, the order
-    // the prototype's table has them (it matters only for exact ties).
-    int prevState[NUM_STATES][2];
-    int prevSign[NUM_STATES][2][2]; // +1 for a coded 0, -1 for a coded 1
-    for (int ns = 0; ns < NUM_STATES; ns++)
-    {
-        for (int p = 0; p < 2; p++)
-        {
-            int s = (ns >> 1) | (p ? NUM_STATES / 2 : 0);
-            int out[2];
-            encoderOutput(s, ns & 1, out);
-            prevState[ns][p] = s;
-            prevSign[ns][p][0] = 1 - 2 * out[0];
-            prevSign[ns][p][1] = 1 - 2 * out[1];
-        }
-    }
+    const Trellis& trellis = theTrellis();
 
     // Soft Viterbi maximising the correlation between LLRs and +/-1 code bits.
-    constexpr int STEPS = CODED_BITS / 2; // 97
     double metric[NUM_STATES];
     double nextMetric[NUM_STATES];
     uint8_t decisions[STEPS][NUM_STATES];
-    for (int s = 0; s < NUM_STATES; s++) metric[s] = -1e18;
+    for (int s = 0; s < NUM_STATES; s++) metric[s] = UNREACHABLE;
     metric[0] = 0.0;
 
     for (int t = 0; t < STEPS; t++)
@@ -149,12 +182,12 @@ bool decodeFrame(const FrameLlrs& llrs, Payload& payloadOut, const KnownBits& kn
         {
             if (knownInput >= 0 && (ns & 1) != knownInput)
             {
-                nextMetric[ns] = -1e18;
+                nextMetric[ns] = UNREACHABLE;
                 decisions[t][ns] = 0;
                 continue;
             }
-            double c0 = metric[prevState[ns][0]] + 0.5 * (prevSign[ns][0][0] * l0 + prevSign[ns][0][1] * l1);
-            double c1 = metric[prevState[ns][1]] + 0.5 * (prevSign[ns][1][0] * l0 + prevSign[ns][1][1] * l1);
+            double c0 = metric[trellis.prevState[ns][0]] + trellis.branch(ns, 0, l0, l1);
+            double c1 = metric[trellis.prevState[ns][1]] + trellis.branch(ns, 1, l0, l1);
             bool pickSecond = c1 > c0;
             nextMetric[ns] = pickSecond ? c1 : c0;
             decisions[t][ns] = pickSecond ? 1 : 0;
@@ -168,13 +201,92 @@ bool decodeFrame(const FrameLlrs& llrs, Payload& payloadOut, const KnownBits& kn
     for (int t = STEPS - 1; t >= 0; t--)
     {
         bits[t] = (uint8_t)(state & 1);
-        state = prevState[state][decisions[t][state]];
+        state = trellis.prevState[state][decisions[t][state]];
+    }
+    return finishPayload(bits, payloadOut);
+}
+
+std::vector<ListDecode> decodeFrameList(const FrameLlrs& llrs, const KnownBits& known, int listSize)
+{
+    std::vector<ListDecode> out;
+    listSize = std::min(std::max(listSize, 1), MAX_LIST_SIZE);
+    double deinterleaved[FRAME_BITS];
+    for (int i = 0; i < FRAME_BITS; i++) deinterleaved[INTERLEAVE[i]] = llrs[i];
+    const Trellis& trellis = theTrellis();
+
+    // Parallel list Viterbi (Seshadri and Sundberg 1994): every state keeps
+    // its listSize best paths, best first, rather than one. A path into ns
+    // comes from rank r at one of its two predecessors, so the best
+    // listSize into ns are a merge of two sorted lists. Each kept path
+    // remembers which predecessor and rank it came from.
+    std::vector<double> metric((size_t)NUM_STATES * listSize, UNREACHABLE);
+    std::vector<double> nextMetric(metric.size());
+    std::vector<uint8_t> from((size_t)STEPS * NUM_STATES * listSize);
+    auto M = [&](std::vector<double>& m, int s, int r) -> double& { return m[(size_t)s * listSize + r]; };
+    M(metric, 0, 0) = 0.0;
+
+    for (int t = 0; t < STEPS; t++)
+    {
+        double l0 = deinterleaved[2 * t];
+        double l1 = deinterleaved[2 * t + 1];
+        int knownInput = t < PAYLOAD_BITS ? known[t] : -1;
+        for (int ns = 0; ns < NUM_STATES; ns++)
+        {
+            uint8_t* f = from.data() + ((size_t)t * NUM_STATES + ns) * listSize;
+            if (knownInput >= 0 && (ns & 1) != knownInput)
+            {
+                for (int r = 0; r < listSize; r++)
+                {
+                    M(nextMetric, ns, r) = UNREACHABLE;
+                    f[r] = 0;
+                }
+                continue;
+            }
+            int p0 = trellis.prevState[ns][0];
+            int p1 = trellis.prevState[ns][1];
+            double b0 = trellis.branch(ns, 0, l0, l1);
+            double b1 = trellis.branch(ns, 1, l0, l1);
+            // Ties go to the first predecessor, as decodeFrame() breaks them,
+            // so rank 0 is always the path decodeFrame() picks.
+            int i = 0, j = 0;
+            for (int r = 0; r < listSize; r++)
+            {
+                double a = i < listSize ? M(metric, p0, i) + b0 : UNREACHABLE;
+                double b = j < listSize ? M(metric, p1, j) + b1 : UNREACHABLE;
+                if (b > a)
+                {
+                    M(nextMetric, ns, r) = b;
+                    f[r] = (uint8_t)(0x80 | j++);
+                }
+                else
+                {
+                    M(nextMetric, ns, r) = a;
+                    f[r] = (uint8_t)i++;
+                }
+            }
+        }
+        std::swap(metric, nextMetric);
     }
 
-    for (int i = 0; i < PAYLOAD_BITS; i++) payloadOut[i] = bits[i];
-    uint16_t crc = 0;
-    for (int i = 0; i < CRC_BITS; i++) crc = (uint16_t)((crc << 1) | bits[PAYLOAD_BITS + i]);
-    return crc14(bits, PAYLOAD_BITS) == crc;
+    for (int rank = 0; rank < listSize; rank++)
+    {
+        // Fewer paths than the list holds can reach the end (known bits).
+        if (!(M(metric, 0, rank) > UNREACHABLE / 2)) break;
+        uint8_t bits[STEPS];
+        int state = 0;
+        int r = rank;
+        for (int t = STEPS - 1; t >= 0; t--)
+        {
+            bits[t] = (uint8_t)(state & 1);
+            uint8_t f = from[((size_t)t * NUM_STATES + state) * listSize + r];
+            r = f & 0x7f;
+            state = trellis.prevState[state][(f & 0x80) ? 1 : 0];
+        }
+        ListDecode d;
+        d.rank = rank;
+        if (finishPayload(bits, d.payload)) out.push_back(d);
+    }
+    return out;
 }
 
 } // namespace Glissando

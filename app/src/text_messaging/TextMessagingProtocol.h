@@ -36,6 +36,7 @@
 #define TEXT_MESSAGING__TEXT_MESSAGING_PROTOCOL_H
 
 #include <cstdint>
+#include <ctime>
 #include <deque>
 #include <functional>
 #include <map>
@@ -424,6 +425,16 @@ private:
         // fragments asks for them.
         uint64_t keyingEndsMs = 0;
         bool heardThisKeying = false;
+
+        // Partial copy, after JTTY. Fragments heard with segments missing
+        // (Frame::partial), as text with "..." in the gaps; they do not count
+        // as received. Once the keying that brought something new is over,
+        // a message still missing fragments is shown for what it has
+        // (showPending), and the same line is filled in as the rest arrives.
+        std::vector<std::string> partialFragments;
+        bool showPending = false;
+        int64_t shownId = 0;        // the message store row it is shown as, 0 for none yet
+        std::time_t shownAt = 0;
     };
 
     using ReassemblyKey = std::pair<std::string, uint16_t>;
@@ -451,6 +462,8 @@ private:
     void queueAckLocked(const std::string& destination, uint16_t airId);
     void queuePartialAckLocked(const std::string& destination, uint16_t airId, uint32_t received);
     void requestMissingFragmentsLocked(uint64_t nowMs);
+    void showPartialCopiesLocked(uint64_t nowMs, std::vector<PendingEvent>& events);
+    TextMessage receivedMessageLocked(const Frame& frame, const Reassembly& reassembly) const;
     void queuePongLocked(const std::string& destination, float snr);
     void reserveChannelForKeyingLocked(const Frame& frame, uint64_t nowMs);
     void handleIncomingFragmentLocked(const Frame& frame, float snr,

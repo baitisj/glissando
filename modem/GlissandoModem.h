@@ -19,6 +19,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -85,6 +86,12 @@ using Payload = std::array<uint8_t, PAYLOAD_BITS>;
 using KnownBits = std::array<int8_t, PAYLOAD_BITS>;
 KnownBits noKnownBits();
 
+// What a receiver knows a payload must look like beyond its CRC, such as
+// a segment the link layer could have sent (isLinkSegment() in
+// GlissandoLink.h). JTTY's decoder calls this its grammar check. See
+// ModemSettings::payloadCheck.
+using PayloadCheck = std::function<bool(const Payload&)>;
+
 struct ModemSettings
 {
     int gear = 3;
@@ -107,6 +114,14 @@ struct ModemSettings
     // a right guess needs less signal, a wrong one fails the CRC. Each
     // guess is another chance for noise to pass the CRC, so keep them few.
     std::vector<KnownBits> knownBits;
+
+    // Receive only. When no candidate decodes, the decoder lists the
+    // runners-up of each candidate's most likely payload and takes the
+    // first that passes the CRC (list decoding, as JTTY's decoder does).
+    // Every runner-up tried is another chance for noise to pass the CRC; a
+    // payloadCheck, when set, must accept it too, which turns most of those
+    // chances away. Unset, any payload passes.
+    PayloadCheck payloadCheck;
 };
 
 // One transmission: gearInfo(gear).voices payloads (one per voice), peak
@@ -153,6 +168,11 @@ struct Decode
     // it: 1, or more when the streaming receiver averaged a repeat with
     // copies it heard earlier but could not decode (StreamingReceiver).
     int copies = 1;
+
+    // How many frames decoded earlier, other stations' or ones at another
+    // tempo, the streaming receiver took out of the audio over this one
+    // before it decoded (signal subtraction). 0 when none overlapped it.
+    int framesRemoved = 0;
 };
 
 // Batch receiver: decodes every voice of a frame of the given settings that

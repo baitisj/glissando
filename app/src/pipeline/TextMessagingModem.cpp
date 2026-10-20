@@ -40,6 +40,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 
 #include "freedv_api.h"
 #include "util/logging/ulog.h"
@@ -116,6 +117,25 @@ float modemSnr(struct freedv* modem)
     return snr;
 }
 
+// What a payload must look like, beyond its CRC, for the receiver to take a
+// runner-up its list decoding found: a segment the link layer could have
+// cut, and when it is the first of a burst, or a filler carrying a frame,
+// one that begins the way chat frames do. About 11 random payloads in 32
+// pass.
+bool couldBeChatSegment(const Glissando::Payload& payload)
+{
+    if (!Glissando::isLinkSegment(payload, SIGNALLING_FRAME_BYTES, TEXT_FRAME_BYTES)) return false;
+    const Glissando::Segment segment = Glissando::readSegment(payload);
+    if (segment.index == Glissando::FILLER_SEGMENT_INDEX)
+    {
+        bool carries = false;
+        for (uint8_t byte : segment.bytes) carries = carries || byte != 0;
+        return !carries || FrameCodec::couldBeginFrame(segment.bytes.data(), (int)segment.bytes.size(), true);
+    }
+    if (segment.index != 0) return true;
+    return FrameCodec::couldBeginFrame(segment.bytes.data(), (int)segment.bytes.size(), !segment.text);
+}
+
 } // namespace
 
 TextMessagingModem::TextMessagingModem()
@@ -131,6 +151,7 @@ TextMessagingModem::TextMessagingModem()
     glissandoRx_->setDecodeCallback([this](const Glissando::StreamDecode& decode) {
         onGlissandoDecode(decode);
     });
+    glissandoRx_->setPayloadCheck(couldBeChatSegment);
 }
 
 TextMessagingModem::~TextMessagingModem()
@@ -586,6 +607,16 @@ void TextMessagingModem::resetReceivers()
 {
     {
         std::lock_guard<std::mutex> lock(glissandoMutex_);
+        // A burst still waiting for its last segments is over: whatever of
+        // it was heard is handed over at the next poll(). The caller may
+        // hold locks the frame callback takes.
+        reassembler_.expire(std::numeric_limits<long long>::max());
+        for (Glissando::LinkBurst& c : reassembler_.takeIncomplete())
+        {
+            auto it = streamHeard_.find(c.stream);
+            if (it == streamHeard_.end()) continue;
+            cutBursts_.push_back({std::move(c), it->second.first, it->second.second});
+        }
         reassembler_.reset();
         burstHeldUntil_.clear();
     }
@@ -976,6 +1007,7 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
     Glissando::LinkBurst burst;
     bool complete = false;
     float snr = (float)d.report.snrDb;
+    std::vector<CutBurst> cut;
     {
         std::lock_guard<std::mutex> lock(glissandoMutex_);
         glissandoStatus_.haveReport = true;
@@ -991,7 +1023,16 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
         GlissandoHeard heard;
         const Glissando::GearInfo& info = Glissando::gearInfo(decode.gear);
         const int stream = info.samplesPerSymbol() * Glissando::SCALE_COUNT + (int)d.scale;
-        complete = reassembler_.add(d.payload, d.startSample, duplicate, burst, &heard.segment, stream);
+        complete = reassembler_.add(d.payload, d.startSample, duplicate, burst, &heard.segment, stream,
+                                    info.frameSamples(), info.voices);
+        streamHeard_[stream] = {decode.gear, snr};
+        reassembler_.expire(glissandoRx_->samplesReceived());
+        for (Glissando::LinkBurst& c : reassembler_.takeIncomplete())
+        {
+            auto it = streamHeard_.find(c.stream);
+            cut.push_back({std::move(c), it != streamHeard_.end() ? it->second.first : decode.gear,
+                           it != streamHeard_.end() ? it->second.second : snr});
+        }
 
         // Until its next frame could have decoded: a frame on, and the
         // receiver's search behind it.
@@ -1035,17 +1076,76 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
     if (rxLogEnabled())
     {
         std::string averaged = d.copies > 1 ? ", averaged over " + std::to_string(d.copies) + " copies" : "";
-        log_info("RX: Glissando %s %s voice %d, %.1f dB, %.2f Hz Doppler, offset %+.1f Hz%s%s",
+        std::string removed =
+            d.framesRemoved > 0 ? ", heard under " + std::to_string(d.framesRemoved) + " frames taken out" : "";
+        log_info("RX: Glissando %s %s voice %d, %.1f dB, %.2f Hz Doppler, offset %+.1f Hz%s%s%s",
                  Glissando::gearInfo(decode.gear).tempo, Glissando::scaleName(d.scale), d.voice, d.report.snrDb,
-                 d.report.dopplerHz, d.frequencyOffsetHz, averaged.c_str(), complete ? ", burst complete" : "");
+                 d.report.dopplerHz, d.frequencyOffsetHz, averaged.c_str(), removed.c_str(),
+                 !complete ? "" : burst.missingSegments != 0 ? ", burst ends with segments missing" : ", burst complete");
     }
-    if (!complete) return;
+    for (const CutBurst& c : cut) deliverBurst(c.burst, c.gear, c.snr);
+    if (complete) deliverBurst(burst, decode.gear, snr);
+}
 
-    Frame frame;
-    if (!FrameCodec::decode(burst.bytes.data(), (int)burst.bytes.size(), frame))
+void TextMessagingModem::poll()
+{
+    std::vector<CutBurst> cut;
     {
-        if (rxLogEnabled()) log_info("RX: Glissando burst is not a chat frame");
-        return;
+        std::lock_guard<std::mutex> lock(glissandoMutex_);
+        reassembler_.expire(glissandoRx_->samplesReceived());
+        for (Glissando::LinkBurst& c : reassembler_.takeIncomplete())
+        {
+            auto it = streamHeard_.find(c.stream);
+            if (it == streamHeard_.end()) continue;
+            cut.push_back({std::move(c), it->second.first, it->second.second});
+        }
+        cut.insert(cut.begin(), cutBursts_.begin(), cutBursts_.end());
+        cutBursts_.clear();
+    }
+    for (const CutBurst& c : cut) deliverBurst(c.burst, c.gear, c.snr);
+}
+
+void TextMessagingModem::deliverBurst(const Glissando::LinkBurst& burst, int gear, float snr)
+{
+    Frame frame;
+    if (burst.missingSegments != 0)
+    {
+        // Only text is worth reading in part: a signalling burst's second
+        // segment is the end of a long callsign, and an acknowledgement or
+        // ping missing it says nothing.
+        bool read = false;
+        if (burst.text)
+        {
+            std::lock_guard<std::mutex> lock(glissandoMutex_);
+            read = partialCopies_.add(burst.bytes, burst.missingSegments, steadyMs(), frame);
+        }
+        if (!read)
+        {
+            if (rxLogEnabled()) log_info("RX: Glissando burst lost segments (0x%02x) it cannot be read without",
+                                         (unsigned)burst.missingSegments);
+            return;
+        }
+        if (rxLogEnabled())
+        {
+            log_info("RX: Glissando text from %s, message %u fragment %d of %d, %s", frame.originCallsign.c_str(),
+                     (unsigned)frame.airId, frame.fragmentIndex + 1, frame.fragmentCount,
+                     frame.partial ? "partial copy (segments missing)" : "whole, put together from partial copies");
+        }
+    }
+    else
+    {
+        if (!FrameCodec::decode(burst.bytes.data(), (int)burst.bytes.size(), frame))
+        {
+            if (rxLogEnabled()) log_info("RX: Glissando burst is not a chat frame");
+            return;
+        }
+        if (burst.text)
+        {
+            // A whole copy makes any partial ones of it redundant.
+            Frame whole;
+            std::lock_guard<std::mutex> lock(glissandoMutex_);
+            partialCopies_.add(burst.bytes, 0, steadyMs(), whole);
+        }
     }
 
     // Only a locator rides in a duet's spare voice: nothing else there is
@@ -1063,7 +1163,7 @@ void TextMessagingModem::onGlissandoDecode(const Glissando::StreamDecode& decode
 
     {
         std::lock_guard<std::mutex> lock(glissandoMutex_);
-        stationGears_.heard(frame.originCallsign, decode.gear, steadyMs());
+        stationGears_.heard(frame.originCallsign, gear, steadyMs());
     }
 
     FrameCallback callback;

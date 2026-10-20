@@ -75,6 +75,39 @@ constexpr double MIN_ES_OVER_N0 = 1.0;
 // so there are only two; a guess of 32 bits bought only 0.2 dB.
 constexpr int PADDING_HYPOTHESES[] = {64, 48};
 
+// A payload must also look like what was heard: re-encoded, it may
+// disagree with the sign of at most MAX_HARD_ERRORS of the 195 soft bits
+// (FT8 decoders make the same check). Every path the decoder tries is a
+// chance for noise to pass the 14-bit CRC. Through noise the best path as
+// heard disagrees in about 25 to 50 bits, and with a zero padding guess
+// forcing it, in 55 to 100; frames that decode near threshold disagree in
+// 0 to 44, mostly under 35, in AWGN and in fading alike, at every tempo.
+// So the ceiling turns away most of the padding guesses' paths through
+// noise, which were most of the chances, and none of the right decodes
+// measured.
+constexpr int MAX_HARD_ERRORS = 44;
+
+// List decoding, after JTTY's decoder. When the most likely payload of
+// every guess fails, the right one is often a runner-up: the decoder keeps
+// the LIST_SIZE most likely paths of each guess and tries the rest in turn.
+// In one frame trials at the 50 % point it decodes 28 % more frames at
+// Allegro in AWGN and 49 % more in CCIR poor fading, and about 30 % more at
+// Adagio, Andante and Presto in fading.
+//
+// A runner-up must agree with what was heard much more closely than noise
+// does: the soft bits it disagrees with may hold at most
+// MAX_LIST_DISAGREEMENT of the frame's soft weight (disagreement()). Right
+// runners-up measure 0.02 to 0.09, under 0.075 in fading, which piles the
+// evidence onto the frame's strong stretches; paths through noise measure
+// 0.045 to 0.12, mostly over 0.08. Hard errors tell the two apart far less
+// well. In 160 minutes of busy traffic at every tempo about 7000
+// runners-up an hour got under the ceiling, each a 1 in 16384 chance for
+// noise: a false decode every two hours or so before the caller's payload
+// check, where a ceiling of 40 hard errors let in 89000 an hour, and in
+// fading fewer right ones.
+constexpr int LIST_SIZE = 16;
+constexpr double MAX_LIST_DISAGREEMENT = 0.075;
+
 // ---------------------------------------------------------------- helpers
 
 // sum a[n] * conj(b[n]). Eight independent partial sums let the compiler
@@ -1035,18 +1068,362 @@ static bool allZero(const Payload& payload)
     return true;
 }
 
-bool decodeWithGuesses(const FrameLlrs& llrs, const std::vector<KnownBits>& knownBits, Payload& payloadOut)
+int hardErrors(const FrameLlrs& llrs, const Payload& payload)
 {
-    if (decodeFrame(llrs, payloadOut) && !allZero(payloadOut)) return true;
+    CodedFrame coded = encodeFrame(payload);
+    int errors = 0;
+    for (int i = 0; i < FRAME_BITS; i++)
+    {
+        float llr = llrs[(size_t)i];
+        if (llr != 0.0f && (llr < 0.0f ? 1 : 0) != coded[(size_t)i]) errors++;
+    }
+    return errors;
+}
+
+double disagreement(const FrameLlrs& llrs, const Payload& payload)
+{
+    CodedFrame coded = encodeFrame(payload);
+    double against = 0.0;
+    double total = 0.0;
+    for (int i = 0; i < FRAME_BITS; i++)
+    {
+        float llr = llrs[(size_t)i];
+        total += std::fabs(llr);
+        if (llr != 0.0f && (llr < 0.0f ? 1 : 0) != coded[(size_t)i]) against += std::fabs(llr);
+    }
+    return total > 0.0 ? against / total : 1.0;
+}
+
+namespace
+{
+
+// The decoder's guesses, in the order it tries them: as heard, the zero
+// padding guesses, then the caller's.
+std::vector<KnownBits> ladderGuesses(const std::vector<KnownBits>& knownBits)
+{
+    std::vector<KnownBits> guesses;
+    guesses.push_back(noKnownBits());
     for (int knownZeroBits : PADDING_HYPOTHESES)
     {
-        if (decodeFrame(llrs, payloadOut, knownZeroBits) && !allZero(payloadOut)) return true;
+        KnownBits known = noKnownBits();
+        for (int i = PAYLOAD_BITS - knownZeroBits; i < PAYLOAD_BITS; i++) known[(size_t)i] = 0;
+        guesses.push_back(known);
     }
-    for (const KnownBits& known : knownBits)
+    guesses.insert(guesses.end(), knownBits.begin(), knownBits.end());
+    return guesses;
+}
+
+} // namespace
+
+bool decodeWithGuesses(const FrameLlrs& llrs, const std::vector<KnownBits>& knownBits, Payload& payloadOut,
+                       LadderStep* stepOut)
+{
+    const std::vector<KnownBits> guesses = ladderGuesses(knownBits);
+    for (size_t g = 0; g < guesses.size(); g++)
     {
-        if (decodeFrame(llrs, payloadOut, known) && !allZero(payloadOut)) return true;
+        if (!decodeFrame(llrs, payloadOut, guesses[g]) || allZero(payloadOut)) continue;
+        int errors = hardErrors(llrs, payloadOut);
+        if (errors > MAX_HARD_ERRORS) continue;
+        if (stepOut != nullptr) *stepOut = {(int)g, 0, errors};
+        return true;
     }
     return false;
+}
+
+bool decodeListWithGuesses(const FrameLlrs& llrs, const std::vector<KnownBits>& knownBits, const PayloadCheck& check,
+                           Payload& payloadOut, LadderStep* stepOut)
+{
+    const std::vector<KnownBits> guesses = ladderGuesses(knownBits);
+    for (size_t g = 0; g < guesses.size(); g++)
+    {
+        for (const ListDecode& d : decodeFrameList(llrs, guesses[g], LIST_SIZE))
+        {
+            if (d.rank == 0 || allZero(d.payload)) continue;
+            if (disagreement(llrs, d.payload) > MAX_LIST_DISAGREEMENT) continue;
+            if (check && !check(d.payload)) continue;
+            payloadOut = d.payload;
+            if (stepOut != nullptr) *stepOut = {(int)g, d.rank, hardErrors(llrs, d.payload)};
+            return true;
+        }
+    }
+    return false;
+}
+
+namespace
+{
+
+// The frame a payload sings, as subtractFrame() and refineFrame() need it.
+struct SentFrame
+{
+    // Every symbol's glide template, carried on the running phase of the
+    // glides before it (the waveform is phase continuous) and faded at each
+    // end as modulate() fades it, before any frequency offset.
+    std::vector<std::complex<float>> wave;
+    // Where its pitch sits between the notes of the scale, sample by sample:
+    // above note[m], with weight toNext[m] on the note above that.
+    std::vector<uint8_t> note;
+    std::vector<float> toNext;
+};
+
+SentFrame sentFrame(const VoiceTemplates& voice, const GearInfo& gear, const Payload& payload)
+{
+    const int L = voice.samplesPerSymbol;
+    const int n0 = voice.glideSamples;
+    const int holdLength = voice.holdSamples;
+    const long long frame = (long long)SYMBOLS_PER_FRAME * L;
+    const std::array<int, SYMBOLS_PER_FRAME> notes = frameNotes(encodeFrame(payload));
+    SentFrame out;
+    out.wave.resize((size_t)frame);
+    out.note.resize((size_t)frame);
+    out.toNext.resize((size_t)frame);
+    {
+        std::vector<double> pitch((size_t)L);
+        const int ramp = SAMPLE_RATE_HZ / 100;
+        double running = 0.0;
+        for (int k = 0; k < SYMBOLS_PER_FRAME; k++)
+        {
+            const int a = k > 0 ? notes[(size_t)k - 1] : notes[0];
+            const int b = notes[(size_t)k];
+            const std::complex<double> carrier = std::polar(1.0, running);
+            running = std::fmod(running + voice.advance[a][b], 2.0 * PI);
+            const size_t g = ((size_t)a * NOTES + b) * n0;
+            const size_t h = (size_t)b * holdLength;
+            pitchTrack(voice.notes[(size_t)a], voice.notes[(size_t)b], L, gear.glide, pitch.data());
+            for (int n = 0; n < L; n++)
+            {
+                const long long m = (long long)k * L + n;
+                std::complex<double> t = n < n0 ? std::complex<double>(voice.glideRe[g + n], voice.glideIm[g + n])
+                                                : voice.rotation[a][b] * std::complex<double>(voice.holdRe[h + n - n0],
+                                                                                              voice.holdIm[h + n - n0]);
+                double w = 1.0;
+                if (m < ramp)
+                    w = 0.5 - 0.5 * std::cos(PI * (double)m / ramp);
+                else if (m >= frame - ramp)
+                    w = 0.5 - 0.5 * std::cos(PI * (double)(frame - 1 - m) / ramp);
+                out.wave[(size_t)m] = std::complex<float>(w * carrier * t);
+
+                const double f = pitch[(size_t)n];
+                int j = 0;
+                while (j < NOTES - 2 && f >= voice.notes[(size_t)j + 1]) j++;
+                double x = (f - voice.notes[(size_t)j]) / (voice.notes[(size_t)j + 1] - voice.notes[(size_t)j]);
+                out.note[(size_t)m] = (uint8_t)j;
+                out.toNext[(size_t)m] = (float)std::min(std::max(x, 0.0), 1.0);
+            }
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+void refineFrame(const ComplexSignal& z, const VoiceTemplates& voice, const GearInfo& gear, const Payload& payload,
+                 long long& start, double& dfHz)
+{
+    const int L = voice.samplesPerSymbol;
+    const long long size = (long long)z.size();
+    const SentFrame sent = sentFrame(voice, gear, payload);
+
+    // The decoder's timing and offset are good enough to decode, not always
+    // to cancel: a glide is a chirp, and a little early on a chirp looks much
+    // like a little low, so the sync search can trade one for the other by
+    // 10 ms or so. With every note now known, the whole melody times the
+    // frame far more sharply than the 21 sync symbols did. Each symbol's
+    // correlation is squared before summing, so fading does not matter.
+    auto fit = [&](long long at, double df) {
+        double total = 0.0;
+        for (int k = 0; k < SYMBOLS_PER_FRAME; k++)
+        {
+            const long long base = at + (long long)k * L;
+            if (base < 0 || base + L > size) continue;
+            std::complex<double> c = 0.0;
+            const std::complex<float>* t = sent.wave.data() + (size_t)k * L;
+            forEachPhasor(-df, (size_t)L, [&](size_t n, double pr, double pi) {
+                std::complex<double> y(z.re[(size_t)(base + (long long)n)], z.im[(size_t)(base + (long long)n)]);
+                c += y * std::complex<double>(pr, pi) * std::conj(std::complex<double>(t[n]));
+            });
+            total += std::norm(c);
+        }
+        return total;
+    };
+    long long at = start;
+    double df = dfHz;
+    {
+        double best = fit(at, df);
+        auto searchTime = [&](long long half, long long step) {
+            long long centre = at;
+            for (long long d = -half; d <= half; d += step)
+            {
+                if (d == 0) continue;
+                double e = fit(centre + d, df);
+                if (e > best)
+                {
+                    best = e;
+                    at = centre + d;
+                }
+            }
+        };
+        auto searchFrequency = [&](double half, double step) {
+            double centre = df;
+            for (double d = -half; d <= half + 1e-9; d += step)
+            {
+                if (std::fabs(d) < 1e-12) continue;
+                double e = fit(at, centre + d);
+                if (e > best)
+                {
+                    best = e;
+                    df = centre + d;
+                }
+            }
+        };
+        const long long coarse = std::max(1, L / 64);
+        searchTime(12 * coarse, coarse);
+        const double resolution = 1.0 / gear.symbolSeconds;
+        searchFrequency(0.25 * resolution, 0.03125 * resolution);
+        const long long medium = std::max(1LL, coarse / 8);
+        searchTime(coarse, medium);
+        searchTime(medium, 1);
+        searchFrequency(0.03125 * resolution, 0.0078125 * resolution);
+        searchTime(2, 1);
+    }
+    start = at;
+    dfHz = df;
+}
+
+void subtractFrame(ComplexSignal& z, const VoiceTemplates& voice, const GearInfo& gear, long long start, double dfHz,
+                   const Payload& payload)
+{
+    const int L = voice.samplesPerSymbol;
+    const long long frame = (long long)SYMBOLS_PER_FRAME * L;
+    const long long size = (long long)z.size();
+    if (start >= size || start + frame <= 0) return;
+    const SentFrame sent = sentFrame(voice, gear, payload);
+    const long long at = start;
+    const double df = dfHz;
+
+    // The frame as heard at that timing and offset.
+    auto heard = [&](long long m) {
+        double cycles = std::fmod(df * (double)m / SAMPLE_RATE_HZ, 1.0);
+        return std::complex<double>(sent.wave[(size_t)m]) * std::polar(1.0, 2.0 * PI * cycles);
+    };
+
+    // An HF channel's gain changes with time (fading) and with frequency
+    // (multipath: two paths a millisecond apart cancel at some notes and add
+    // at others). So it is modelled as a gain at every note of the scale,
+    // interpolated between notes as the pitch glides, and found by least
+    // squares over a few symbols at a time. Per symbol: the normal equations
+    // of that fit, A g = r.
+    struct Normal
+    {
+        double A[NOTES][NOTES] = {};
+        std::complex<double> r[NOTES] = {};
+    };
+    std::vector<Normal> normals(SYMBOLS_PER_FRAME);
+    std::array<bool, SYMBOLS_PER_FRAME> measured{};
+    for (int k = 0; k < SYMBOLS_PER_FRAME; k++)
+    {
+        const long long base = at + (long long)k * L;
+        if (base < 0 || base + L > size) continue;
+        Normal& eq = normals[(size_t)k];
+        for (int n = 0; n < L; n++)
+        {
+            const long long m = (long long)k * L + n;
+            const std::complex<double> v = heard(m);
+            const std::complex<double> y(z.re[(size_t)(base + n)], z.im[(size_t)(base + n)]);
+            const double e = std::norm(v);
+            const std::complex<double> c = y * std::conj(v);
+            const int j = sent.note[(size_t)m];
+            const double w1 = sent.toNext[(size_t)m];
+            const double w0 = 1.0 - w1;
+            eq.A[j][j] += w0 * w0 * e;
+            eq.A[j][j + 1] += w0 * w1 * e;
+            eq.A[j + 1][j] += w0 * w1 * e;
+            eq.A[j + 1][j + 1] += w1 * w1 * e;
+            eq.r[j] += w0 * c;
+            eq.r[j + 1] += w1 * c;
+        }
+        measured[(size_t)k] = true;
+    }
+
+    // Each symbol's gains come from it and its neighbours over about a
+    // quarter second, which follows CCIR poor fading (1 Hz) and averages
+    // down the noise. Notes the stretch hardly sounds lean towards the
+    // stretch's single, flat gain rather than being left undetermined.
+    const int span = std::max(1, (int)std::lround(0.12 / gear.symbolSeconds));
+    std::vector<std::array<std::complex<double>, NOTES>> gain(SYMBOLS_PER_FRAME);
+    for (int k = 0; k < SYMBOLS_PER_FRAME; k++)
+    {
+        double A[NOTES][NOTES] = {};
+        std::complex<double> r[NOTES] = {};
+        for (int j = -span; j <= span; j++)
+        {
+            int i = k + j;
+            if (i < 0 || i >= SYMBOLS_PER_FRAME || !measured[(size_t)i]) continue;
+            double w = span + 1 - std::abs(j);
+            for (int p = 0; p < NOTES; p++)
+            {
+                r[p] += w * normals[(size_t)i].r[p];
+                for (int q = 0; q < NOTES; q++) A[p][q] += w * normals[(size_t)i].A[p][q];
+            }
+        }
+        double largest = 0.0;
+        double all = 0.0;
+        std::complex<double> rAll = 0.0;
+        for (int p = 0; p < NOTES; p++)
+        {
+            largest = std::max(largest, A[p][p]);
+            rAll += r[p];
+            for (int q = 0; q < NOTES; q++) all += A[p][q];
+        }
+        if (!(largest > 0.0) || !(all > 0.0)) continue;
+        const std::complex<double> flat = rAll / all;
+        const double ridge = 1e-2 * largest;
+        for (int p = 0; p < NOTES; p++)
+        {
+            A[p][p] += ridge;
+            r[p] += ridge * flat;
+        }
+        // Gaussian elimination; A is symmetric positive definite.
+        for (int p = 0; p < NOTES; p++)
+        {
+            for (int q = p + 1; q < NOTES; q++)
+            {
+                double f = A[q][p] / A[p][p];
+                if (f == 0.0) continue;
+                for (int c = p; c < NOTES; c++) A[q][c] -= f * A[p][c];
+                r[q] -= f * r[p];
+            }
+        }
+        for (int p = NOTES - 1; p >= 0; p--)
+        {
+            std::complex<double> v = r[p];
+            for (int c = p + 1; c < NOTES; c++) v -= A[p][c] * gain[(size_t)k][(size_t)c];
+            gain[(size_t)k][(size_t)p] = v / A[p][p];
+        }
+    }
+
+    // Take the frame out, its gains interpolated between notes as the pitch
+    // glides and between symbol centres in time.
+    for (int k = 0; k < SYMBOLS_PER_FRAME; k++)
+    {
+        const long long base = at + (long long)k * L;
+        if (base + L <= 0 || base >= size) continue;
+        for (int n = 0; n < L; n++)
+        {
+            const long long m = (long long)k * L + n;
+            const long long i = base + n;
+            if (i < 0 || i >= size) continue;
+            const int j = sent.note[(size_t)m];
+            const double w1 = sent.toNext[(size_t)m];
+            const double x = (n + 0.5) / L - 0.5; // -0.5 .. 0.5 across the symbol
+            const int other = std::min(std::max(x < 0.0 ? k - 1 : k + 1, 0), SYMBOLS_PER_FRAME - 1);
+            const double far = std::fabs(x);
+            std::complex<double> g = (1.0 - w1) * ((1.0 - far) * gain[(size_t)k][(size_t)j] + far * gain[(size_t)other][(size_t)j]) +
+                                     w1 * ((1.0 - far) * gain[(size_t)k][(size_t)j + 1] + far * gain[(size_t)other][(size_t)j + 1]);
+            const std::complex<double> v = g * heard(m);
+            z.re[(size_t)i] -= (float)v.real();
+            z.im[(size_t)i] -= (float)v.imag();
+        }
+    }
 }
 
 double softAgreement(const FrameLlrs& a, const FrameLlrs& b)
@@ -1069,6 +1446,75 @@ VoiceDecode receiveVoice(const ComplexSignal& z, const GearInfo& gear, const Voi
                         candidates, knownBits);
 }
 
+namespace
+{
+
+// Refines one sync candidate, demodulates and decodes it (the body of
+// receiveVoice()'s loop). Returns true when it decoded; otherwise adds it
+// to result.failed when it measured as anything at all.
+bool tryCandidate(const ComplexSignal& z, const GearInfo& gear, const VoiceTemplates& voice, const SyncCandidate& found,
+                  double maxOffsetHz, const std::vector<KnownBits>& knownBits, Correlations& corr, VoiceDecode& result)
+{
+    SyncCandidate sync = refineSync(z, voice, found);
+    // Refinement may walk a peak at the edge of the search range out of
+    // it; the range is a promise to the caller, so such a peak is not
+    // a candidate.
+    if (std::fabs(sync.df) > maxOffsetHz) return false;
+
+    correlate(z, voice, sync, corr);
+    FrameLlrs llrs;
+    ChannelReport report;
+    double esOverN0 = demodulate(corr, gear, voice, llrs, report);
+    if (std::isnan(esOverN0)) return false;
+
+    // Too weak to decode by a wide margin: no Viterbi, so no chance of
+    // a CRC passing by luck (see MIN_ES_OVER_N0).
+    Payload payload{};
+    LadderStep step;
+    bool ok = esOverN0 >= MIN_ES_OVER_N0 && decodeWithGuesses(llrs, knownBits, payload, &step);
+
+    if (!result.haveCandidate)
+    {
+        // Until something decodes, report the best sync candidate.
+        result.haveCandidate = true;
+        result.decode.startSample = sync.start;
+        result.decode.frequencyOffsetHz = sync.df;
+        result.decode.report = report;
+        result.syncScore = sync.score;
+        result.esOverN0 = esOverN0;
+        result.hypothesis = sync.hypothesis;
+    }
+    if (ok)
+    {
+        double doppler = soundChannel(corr, gear, voice, payload);
+        if (doppler >= 0) report.dopplerHz = doppler;
+        result.decode.ok = true;
+        result.decode.payload = payload;
+        result.decode.startSample = sync.start;
+        result.decode.frequencyOffsetHz = sync.df;
+        result.decode.report = report;
+        result.syncScore = sync.score;
+        result.esOverN0 = esOverN0;
+        result.hypothesis = sync.hypothesis;
+        result.step = step;
+        result.failed.clear();
+        return true;
+    }
+
+    SoftFrame soft;
+    soft.llrs = llrs;
+    soft.startSample = sync.start;
+    soft.frequencyOffsetHz = sync.df;
+    soft.syncScore = sync.score;
+    soft.esOverN0 = esOverN0;
+    soft.hypothesis = sync.hypothesis;
+    soft.report = report;
+    result.failed.push_back(soft);
+    return false;
+}
+
+} // namespace
+
 VoiceDecode receiveVoice(const ComplexSignal& z, const GearInfo& gear, const std::vector<const VoiceTemplates*>& voices,
                          long long searchFrom, long long searchTo, double maxOffsetHz, int candidates,
                          const std::vector<KnownBits>& knownBits)
@@ -1077,62 +1523,61 @@ VoiceDecode receiveVoice(const ComplexSignal& z, const GearInfo& gear, const std
     std::unique_ptr<Correlations> corr(new Correlations);
     for (const SyncCandidate& found : syncSearch(z, gear, voices, searchFrom, searchTo, maxOffsetHz, candidates))
     {
-        const VoiceTemplates& voice = *voices[(size_t)found.hypothesis];
-        SyncCandidate sync = refineSync(z, voice, found);
-        // Refinement may walk a peak at the edge of the search range out of
-        // it; the range is a promise to the caller, so such a peak is not
-        // a candidate.
-        if (std::fabs(sync.df) > maxOffsetHz) continue;
-
-        correlate(z, voice, sync, *corr);
-        FrameLlrs llrs;
-        ChannelReport report;
-        double esOverN0 = demodulate(*corr, gear, voice, llrs, report);
-        if (std::isnan(esOverN0)) continue;
-
-        // Too weak to decode by a wide margin: no Viterbi, so no chance of
-        // a CRC passing by luck (see MIN_ES_OVER_N0).
-        Payload payload{};
-        bool ok = esOverN0 >= MIN_ES_OVER_N0 && decodeWithGuesses(llrs, knownBits, payload);
-
-        if (!result.haveCandidate)
-        {
-            // Until something decodes, report the best sync candidate.
-            result.haveCandidate = true;
-            result.decode.startSample = sync.start;
-            result.decode.frequencyOffsetHz = sync.df;
-            result.decode.report = report;
-            result.syncScore = sync.score;
-            result.esOverN0 = esOverN0;
-            result.hypothesis = sync.hypothesis;
-        }
-        if (ok)
-        {
-            double doppler = soundChannel(*corr, gear, voice, payload);
-            if (doppler >= 0) report.dopplerHz = doppler;
-            result.decode.ok = true;
-            result.decode.payload = payload;
-            result.decode.startSample = sync.start;
-            result.decode.frequencyOffsetHz = sync.df;
-            result.decode.report = report;
-            result.syncScore = sync.score;
-            result.esOverN0 = esOverN0;
-            result.hypothesis = sync.hypothesis;
-            result.failed.clear();
+        if (tryCandidate(z, gear, *voices[(size_t)found.hypothesis], found, maxOffsetHz, knownBits, *corr, result))
             break;
-        }
-
-        SoftFrame soft;
-        soft.llrs = llrs;
-        soft.startSample = sync.start;
-        soft.frequencyOffsetHz = sync.df;
-        soft.syncScore = sync.score;
-        soft.esOverN0 = esOverN0;
-        soft.hypothesis = sync.hypothesis;
-        soft.report = report;
-        result.failed.push_back(soft);
     }
     return result;
+}
+
+VoiceDecode receiveAt(const ComplexSignal& z, const GearInfo& gear, const VoiceTemplates& voice, long long start,
+                      double dfHz, double maxOffsetHz, const std::vector<KnownBits>& knownBits)
+{
+    VoiceDecode result;
+    const long long frame = (long long)SYMBOLS_PER_FRAME * voice.samplesPerSymbol;
+    if (start < 0 || start + frame > (long long)z.size()) return result;
+    std::unique_ptr<Correlations> corr(new Correlations);
+    tryCandidate(z, gear, voice, {start, dfHz, 0.0, 0}, maxOffsetHz, knownBits, *corr, result);
+    return result;
+}
+
+double soundDecoded(const ComplexSignal& z, const GearInfo& gear, const VoiceTemplates& voice, long long start,
+                    double dfHz, const Payload& payload)
+{
+    const long long frame = (long long)SYMBOLS_PER_FRAME * voice.samplesPerSymbol;
+    if (start < 0 || start + frame > (long long)z.size()) return -1.0;
+    std::unique_ptr<Correlations> corr(new Correlations);
+    correlate(z, voice, {start, dfHz, 0.0, 0}, *corr);
+    return soundChannel(*corr, gear, voice, payload);
+}
+
+bool decodeByList(const ComplexSignal& z, const GearInfo& gear, const std::vector<const VoiceTemplates*>& voices,
+                  const std::vector<KnownBits>& knownBits, const PayloadCheck& check, VoiceDecode& result)
+{
+    if (result.decode.ok) return true;
+    for (const SoftFrame& soft : result.failed)
+    {
+        if (soft.esOverN0 < MIN_ES_OVER_N0) continue;
+        Payload payload{};
+        LadderStep step;
+        if (!decodeListWithGuesses(soft.llrs, knownBits, check, payload, &step)) continue;
+
+        ChannelReport report = soft.report;
+        double doppler = soundDecoded(z, gear, *voices[(size_t)soft.hypothesis], soft.startSample,
+                                      soft.frequencyOffsetHz, payload);
+        if (doppler >= 0) report.dopplerHz = doppler;
+        result.decode.ok = true;
+        result.decode.payload = payload;
+        result.decode.startSample = soft.startSample;
+        result.decode.frequencyOffsetHz = soft.frequencyOffsetHz;
+        result.decode.report = report;
+        result.syncScore = soft.syncScore;
+        result.esOverN0 = soft.esOverN0;
+        result.hypothesis = soft.hypothesis;
+        result.step = step;
+        result.failed.clear();
+        return true;
+    }
+    return false;
 }
 
 } // namespace detail

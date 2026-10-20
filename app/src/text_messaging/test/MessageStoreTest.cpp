@@ -131,6 +131,15 @@ void testMessageRoundTrip()
     CHECK(store.updateMessageStatus(sent.id, MessageStatus::Aborted, 0));
     messages = store.recentMessages(50);
     CHECK(messages[0].status == MessageStatus::Aborted);
+
+    // A message shown in part has its text filled in where it stands.
+    CHECK(store.updateMessageText(received.id, "Morning! 73", MessageStatus::Received));
+    messages = store.recentMessages(50);
+    CHECK(messages.size() == 2);
+    CHECK(messages[1].id == received.id);
+    CHECK(messages[1].text == "Morning! 73");
+    CHECK(messages[1].timestamp == NOW + 30);
+    CHECK(messages[0].text == "Good morning from the chat window");
 }
 
 void testMessageLimitAndPrune()

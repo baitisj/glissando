@@ -10,6 +10,7 @@ add_library(fdv_text_messaging STATIC
     HeardStationList.cpp
     KeyingPlan.cpp
     MessageStore.cpp
+    PartialCopies.cpp
     Sha256.cpp
     SnoopFeed.cpp
     TextMessagingProtocol.cpp
@@ -88,6 +89,11 @@ if(UNITTEST)
     target_link_libraries(fdv_text_messaging_frame_annotation_test fdv_text_messaging)
     target_compile_options(fdv_text_messaging_frame_annotation_test PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
     add_test(NAME text_messaging_frame_annotation COMMAND fdv_text_messaging_frame_annotation_test)
+
+    add_executable(fdv_text_messaging_partial_copies_test test/PartialCopiesTest.cpp)
+    target_link_libraries(fdv_text_messaging_partial_copies_test fdv_text_messaging)
+    target_compile_options(fdv_text_messaging_partial_copies_test PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
+    add_test(NAME text_messaging_partial_copies COMMAND fdv_text_messaging_partial_copies_test)
 
     add_executable(fdv_text_messaging_snoop_test test/SnoopFeedTest.cpp)
     target_link_libraries(fdv_text_messaging_snoop_test fdv_text_messaging)

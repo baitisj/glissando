@@ -57,6 +57,19 @@ constexpr double AVERAGING_OFFSET_HZ = 3.0;
 constexpr double MIN_AGREEMENT = 0.2;
 constexpr int MAX_AVERAGING_TRIES = 4;
 
+// Subtraction, as JTTY's and FT8's decoders do it. Every frame that decodes
+// is kept as heard while any audio it overlaps may still be searched, and is
+// taken out of that audio (detail::subtractFrame) before every later search,
+// at every tempo. A search that decodes a frame takes it out and searches
+// the same stretch again, for up to MAX_DECODES_PER_SEARCH frames per voice:
+// two stations that key up together at one tempo are both heard. And the
+// candidates kept for averaging that a new frame overlaps are decoded again
+// without it, strongest first, up to MAX_RETRIES_PER_DECODE of them: of two
+// frames that collide, the one that started first was searched while the
+// other was still on the air, and is often the weaker.
+constexpr int MAX_DECODES_PER_SEARCH = 3;
+constexpr int MAX_RETRIES_PER_DECODE = 16;
+
 // Geometry of one gear's search.
 struct Geometry
 {
@@ -108,7 +121,8 @@ struct StreamingReceiver::Impl
         long long start;
     };
 
-    // A candidate that did not decode, kept for averaging.
+    // A candidate that did not decode, kept for averaging and to decode
+    // again once a frame over it is taken out.
     struct Kept
     {
         long long samplesPerSymbol;
@@ -118,6 +132,22 @@ struct StreamingReceiver::Impl
         double frequencyOffsetHz;
         double syncScore;
         FrameLlrs llrs;
+        int gear;
+        ChannelReport report;
+        // Whether these soft bits have been list decoded (listMature()).
+        bool listed;
+    };
+
+    // A frame that decoded, kept to be taken out of later searches' audio.
+    struct Heard
+    {
+        int gear;
+        int voice;
+        Scale scale;
+        long long start;
+        double frequencyOffsetHz;
+        Payload payload;
+        long long frameSamples;
     };
 
     // Shared with push() and the control calls, under mutex.
@@ -142,6 +172,7 @@ struct StreamingReceiver::Impl
 
     std::mutex knownBitsMutex;
     std::vector<KnownBits> knownBits;
+    PayloadCheck payloadCheck;  // under knownBitsMutex too
 
     std::atomic<long long> samplesPushed{0};
     std::atomic<long long> lastFrameEnd{-1};
@@ -158,6 +189,7 @@ struct StreamingReceiver::Impl
     std::vector<GearState> states;
     std::vector<Recent> recent;
     std::vector<Kept> kept;
+    std::vector<Heard> heard;
     unsigned seenGeneration = 0;
     double activeTuning = 0.0;
     std::vector<Scale> activeScales{Scale::Pentatonic};
@@ -169,8 +201,16 @@ struct StreamingReceiver::Impl
     bool alreadyReported(long long samplesPerSymbol, int voice, long long start);
     bool average(const Geometry& geo, int voice, const detail::SoftFrame& soft, long long start, Scale scale,
                  const std::vector<KnownBits>& known, Decode& decodeOut);
-    void keep(const Geometry& geo, int voice, const detail::SoftFrame& soft, long long start, Scale scale);
+    void keep(const Geometry& geo, int voice, const detail::SoftFrame& soft, long long start, Scale scale, int gear);
     void forgetKept(long long samplesPerSymbol, int voice, long long start);
+    bool analyticOf(long long from, long long to, detail::ComplexSignal& z) const;
+    int subtractHeard(detail::ComplexSignal& z, long long zStart, long long from, long long to) const;
+    void addHeard(const detail::ComplexSignal& z, long long zStart, int gear, int voice, Scale scale, Decode& decode);
+    void retryKept(const Heard& over, const std::vector<KnownBits>& known, std::vector<StreamDecode>& found,
+                   std::vector<Heard>& added);
+    void listMature(const std::vector<KnownBits>& known, const PayloadCheck& check, std::vector<StreamDecode>& found,
+                    std::vector<Heard>& added);
+    long long lookBackSamples() const;
 };
 
 StreamingReceiver::StreamingReceiver()
@@ -210,6 +250,12 @@ void StreamingReceiver::setKnownBits(const std::vector<KnownBits>& knownBits)
     impl_->knownBits = knownBits;
 }
 
+void StreamingReceiver::setPayloadCheck(PayloadCheck check)
+{
+    std::lock_guard<std::mutex> lock(impl_->knownBitsMutex);
+    impl_->payloadCheck = std::move(check);
+}
+
 void StreamingReceiver::setDecodeCallback(DecodeCallback callback)
 {
     std::lock_guard<std::mutex> lock(impl_->callbackMutex);
@@ -238,6 +284,7 @@ void StreamingReceiver::start()
     impl_->states.clear();
     impl_->recent.clear();
     impl_->kept.clear();
+    impl_->heard.clear();
     impl_->seenGeneration = impl_->resetGeneration;
 
     impl_->running = true;
@@ -346,6 +393,9 @@ void StreamingReceiver::Impl::run()
             if (configChanged)
             {
                 newGears = gears;
+                // Frames heard at another tuning would be re-synthesised on
+                // the wrong notes.
+                if (tuningOffsetHz != activeTuning) heard.clear();
                 activeTuning = tuningOffsetHz;
                 activeScales = listenedScales(scale, anyScale);
                 configChanged = false;
@@ -389,10 +439,12 @@ void StreamingReceiver::Impl::run()
         }
 
         // Drop the history no search needs any more: everything before the
-        // earliest sample of any gear's next window. That is at most one
-        // window of the slowest gear, unless the worker has fallen behind.
+        // earliest sample of any gear's next window, and of any kept
+        // candidate a new frame could still be taken out from under
+        // (lookBackSamples()). That is at most a window and a frame of the
+        // slowest gear, unless the worker has fallen behind.
         long long end = historyStart + (long long)history.size();
-        long long keepFrom = end;
+        long long keepFrom = end - lookBackSamples();
         for (const GearState& state : states)
         {
             keepFrom = std::min(keepFrom, state.nextStart - Geometry(state.gear).before);
@@ -520,7 +572,7 @@ bool StreamingReceiver::Impl::average(const Geometry& geo, int voice, const deta
 }
 
 void StreamingReceiver::Impl::keep(const Geometry& geo, int voice, const detail::SoftFrame& soft, long long start,
-                                   Scale scale)
+                                   Scale scale, int gear)
 {
     if (soft.esOverN0 < MIN_KEPT_ES_OVER_N0) return;
 
@@ -532,12 +584,14 @@ void StreamingReceiver::Impl::keep(const Geometry& geo, int voice, const detail:
             std::fabs(k.frequencyOffsetHz - soft.frequencyOffsetHz) <= AVERAGING_OFFSET_HZ)
         {
             if (soft.syncScore > k.syncScore)
-                k = {geo.L, voice, scale, start, soft.frequencyOffsetHz, soft.syncScore, soft.llrs};
+                k = {geo.L, voice, scale, start, soft.frequencyOffsetHz, soft.syncScore, soft.llrs, gear, soft.report,
+                     false};
             return;
         }
     }
     if (kept.size() >= AVERAGING_KEPT) kept.erase(kept.begin());
-    kept.push_back({geo.L, voice, scale, start, soft.frequencyOffsetHz, soft.syncScore, soft.llrs});
+    kept.push_back(
+        {geo.L, voice, scale, start, soft.frequencyOffsetHz, soft.syncScore, soft.llrs, gear, soft.report, false});
 }
 
 void StreamingReceiver::Impl::forgetKept(long long samplesPerSymbol, int voice, long long start)
@@ -548,6 +602,191 @@ void StreamingReceiver::Impl::forgetKept(long long samplesPerSymbol, int voice, 
                                          std::llabs(k.start - start) <= samplesPerSymbol;
                               }),
                kept.end());
+}
+
+long long StreamingReceiver::Impl::lookBackSamples() const
+{
+    // A kept candidate can be decoded again once a frame that overlaps it
+    // decodes: as long ago as a whole window of that frame's tempo, then a
+    // whole frame of the candidate's.
+    long long window = 0;
+    long long frame = 0;
+    for (const GearState& state : states)
+    {
+        Geometry geo(state.gear);
+        window = std::max(window, geo.windowLength());
+        frame = std::max(frame, geo.frame);
+    }
+    return window + frame + HILBERT_GUARD;
+}
+
+bool StreamingReceiver::Impl::analyticOf(long long from, long long to, detail::ComplexSignal& z) const
+{
+    from = std::max(from, historyStart);
+    to = std::min(to, historyStart + (long long)history.size());
+    if (to <= from) return false;
+    detail::analyticSignal(history.data() + (from - historyStart), (size_t)(to - from), z);
+    return true;
+}
+
+int StreamingReceiver::Impl::subtractHeard(detail::ComplexSignal& z, long long zStart, long long from,
+                                           long long to) const
+{
+    // Every heard frame that overlaps [from, to), in the order they decoded.
+    int removed = 0;
+    const long long zEnd = zStart + (long long)z.size();
+    for (const Heard& h : heard)
+    {
+        if (h.start >= zEnd || h.start + h.frameSamples <= zStart) continue;
+        if (h.start < to && h.start + h.frameSamples > from) removed++;
+        std::shared_ptr<const detail::VoiceTemplates> voice =
+            detail::voiceTemplates(h.scale, h.voice, h.gear, activeTuning);
+        detail::subtractFrame(z, *voice, gearInfo(h.gear), h.start - zStart, h.frequencyOffsetHz, h.payload);
+    }
+    return removed;
+}
+
+void StreamingReceiver::Impl::addHeard(const detail::ComplexSignal& z, long long zStart, int gear, int voice,
+                                       Scale scale, Decode& decode)
+{
+    // Timed against the whole melody while the whole frame is in z, which
+    // later searches, holding only part of it, could not do as well.
+    std::shared_ptr<const detail::VoiceTemplates> templates = detail::voiceTemplates(scale, voice, gear, activeTuning);
+    long long start = decode.startSample - zStart;
+    double offset = decode.frequencyOffsetHz;
+    detail::refineFrame(z, *templates, gearInfo(gear), decode.payload, start, offset);
+    if (heard.size() >= 256) heard.erase(heard.begin());
+    heard.push_back({gear, voice, scale, zStart + start, offset, decode.payload, gearInfo(gear).frameSamples()});
+}
+
+void StreamingReceiver::Impl::retryKept(const Heard& over, const std::vector<KnownBits>& known,
+                                        std::vector<StreamDecode>& found, std::vector<Heard>& added)
+{
+    std::vector<size_t> overlapping;
+    for (size_t i = 0; i < kept.size(); i++)
+    {
+        const Kept& k = kept[i];
+        long long frame = gearInfo(k.gear).frameSamples();
+        if (k.start < over.start + over.frameSamples && k.start + frame > over.start) overlapping.push_back(i);
+    }
+    std::sort(overlapping.begin(), overlapping.end(),
+              [&](size_t a, size_t b) { return kept[a].syncScore > kept[b].syncScore; });
+    if (overlapping.size() > (size_t)MAX_RETRIES_PER_DECODE) overlapping.resize((size_t)MAX_RETRIES_PER_DECODE);
+
+    std::vector<Kept> candidates;
+    for (size_t i : overlapping) candidates.push_back(kept[i]);
+    for (const Kept& k : candidates)
+    {
+        const GearInfo& info = gearInfo(k.gear);
+        Geometry geo(k.gear);
+        const long long from = k.start - geo.step - HILBERT_GUARD;
+        const long long to = k.start + geo.frame + geo.step + HILBERT_GUARD;
+        if (from < historyStart || to > historyStart + (long long)history.size()) continue;
+        if (alreadyReported(geo.L, k.voice, k.start)) continue;
+
+        detail::ComplexSignal z;
+        if (!analyticOf(from, to, z)) continue;
+        int removed = subtractHeard(z, from, k.start, k.start + geo.frame);
+        std::shared_ptr<const detail::VoiceTemplates> voice =
+            detail::voiceTemplates(k.scale, k.voice, k.gear, activeTuning);
+        detail::VoiceDecode result =
+            detail::receiveAt(z, info, *voice, k.start - from, k.frequencyOffsetHz, MAX_OFFSET_HZ, known);
+        if (!result.decode.ok)
+        {
+            // Without the frame on top it is a cleaner copy, to average a
+            // repeat with and to list decode (again).
+            if (result.failed.empty()) continue;
+            for (Kept& copy : kept)
+            {
+                if (copy.samplesPerSymbol == k.samplesPerSymbol && copy.voice == k.voice && copy.start == k.start)
+                {
+                    copy.llrs = result.failed.front().llrs;
+                    copy.report = result.failed.front().report;
+                    copy.listed = false;
+                    break;
+                }
+            }
+            continue;
+        }
+
+        long long start = from + result.decode.startSample;
+        forgetKept(geo.L, k.voice, start);
+        if (alreadyReported(geo.L, k.voice, start)) continue;
+        recent.push_back({geo.L, k.voice, start});
+
+        StreamDecode decode;
+        decode.gear = k.gear;
+        decode.decode = result.decode;
+        decode.decode.voice = k.voice;
+        decode.decode.scale = k.scale;
+        decode.decode.startSample = start;
+        decode.decode.framesRemoved = removed;
+        addHeard(z, from, k.gear, k.voice, k.scale, decode.decode);
+        added.push_back(heard.back());
+        found.push_back(decode);
+    }
+}
+
+void StreamingReceiver::Impl::listMature(const std::vector<KnownBits>& known, const PayloadCheck& check,
+                                         std::vector<StreamDecode>& found, std::vector<Heard>& added)
+{
+    // A kept candidate is list decoded once, when no search can find a
+    // better copy of it: every gear at its tempo has searched past it (G5's
+    // first voice is G4's waveform). Only audio still held is listed, so a
+    // decode never arrives long after its frame.
+    std::vector<Kept> ready;
+    const long long held = historyStart;
+    for (Kept& k : kept)
+    {
+        if (k.listed) continue;
+        bool passed = true;
+        for (const GearState& state : states)
+        {
+            Geometry geo(state.gear);
+            if (geo.L == k.samplesPerSymbol && k.start >= state.nextStart - 3 * geo.step) passed = false;
+        }
+        if (!passed) continue;
+        k.listed = true;
+        if (k.start >= held) ready.push_back(k);
+    }
+
+    for (const Kept& k : ready)
+    {
+        Payload payload{};
+        if (!detail::decodeListWithGuesses(k.llrs, known, check, payload)) continue;
+        Geometry geo(k.gear);
+        forgetKept(geo.L, k.voice, k.start);
+        if (alreadyReported(geo.L, k.voice, k.start)) continue;
+        recent.push_back({geo.L, k.voice, k.start});
+
+        StreamDecode decode;
+        decode.gear = k.gear;
+        decode.decode.ok = true;
+        decode.decode.voice = k.voice;
+        decode.decode.scale = k.scale;
+        decode.decode.payload = payload;
+        decode.decode.startSample = k.start;
+        decode.decode.frequencyOffsetHz = k.frequencyOffsetHz;
+        decode.decode.report = k.report;
+
+        // Sounded, timed and taken out like any other decode, with the
+        // frames heard over it out of the way first.
+        const long long from = k.start - geo.step - HILBERT_GUARD;
+        const long long to = k.start + geo.frame + geo.step + HILBERT_GUARD;
+        detail::ComplexSignal z;
+        if (from >= historyStart && to <= historyStart + (long long)history.size() && analyticOf(from, to, z))
+        {
+            decode.decode.framesRemoved = subtractHeard(z, from, k.start, k.start + geo.frame);
+            std::shared_ptr<const detail::VoiceTemplates> voice =
+                detail::voiceTemplates(k.scale, k.voice, k.gear, activeTuning);
+            double doppler =
+                detail::soundDecoded(z, gearInfo(k.gear), *voice, k.start - from, k.frequencyOffsetHz, payload);
+            if (doppler >= 0) decode.decode.report.dopplerHz = doppler;
+            addHeard(z, from, k.gear, k.voice, k.scale, decode.decode);
+            added.push_back(heard.back());
+        }
+        found.push_back(decode);
+    }
 }
 
 bool StreamingReceiver::Impl::alreadyReported(long long samplesPerSymbol, int voice, long long start)
@@ -577,14 +816,19 @@ void StreamingReceiver::Impl::search(GearState& state, unsigned generation)
 
     detail::ComplexSignal z;
     detail::analyticSignal(history.data() + (windowStart - historyStart), (size_t)(windowEnd - windowStart), z);
+    // Frames already heard, at any tempo, out of the way first.
+    subtractHeard(z, windowStart, windowStart, windowEnd);
 
     std::vector<KnownBits> known;
+    PayloadCheck check;
     {
         std::lock_guard<std::mutex> lock(knownBitsMutex);
         known = knownBits;
+        check = payloadCheck;
     }
 
     std::vector<StreamDecode> found;
+    std::vector<Heard> added;
     bool haveReport = false;
     bool reportDecoded = false;
     ChannelReport report;
@@ -598,56 +842,88 @@ void StreamingReceiver::Impl::search(GearState& state, unsigned generation)
             held.push_back(detail::voiceTemplates(scale, voice, state.gear, activeTuning));
             hypotheses.push_back(held.back().get());
         }
-        detail::VoiceDecode result = detail::receiveVoice(z, info, hypotheses, first - 2 * geo.step - windowStart,
-                                                          first + geo.hop - windowStart, MAX_OFFSET_HZ, CANDIDATES,
-                                                          known);
-        if (!result.haveCandidate) continue;
+        for (int pass = 0; pass < MAX_DECODES_PER_SEARCH; pass++)
+        {
+            detail::VoiceDecode result = detail::receiveVoice(z, info, hypotheses, first - 2 * geo.step - windowStart,
+                                                              first + geo.hop - windowStart, MAX_OFFSET_HZ,
+                                                              CANDIDATES, known);
+            if (!result.haveCandidate) break;
 
-        long long start = windowStart + result.decode.startSample;
-        // The report of a decoded frame beats the best guess of a search
-        // that decoded nothing.
-        if (!haveReport || (result.decode.ok && !reportDecoded))
-        {
-            haveReport = true;
-            reportDecoded = result.decode.ok;
-            report = result.decode.report;
-            reportAt = start + geo.frame;
-        }
-        Decode decoded = result.decode;
-        decoded.scale = activeScales[(size_t)result.hypothesis];
-        if (!decoded.ok)
-        {
-            // Strongest candidate first: add each to the copies kept from
-            // earlier, and keep it in turn if that does not decode either.
-            for (const detail::SoftFrame& soft : result.failed)
+            long long start = windowStart + result.decode.startSample;
+            // The report of a decoded frame beats the best guess of a search
+            // that decoded nothing.
+            if (!haveReport || (result.decode.ok && !reportDecoded))
             {
-                long long softStart = windowStart + soft.startSample;
-                Scale softScale = activeScales[(size_t)soft.hypothesis];
-                if (average(geo, voice, soft, softStart, softScale, known, decoded))
+                haveReport = true;
+                reportDecoded = result.decode.ok;
+                report = result.decode.report;
+                reportAt = start + geo.frame;
+            }
+            Decode decoded = result.decode;
+            decoded.scale = activeScales[(size_t)result.hypothesis];
+            if (!decoded.ok)
+            {
+                // Strongest candidate first: add each to the copies kept from
+                // earlier, and keep it in turn if that does not decode either.
+                for (const detail::SoftFrame& soft : result.failed)
                 {
-                    start = softStart;
-                    break;
+                    long long softStart = windowStart + soft.startSample;
+                    Scale softScale = activeScales[(size_t)soft.hypothesis];
+                    if (average(geo, voice, soft, softStart, softScale, known, decoded))
+                    {
+                        start = softStart;
+                        break;
+                    }
+                }
+                for (const detail::SoftFrame& soft : result.failed)
+                {
+                    long long softStart = windowStart + soft.startSample;
+                    if (!decoded.ok || std::llabs(softStart - start) > geo.L)
+                        keep(geo, voice, soft, softStart, activeScales[(size_t)soft.hypothesis], state.gear);
                 }
             }
-            for (const detail::SoftFrame& soft : result.failed)
-            {
-                long long softStart = windowStart + soft.startSample;
-                if (!decoded.ok || std::llabs(softStart - start) > geo.L)
-                    keep(geo, voice, soft, softStart, activeScales[(size_t)soft.hypothesis]);
-            }
-        }
-        if (!decoded.ok) continue;
-        // A kept copy of a frame that has now decoded is no use any more.
-        forgetKept(geo.L, voice, start);
-        if (alreadyReported(geo.L, voice, start)) continue;
+            if (!decoded.ok) break;
+            // A kept copy of a frame that has now decoded is no use any more.
+            forgetKept(geo.L, voice, start);
 
-        recent.push_back({geo.L, voice, start});
-        StreamDecode decode;
-        decode.gear = state.gear;
-        decode.decode = decoded;
-        decode.decode.voice = voice;
-        decode.decode.startSample = start;
-        found.push_back(decode);
+            // Take it out, and search again for a frame it was hiding. One
+            // reported already (heard by an earlier, overlapping search, or
+            // left over from a take-out that was not quite clean) comes out
+            // again too.
+            decoded.voice = voice;
+            decoded.startSample = start;
+            bool fresh = !alreadyReported(geo.L, voice, start);
+            int removed = 0;
+            for (const Heard& h : heard)
+            {
+                if (h.start < start + geo.frame && h.start + h.frameSamples > start) removed++;
+            }
+            addHeard(z, windowStart, state.gear, voice, decoded.scale, decoded);
+            const Heard& now = heard.back();
+            std::shared_ptr<const detail::VoiceTemplates> templates =
+                detail::voiceTemplates(now.scale, now.voice, now.gear, activeTuning);
+            detail::subtractFrame(z, *templates, info, now.start - windowStart, now.frequencyOffsetHz, now.payload);
+            if (!fresh) continue;
+
+            recent.push_back({geo.L, voice, start});
+            added.push_back(now);
+            StreamDecode decode;
+            decode.gear = state.gear;
+            decode.decode = decoded;
+            decode.decode.framesRemoved = removed;
+            found.push_back(decode);
+        }
+    }
+
+    // List decode the candidates no search will find a better copy of now.
+    listMature(known, check, found, added);
+
+    // Decode again, without the frames just heard, the candidates they were
+    // on top of; and so on for whatever that brings out.
+    for (size_t i = 0; i < added.size() && i < 4 * (size_t)MAX_DECODES_PER_SEARCH; i++)
+    {
+        Heard over = added[i];
+        retryKept(over, known, found, added);
     }
 
     // Forget kept copies too old to be averaged with.
@@ -656,6 +932,11 @@ void StreamingReceiver::Impl::search(GearState& state, unsigned generation)
                                   return k.start < first - AVERAGING_SECONDS * SAMPLE_RATE_HZ;
                               }),
                kept.end());
+
+    // Forget heard frames that no audio still held overlaps.
+    heard.erase(std::remove_if(heard.begin(), heard.end(),
+                               [&](const Heard& h) { return h.start + h.frameSamples < historyStart; }),
+                heard.end());
 
     // Forget frames at this tempo that no window can reach any more (the
     // windows reach only a few steps before their first start).
@@ -680,9 +961,38 @@ void StreamingReceiver::Impl::search(GearState& state, unsigned generation)
         lastReportAt = reportAt;
     }
 
-    // Voice order within a duet frame (the link layer reassembles in it).
-    std::stable_sort(found.begin(), found.end(),
-                     [](const StreamDecode& a, const StreamDecode& b) { return a.decode.voice < b.decode.voice; });
+    // In the order the frames went on the air, voice 0 before voice 1 within
+    // a duet frame (the link layer reassembles in that order). A frame
+    // decoded again from under another can be older than one decoded first.
+    // The two voices of a duet frame start together, give or take the
+    // timing's few samples, so a voice 1 decode within 10 ms of a voice 0
+    // decode at its tempo is placed by that one's start.
+    std::vector<long long> onAir(found.size());
+    for (size_t i = 0; i < found.size(); i++)
+    {
+        const Decode& d = found[i].decode;
+        onAir[i] = d.startSample;
+        if (d.voice != 1) continue;
+        for (const StreamDecode& other : found)
+        {
+            if (other.decode.voice == 0 && other.gear == found[i].gear &&
+                std::llabs(other.decode.startSample - d.startSample) <= SAMPLE_RATE_HZ / 100)
+            {
+                onAir[i] = other.decode.startSample;
+                break;
+            }
+        }
+    }
+    std::vector<size_t> order(found.size());
+    for (size_t i = 0; i < order.size(); i++) order[i] = i;
+    std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+        if (onAir[a] != onAir[b]) return onAir[a] < onAir[b];
+        return found[a].decode.voice < found[b].decode.voice;
+    });
+    std::vector<StreamDecode> inOrder;
+    inOrder.reserve(found.size());
+    for (size_t i : order) inOrder.push_back(found[i]);
+    found.swap(inOrder);
     DecodeCallback cb;
     {
         std::lock_guard<std::mutex> lock(callbackMutex);
@@ -690,7 +1000,7 @@ void StreamingReceiver::Impl::search(GearState& state, unsigned generation)
     }
     for (const StreamDecode& decode : found)
     {
-        long long end = decode.decode.startSample + geo.frame;
+        long long end = decode.decode.startSample + gearInfo(decode.gear).frameSamples();
         if (end > lastFrameEnd) lastFrameEnd = end;
         if (cb) cb(decode);
     }

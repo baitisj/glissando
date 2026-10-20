@@ -47,6 +47,7 @@
 
 #include "AnswerTempo.h"
 #include "FrameCodec.h"
+#include "PartialCopies.h"
 #include "TextMessagingTypes.h"
 #include "GlissandoChord.h"
 #include "GlissandoCw.h"
@@ -103,6 +104,12 @@ public:
     // Feeds received 8 kHz audio to both demodulators, invoking the frame
     // callback for every frame that passes the modem's CRC.
     void demodulate(const short* samples, int numSamples);
+
+    // Hands over what the Glissando receiver has of bursts whose last
+    // segments never came, once they cannot come any more (partial copy).
+    // Call it regularly from a thread that holds no lock the frame callback
+    // takes: the transport's poll() does.
+    void poll();
 
     // True while either demodulator is locked onto a burst, or was within
     // CHANNEL_BUSY_HOLD_MILLISECONDS: somebody else has the channel. Safe to
@@ -284,6 +291,11 @@ private:
     // in onGlissandoDecode(), which reassembles segments into chat frames.
     void onGlissandoDecode(const Glissando::StreamDecode& decode);
 
+    // A burst the reassembler handed over, whole or with segments missing:
+    // read, merged with earlier copies of it when it lost some, and given to
+    // the frame callback.
+    void deliverBurst(const Glissando::LinkBurst& burst, int gear, float snr);
+
     // Why isReceiving() says the channel is taken.
     enum class Busy
     {
@@ -315,6 +327,18 @@ private:
     // Each stream (tempo and scale) with a burst part way through, and the
     // receiver sample until which its next frame could still decode.
     std::map<int, long long> burstHeldUntil_;
+    // Bursts cut short when the receivers were reset, for poll() to hand
+    // over, with the gear and SNR they were heard at; and the copies of text
+    // frames that lost segments, merged across the sender's retries.
+    struct CutBurst
+    {
+        Glissando::LinkBurst burst;
+        int gear = 0;
+        float snr = 0.0f;
+    };
+    std::vector<CutBurst> cutBursts_;
+    std::map<int, std::pair<int, float>> streamHeard_; // stream -> gear and SNR of its last frame
+    TextMessaging::PartialCopies partialCopies_;
     std::vector<GlissandoHeard> glissandoHeard_;
     std::vector<double> lastHeardNotesHz_;      // every voice of the last frame heard
     uint64_t lastHeardStartMs_ = 0;

@@ -77,6 +77,11 @@ struct Frame
 
     // A locator frame's grid square, four characters (FrameCodec::normalizeLocator).
     std::string locator;
+
+    // Received over Glissando with segments of its burst lost to a fade
+    // (FrameCodec::decodePartial()): the text has "..." where they were.
+    // Shown, but not taken as received, so the sender is still asked for it.
+    bool partial = false;
 };
 
 constexpr int MAX_TEXT_BURSTS_FOLLOWING = (1 << BURSTS_FOLLOWING_BITS) - 1;
@@ -140,6 +145,24 @@ public:
     // too short for its header, the type is not one of ours, or a field holds
     // a value no sender produces.
     static bool decode(const uint8_t* data, int length, Frame& frameOut);
+
+    // A text frame some of whose HamText::TEXT_BLOCK_BITS blocks never
+    // arrived (bit i of missingBlocks for block i, zero bytes there), as
+    // Glissando hands over a burst that lost segments (its blocks). Each
+    // block's text reads on its own, so what arrived is all there, with
+    // "..." for each run of missing blocks; frameOut.partial is set. False
+    // as decode() is, for a signalling frame, and when any of the header is
+    // missing: it says who sent the frame and which message it is part of.
+    // With no blocks missing it is decode().
+    static bool decodePartial(const uint8_t* data, int length, uint8_t missingBlocks, Frame& frameOut);
+
+    // Whether these bytes, the start of a frame that may be cut short (such
+    // as the first segment of a Glissando burst), could begin a frame a
+    // sender produces: a type code in use, a signalling type or a text type
+    // as asked, and as much of the origin callsign as is there one that
+    // packing produces. Glissando's list decoding checks the runners-up it
+    // tries with it, which turns most of the noise away.
+    static bool couldBeginFrame(const uint8_t* data, int length, bool signalling);
 
     // How many characters of text, from character `from`, fit in one text
     // frame sent by originCallsign. The protocol cuts messages with it.

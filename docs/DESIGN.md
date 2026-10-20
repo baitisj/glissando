@@ -302,7 +302,14 @@ audio -> analytic signal -> sync search (dechirp + FFT, all gears)
       -> BCJR over the note trellis -> bit LLRs -> deinterleave
       -> soft Viterbi (LDPC in the target design) -> CRC check
       -> on success: decision-directed channel sounding -> gear advice
+      -> the decoded frame is taken out of the audio, and searched under
+      -> a candidate that never decodes: list Viterbi, runners-up checked
+         against the CRC, the soft bits and the link layer's grammar
 ```
+
+The last two steps are ideas from JTTY's decoder, in the streaming
+receiver: signal subtraction, and list decoding with a grammar check
+(Lessons 10 and 11 of [HOW_IT_HEARS.md](HOW_IT_HEARS.md)).
 
 ## 7. Measured performance
 
@@ -336,8 +343,10 @@ paths because each voice fades independently and both must decode.
 
 **False decodes:** 1 in 7000 (G1, moderate path, -25 dB), a wrong message
 that passed the 14-bit CRC after the receiver tried three sync candidates.
-FT8 handles this with extra plausibility checks on decoded messages; the
-real-time decoder should do the same.
+FT8 handles this with extra plausibility checks on decoded messages. The
+app's receiver now holds the best path to a ceiling of 44 hard errors and
+checks a runner-up of list decoding against the link layer's grammar
+(Lesson 10 of [HOW_IT_HEARS.md](HOW_IT_HEARS.md)).
 
 **Path sounding** (median over 40 decodes at high SNR, Doppler spread in Hz):
 
@@ -363,6 +372,12 @@ orthogonal to the matched filters: a station in B-flat is just noise to a
 receiver listening in A. Keys a fifth apart share four notes and collide.
 The price is musical: two simultaneous stations a semitone apart clash.
 The default is A for everyone and time sharing; keys are for busy bands.
+
+Two stations that key at once in the same key are not both lost either.
+The streaming receiver takes every frame it decodes back out of the audio
+and searches again (Lesson 11 of [HOW_IT_HEARS.md](HOW_IT_HEARS.md)).
+Two Presto stations in the same key, 3 dB apart, keyed together: the
+weaker now decodes 50 times in 60, not 8.
 
 ## 9. What "pretty" costs, and what it buys
 

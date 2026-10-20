@@ -269,6 +269,9 @@ double TextMessagingTransport::airTimeScale(int gear) const
 
 void TextMessagingTransport::poll()
 {
+    // Bursts heard in part, once the rest of them cannot come.
+    if (modem_ != nullptr) modem_->poll();
+
     // The protocol freezes on the channel being busy but has no logging of its
     // own, so the spells are reported here.
     if (txLogEnabled())

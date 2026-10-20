@@ -55,6 +55,12 @@ public:
     // any thread.
     void setKnownBits(const std::vector<KnownBits>& knownBits);
 
+    // What a payload must look like (ModemSettings::payloadCheck) for list
+    // decoding to report it: a candidate that never decodes is listed once,
+    // on its best copy, a quarter frame after it would have decoded. Unset,
+    // any payload that passes the CRC is reported. Safe from any thread.
+    void setPayloadCheck(PayloadCheck check);
+
     // Called on the worker thread for every CRC-valid frame.
     void setDecodeCallback(DecodeCallback callback);
 

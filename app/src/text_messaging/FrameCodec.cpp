@@ -34,6 +34,7 @@
 
 #include "FrameCodec.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstring>
 
@@ -576,6 +577,69 @@ bool FrameCodec::decode(const uint8_t* data, int length, Frame& frameOut)
         frame.payload.assign(text.begin(), text.end());
     }
 
+    frameOut = frame;
+    return true;
+}
+
+bool FrameCodec::couldBeginFrame(const uint8_t* data, int length, bool signalling)
+{
+    if (data == nullptr || length < 1) return false;
+    const int available = 8 * length;
+    if (available < TYPE_BITS) return true;
+
+    const uint8_t code = (uint8_t)getBits(data, 0, TYPE_BITS);
+    FrameType type;
+    bool noAutoAck = false;
+    if (!typeFromCode(code, type, noAutoAck)) return false;
+    if (isSignallingFrameType(type) != signalling) return false;
+
+    // The short locator's callsign follows its type.
+    const int form = isShortLocatorCode(code) ? TYPE_BITS : ORIGIN_BIT;
+    if (available < form + 1) return true;
+    const bool standard = getBits(data, form, 1) == 0;
+    if (available < form + originBits(standard)) return true;
+    return !unpackCallsign(data, form + 1, standard).empty();
+}
+
+bool FrameCodec::decodePartial(const uint8_t* data, int length, uint8_t missingBlocks, Frame& frameOut)
+{
+    if (missingBlocks == 0) return decode(data, length, frameOut);
+    if (data == nullptr || length < 1 || (missingBlocks & 1u)) return false;
+
+    FrameType type;
+    bool noAutoAck = false;
+    if (!typeFromCode((uint8_t)getBits(data, 0, TYPE_BITS), type, noAutoAck)) return false;
+    if (isSignallingFrameType(type)) return false;
+    const bool standard = getBits(data, ORIGIN_BIT, 1) == 0;
+    const int header = headerBits(type, standard);
+    const int available = 8 * length;
+    for (int block = 0; block * HamText::TEXT_BLOCK_BITS < header; block++)
+    {
+        if (missingBlocks & (1u << block)) return false;
+    }
+
+    Frame frame;
+    if (!decode(data, length, frame)) return false;
+
+    // The text again, block by block, leaving out the ones that never came.
+    std::string text;
+    bool gap = false;
+    for (int block = 0; block * HamText::TEXT_BLOCK_BITS < available; block++)
+    {
+        int from = std::max(header, block * HamText::TEXT_BLOCK_BITS);
+        int to = std::min(available, (block + 1) * HamText::TEXT_BLOCK_BITS);
+        if (from >= to) continue;
+        if (block < 8 && (missingBlocks & (1u << block)))
+        {
+            if (!gap) text += "...";
+            gap = true;
+            continue;
+        }
+        gap = false;
+        text += HamText::decode(data, from, to);
+    }
+    frame.payload.assign(text.begin(), text.end());
+    frame.partial = true;
     frameOut = frame;
     return true;
 }
