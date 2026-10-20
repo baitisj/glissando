@@ -449,8 +449,8 @@ bool FileTransferEngine::resumePart(Entry& entry, const std::string& path)
     t.state = FileTransfer::State::Receiving;
     kept_.erase(kept);
 
-    std::vector<uint8_t> body = numbered(entry.number);
-    for (int shift = 24; shift >= 0; shift -= 8) body.push_back((uint8_t)(t.done >> shift));
+    std::vector<uint8_t> body = {entry.number, (uint8_t)(t.done >> 24), (uint8_t)(t.done >> 16),
+                                 (uint8_t)(t.done >> 8), (uint8_t)t.done};
     queueRecord(t.peer, FileRecordType::AcceptFrom, body);
     changed();
 
@@ -624,8 +624,9 @@ std::vector<uint8_t> FileTransferEngine::takeRecords(const std::string& peer, ui
 
         // Its fingerprint first, so the far end knows the file when the
         // offer comes.
-        std::vector<uint8_t> print = numbered(entry.number);
-        print.insert(print.end(), entry.fingerprint.begin(), entry.fingerprint.end());
+        std::vector<uint8_t> print(1 + entry.fingerprint.size());
+        print[0] = entry.number;
+        std::copy(entry.fingerprint.begin(), entry.fingerprint.end(), print.begin() + 1);
         std::vector<uint8_t> printRecord = fileRecordEncode(FileRecordType::Fingerprint, print);
         out.insert(out.end(), printRecord.begin(), printRecord.end());
 
