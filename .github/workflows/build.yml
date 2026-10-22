@@ -1,9 +1,12 @@
 name: Build and test
 
+# Each PR gets the quick modem build and tests. The app build runs only
+# when started by hand: Actions > Build and test > Run workflow, which runs
+# both jobs. Jeff chose this on 2026-10-22, since threads build and test
+# before every push.
 on:
-  push:
-    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   modem:
@@ -20,6 +23,7 @@ jobs:
 
   app:
     name: App (Linux, PulseAudio)
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4

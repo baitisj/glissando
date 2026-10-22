@@ -46,7 +46,12 @@ install `libgtk-3-dev`, or the window-position restore quietly compiles out.
 
 Run only the `glissando|text_messaging` tests. Some of the inherited
 FreeDV tests hang. Unit tests need `-DUNITTEST=ON`, and without it ctest
-finds nothing. CI runs both jobs on every PR and on every push to `main`.
+finds nothing. CI runs only the modem job on each PR, and nothing on a
+push to `main` (Jeff's choice, 2026-10-22). The app job runs only when
+started by hand (Actions > Build and test > Run workflow, or the GitHub
+`actions_run_trigger` tool on the branch), which runs both jobs. Threads
+build the app and run its tests themselves before pushing; start a full
+run when Jeff asks, and always on a release PR.
 
 Other people build this with newer compilers. Include every standard header
 you use, such as `<algorithm>` for `std::count` and `std::min`. The CI
@@ -68,9 +73,9 @@ and `PULSE_SERVER=unix:<path from pactl info>`, or Engage aborts.
 
 ## Releases
 
-1. A PR bumps `PROJECT_VERSION` in `app/CMakeLists.txt`. It always runs full
-   CI: no `[skip ci]` on a release PR, even when earlier PRs skipped it at
-   Jeff's request.
+1. A PR bumps `PROJECT_VERSION` in `app/CMakeLists.txt`. It always gets a
+   full CI run, started by hand on its branch: no `[skip ci]` on a release
+   PR, even when earlier PRs skipped it at Jeff's request.
 2. After Jeff merges it, build from the merge commit:
    - The Linux AppImage: `app/appimage/make-appimage.sh`, which builds a
      Release tree in `app/build-appimage`.
