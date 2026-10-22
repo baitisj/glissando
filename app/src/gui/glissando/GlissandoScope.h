@@ -111,13 +111,15 @@ public:
 
     void clear();
 
-    // The About screen: the screen switches off like an old television, the picture
-    // squeezing to a line and then a dot; invaders march across the top, a
-    // cat sits below them and now and then has a pair of DORC glasses
-    // lowered onto it, and the credits roll up between them. Once they have
-    // rolled by, or on setAbout(false) or a click on the screen, the
-    // waterfall comes back warped and wobbling and settles straight. The
-    // history goes on filling meanwhile; only the drawing changes.
+    // The About screen: the screen switches off like an old television, the
+    // picture squeezing to a line and then a dot. A cat sits at the bottom
+    // and has a pair of DORC glasses lowered onto it; the credits drift down
+    // from the top, pushing a row of invaders ahead of them until they are
+    // squashed flat over the cat, who hops up and bonks them off the screen.
+    // Once the credits have gone by, or on setAbout(false) or a click on the
+    // screen, the waterfall comes back warped and wobbling and settles
+    // straight. The history goes on filling meanwhile; only the drawing
+    // changes.
     void setAbout(bool on, const std::vector<wxString>& credits = {});
 
     // Smoke seeping out all round the screen, 0 for none to 1 at its
@@ -196,6 +198,7 @@ private:
     void switchOffTrace(wxImage& image, double seconds) const;
     void switchOnTrace(wxImage& image, double seconds) const;
     void paintTv(wxGraphicsContext* gc, const wxRect& trace, Tv tv, double seconds);
+    void stepAboutScene(double dt, double width, double height, bool close, double catWidth, double catPx);
 
     // Lets off puffs of smoke while there is any, forgets the ones gone,
     // and stops its timer once the last has.
@@ -312,7 +315,28 @@ private:
     bool about_ = false;
     double tvSwitchedAt_ = -1e9;    // steady clock seconds, when about_ last changed
     std::vector<wxString> credits_;
-    bool creditsRolledBy_ = false;  // the last line has gone off the top
+    bool creditsRolledBy_ = false;  // the last line has faded out at the bottom
+    double creditsRolled_ = 0.0;    // pixels the credits have come down
+
+    // The About scene's invaders and cat.
+    struct Invader
+    {
+        int slot = 0;               // its place in the row
+        int kind = 0;
+        bool flying = false;        // bonked: tumbling away
+        double fx = 0.0, fy = 0.0, vx = 0.0, vy = 0.0, angle = 0.0, spin = 0.0;
+    };
+    std::vector<Invader> invaders_;
+    double sceneLast_ = 0.0;        // steady clock seconds of the last step
+    double catX_ = -1.0;            // pixels from the trace's left; -1 until placed
+    int catDir_ = 1;
+    enum class CatMode { Sit, ToSmack, Smack, Home };
+    CatMode catMode_ = CatMode::Sit;
+    int catTarget_ = -1;
+    double catJump_ = 0.0;          // through a smack, 0 to 1
+    double catStep_ = 0.0;          // its legs
+    unsigned sceneRandom_ = 12345;
+    double sceneRandomUnit();
 
     wxTimer smokeTimer_;
     double smoke_ = 0.0;
