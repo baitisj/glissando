@@ -1,4 +1,4 @@
-add_library(fdv_audio_pipeline STATIC
+add_library(gliss_audio_pipeline STATIC
     AudioPipeline.cpp
     EitherOrStep.cpp
     IPipelineStep.cpp
@@ -10,15 +10,15 @@ add_library(fdv_audio_pipeline STATIC
     TapStep.cpp
 )
 
-target_compile_options(fdv_audio_pipeline PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
-target_link_libraries(fdv_audio_pipeline PRIVATE fdv_os_wrapper samplerate fdv_util)
-target_include_directories(fdv_audio_pipeline PRIVATE ${CODEC2_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_BINARY_DIR}/..)
-target_include_directories(fdv_audio_pipeline PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_options(gliss_audio_pipeline PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
+target_link_libraries(gliss_audio_pipeline PRIVATE gliss_os_wrapper samplerate gliss_util)
+target_include_directories(gliss_audio_pipeline PRIVATE ${CODEC2_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_BINARY_DIR}/..)
+target_include_directories(gliss_audio_pipeline PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 if(BUILD_BACKEND_UNITTESTS)
 macro(DefineUnitTest utName)
     add_executable(${utName} test/${utName}.cpp)
-    target_link_libraries(${utName} PRIVATE fdv_audio_pipeline fdv_util samplerate)
+    target_link_libraries(${utName} PRIVATE gliss_audio_pipeline gliss_util samplerate)
     target_include_directories(${utName} PRIVATE ${CODEC2_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_BINARY_DIR}/..)
 
     add_test(NAME pipeline_${utName} COMMAND ${CMAKE_CURRENT_BINARY_DIR}/${utName})

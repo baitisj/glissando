@@ -1,4 +1,4 @@
-add_library(fdv_reporting STATIC
+add_library(gliss_reporting STATIC
     pskreporter.cpp
     pskreporter.h
     CsvReporter.cpp
@@ -7,6 +7,6 @@ add_library(fdv_reporting STATIC
     UdpReporter.h
 )
 
-target_compile_options(fdv_reporting PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
-target_link_libraries(fdv_reporting PRIVATE yyjson git_version)
-target_include_directories(fdv_reporting PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_options(gliss_reporting PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
+target_link_libraries(gliss_reporting PRIVATE yyjson git_version)
+target_include_directories(gliss_reporting PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

@@ -1,4 +1,4 @@
-add_library(fdv_gui_glissando STATIC
+add_library(gliss_gui_glissando STATIC
     ChaoticaControls.cpp
     ChaoticaTheme.cpp
     GlissandoConsole.cpp
@@ -6,9 +6,9 @@ add_library(fdv_gui_glissando STATIC
     Globe.cpp
     MapBall.cpp)
 
-target_include_directories(fdv_gui_glissando PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../.. ${CMAKE_CURRENT_BINARY_DIR}/../..)
-target_compile_options(fdv_gui_glissando PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
-target_link_libraries(fdv_gui_glissando PUBLIC glissando_modem)
+target_include_directories(gliss_gui_glissando PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../.. ${CMAKE_CURRENT_BINARY_DIR}/../..)
+target_compile_options(gliss_gui_glissando PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
+target_link_libraries(gliss_gui_glissando PUBLIC glissando_modem)
 
 if(UNITTEST)
     add_executable(glissando_globe_test test/GlobeTest.cpp Globe.cpp)
@@ -17,7 +17,7 @@ if(UNITTEST)
 endif(UNITTEST)
 
 if(BOOTSTRAP_WXWIDGETS)
-    add_dependencies(fdv_gui_glissando wx::core wx::base wx::aui wx::html wx::net wx::adv wx::propgrid wx::xrc)
-    target_compile_definitions(fdv_gui_glissando PRIVATE ${WXBUILD_BUILD_DEFS})
-    target_include_directories(fdv_gui_glissando PRIVATE ${WXBUILD_INCLUDES})
+    add_dependencies(gliss_gui_glissando wx::core wx::base wx::aui wx::html wx::net wx::adv wx::propgrid wx::xrc)
+    target_compile_definitions(gliss_gui_glissando PRIVATE ${WXBUILD_BUILD_DEFS})
+    target_include_directories(gliss_gui_glissando PRIVATE ${WXBUILD_INCLUDES})
 endif(BOOTSTRAP_WXWIDGETS)

@@ -12,7 +12,7 @@ else(APPLE)
     set(THREADED_OBJECT_FILES ThreadedObject.cpp)
 endif(APPLE)
 
-add_library(fdv_util STATIC
+add_library(gliss_util STATIC
     Semaphore.cpp
     ${THREADED_OBJECT_FILES}
     ThreadedTimer.cpp
@@ -25,23 +25,23 @@ add_library(fdv_util STATIC
 
 # ULOG_ASYNC is also set via add_definitions() in ../CMakeLists.txt; repeated
 # here as a PUBLIC usage requirement so it reaches downstream projects that
-# link fdv_util through FetchContent. It changes ulog_Event's layout, so it
+# link gliss_util through FetchContent. It changes ulog_Event's layout, so it
 # must be seen wherever ulog.h is.
-target_compile_definitions(fdv_util PUBLIC ULOG_ASYNC)
+target_compile_definitions(gliss_util PUBLIC ULOG_ASYNC)
 
 find_package(Threads REQUIRED)
 
-target_compile_options(fdv_util PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
-target_link_libraries(fdv_util fdv_os_wrapper Threads::Threads)
+target_compile_options(gliss_util PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
+target_link_libraries(gliss_util gliss_os_wrapper Threads::Threads)
 if(WIN32)
-    target_link_libraries(fdv_util iphlpapi)
+    target_link_libraries(gliss_util iphlpapi)
 endif(WIN32)
-target_include_directories(fdv_util PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(gliss_util PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 if(BUILD_BACKEND_UNITTESTS)
 macro(DefineUnitTest utName)
     add_executable(${utName} test/${utName}.cpp)
-    target_link_libraries(${utName} PRIVATE fdv_util)
+    target_link_libraries(${utName} PRIVATE gliss_util)
 
     add_test(NAME util_${utName} COMMAND ${CMAKE_CURRENT_BINARY_DIR}/${utName})
 endmacro()

@@ -1,11 +1,11 @@
-add_library(fdv_rig_control_omnirig STATIC
+add_library(gliss_rig_control_omnirig STATIC
     OmniRig_i.c
     OmniRigController.cpp
 )
 
-target_include_directories(fdv_rig_control_omnirig PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../.. ${CMAKE_CURRENT_BINARY_DIR}/../..)
-target_compile_options(fdv_rig_control_omnirig PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
-target_link_libraries(fdv_rig_control_omnirig PUBLIC fdv_util)
+target_include_directories(gliss_rig_control_omnirig PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../.. ${CMAKE_CURRENT_BINARY_DIR}/../..)
+target_compile_options(gliss_rig_control_omnirig PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
+target_link_libraries(gliss_rig_control_omnirig PUBLIC gliss_util)
 
 # OmniRig_i.c is MIDL output. Its GUIDs are declared EXTERN_C and
 # initialized in one go, which GCC (unlike Clang) warns about in C.
