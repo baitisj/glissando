@@ -91,13 +91,6 @@ bool sameTiming(const TextMessaging::AirTiming& a, const TextMessaging::AirTimin
 
 } // namespace
 
-int MainFrame::chatTempo_()
-{
-    int gear = textMessagingModem().glissandoStatus().transmitGear;
-    if (gear < Glissando::MIN_GEAR || gear > Glissando::MAX_GEAR) gear = wxGetApp().appConfiguration.glissandoGear;
-    return std::min(Glissando::MAX_GEAR, std::max(Glissando::MIN_GEAR, gear));
-}
-
 GlissandoConsoleSettings MainFrame::loadGlissandoSettings_() const
 {
     auto& config = wxGetApp().appConfiguration;
@@ -207,19 +200,8 @@ void MainFrame::applyGlissandoToModem_(bool enabled)
     textMessagingModem().setGlissando(modemConfig);
 
     // Automatic shifting can change the tempo at any frame heard, and every
-    // protocol timer scales with it. With Data2G carrying chat the tempo
-    // picks its Data2G mode, and the timers follow that mode, which can also
-    // change when data2g-host lists the modes it offers.
-    TextMessaging::AirTiming timing;
-    if (data2gChatActive_.load(std::memory_order_acquire))
-    {
-        m_data2gTransport->setGear(chatTempo_());
-        timing = m_data2gTransport->airTiming();
-    }
-    else
-    {
-        timing = textMessagingModem().airTiming();
-    }
+    // protocol timer scales with it.
+    TextMessaging::AirTiming timing = textMessagingModem().airTiming();
     if (!sameTiming(timing, appliedAirTiming_))
     {
         TextMessaging::TextMessagingSession::instance().protocol().setAirTiming(timing);
@@ -264,7 +246,6 @@ GlissandoTelemetry MainFrame::glissandoTelemetry()
                              (m_RxRunning && m_textMessagingTransport != nullptr &&
                               m_textMessagingTransport->isTransmitting());
     telemetry.audioRunning = m_RxRunning;
-    telemetry.data2g = data2gChatActive_.load(std::memory_order_acquire);
     if (glissandoChatShown()) m_chatUnread = false;
     telemetry.chatUnread = m_chatUnread;
 
@@ -578,76 +559,6 @@ void MainFrame::glissandoShowChat(bool show)
 
     wxCommandEvent event;
     OnToolsTextMessaging(event);
-}
-
-// Every file this run, for the console: a session's in twentieths, so the
-// visi-scope's bar and floppies move as a group file's pieces do.
-std::vector<GlissandoScopeFile> MainFrame::glissandoFiles()
-{
-    std::vector<GlissandoScopeFile> out;
-    if (!data2gChatActive_.load(std::memory_order_acquire) || m_data2gTransport == nullptr) return out;
-
-    using Transfer = TextMessaging::Data2G::FileTransfer;
-    for (const Transfer& t : m_data2gTransport->fileTransfers())
-    {
-        GlissandoScopeFile f;
-        f.key = t.id * 2;
-        f.outgoing = t.outgoing;
-        f.station = wxString::FromUTF8(t.peer);
-        f.name = wxString::FromUTF8(t.name);
-        f.size = t.size;
-        f.live = t.live();
-        f.moving = t.state == Transfer::State::Sending || t.state == Transfer::State::Receiving;
-        f.offered = t.state == Transfer::State::Asking;
-        bool whole = t.state == Transfer::State::Delivered || t.state == Transfer::State::Saved;
-        // Ours, what the far end's modem has acknowledged; theirs, what has arrived.
-        uint64_t moved = t.outgoing ? t.done : t.handed;
-        f.fraction = whole ? 1.0 : t.size > 0 ? std::min(1.0, (double)moved / (double)t.size) : 0.0;
-        f.moved = (int)std::floor(f.fraction * 20.0);
-        switch (t.state)
-        {
-            case Transfer::State::Delivered: f.result = _("DELIVERED"); break;
-            case Transfer::State::Saved: f.result = _("SAVED"); break;
-            case Transfer::State::Declined: f.result = _("DECLINED"); break;
-            case Transfer::State::Cancelled:
-            case Transfer::State::CancelledThere: f.result = _("CANCELLED"); break;
-            case Transfer::State::Expired: f.result = _("EXPIRED"); break;
-            default: f.result = _("FAILED"); break;
-        }
-        out.push_back(f);
-    }
-
-    using Group = TextMessaging::Data2G::GroupFile;
-    for (const Group& g : m_data2gTransport->groupFiles())
-    {
-        GlissandoScopeFile f;
-        f.key = g.id * 2 + 1;
-        f.outgoing = g.outgoing;
-        f.station = g.outgoing ? wxString("GLISS") : wxString::FromUTF8(g.sender);
-        f.name = !g.name.empty() ? wxString::FromUTF8(g.name) : wxString::Format(_("file %06X"), (unsigned)g.fileId);
-        f.size = g.size;
-        f.live = g.live();
-        f.moving = f.live;
-        f.heard = g.state == Group::State::Heard;
-        f.fraction = g.pieces > 0 ? std::min(1.0, (double)g.have / g.pieces) : 0.0;
-        f.pieceMap = g.pieceMap;
-        f.moved = g.have;
-        switch (g.state)
-        {
-            case Group::State::Ended:
-                f.result = g.endReason == TextMessaging::Data2G::GroupFileEnd::Cancelled ? _("CANCELLED")
-                           : g.endReason == TextMessaging::Data2G::GroupFileEnd::Failed  ? _("FAILED")
-                                                                                         : _("SENT");
-                break;
-            case Group::State::Saved: f.result = _("SAVED"); break;
-            case Group::State::Ignored: f.result = _("IGNORED"); break;
-            case Group::State::Incomplete: f.result = _("INCOMPLETE"); break;
-            case Group::State::CancelledThere: f.result = _("CANCELLED"); break;
-            default: f.result = _("FAILED"); break;
-        }
-        out.push_back(f);
-    }
-    return out;
 }
 
 bool MainFrame::glissandoChatShown()

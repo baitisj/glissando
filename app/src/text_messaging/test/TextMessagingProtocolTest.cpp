@@ -35,7 +35,6 @@
 #include <cstdio>
 #include <algorithm>
 #include <cmath>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -94,80 +93,7 @@ public:
 
     bool isTransmitting() const override { return transmitting || voiceActive; }
     bool isChannelBusy() const override { return channelBusy; }
-
-    // A transport that takes its own turns, as data2g-host does for the
-    // group, when paced is set. A keying it was given can be taken back
-    // until started is set.
-    bool pacesItself() const override { return paced; }
-    bool withdrawKeying() override
-    {
-        if (!paced || !transmitting || started) return false;
-        transmitting = false;
-        withdrawnKeyings++;
-        return true;
-    }
-    bool paced = false;
-    bool started = false;
-    int withdrawnKeyings = 0;
-
-    // A keying held behind somebody's session, and one given up on unsent,
-    // as Data2G reports them; neither by default, as for our own modem.
-    std::string keyingHeldBy() const override { return heldBy; }
-    bool takeKeyingLost() override
-    {
-        bool was = lost;
-        lost = false;
-        return was;
-    }
-    std::string heldBy;
-    bool lost = false;
     double airTimeScale(int gear) const override { return gear == 1 ? 8.0 : 1.0; }
-
-    // A link that acknowledges by itself, such as a Data2G session, to the
-    // stations in reliableTo; nothing by default, as for our own modem.
-    bool deliversReliablyTo(const std::string& destination) const override
-    {
-        return reliableTo.count(destination) != 0;
-    }
-
-    bool transmitReliably(const std::vector<OutgoingBurst>& bursts, uint64_t keyingId) override
-    {
-        if (bursts.empty() || !deliversReliablyTo(bursts.front().destination)) return false;
-        reliableKeyings.push_back(keyingId);
-        reliable.emplace_back();
-        for (const OutgoingBurst& burst : bursts) reliable.back().push_back(burst.frame);
-        return true;
-    }
-
-    std::vector<KeyingReport> takeKeyingReports() override
-    {
-        std::vector<KeyingReport> taken;
-        taken.swap(reports);
-        return taken;
-    }
-
-    // Lets go of stations only when releases is set, as Data2G does; our own
-    // modem keeps the default, which does nothing.
-    bool releaseStation(const std::string& destination) override
-    {
-        if (!releases) return ITextMessagingTransport::releaseStation(destination);
-        released.push_back(destination);
-        return true;
-    }
-    bool releases = false;
-    std::vector<std::string> released;
-
-    // Keyings the link has started on can no longer be taken back.
-    bool withdrawReliably(uint64_t keyingId) override
-    {
-        if (written.count(keyingId) != 0) return false;
-        auto it = std::find(reliableKeyings.begin(), reliableKeyings.end(), keyingId);
-        if (it == reliableKeyings.end()) return false;
-        withdrawn.push_back(keyingId);
-        return true;
-    }
-    std::set<uint64_t> written;
-    std::vector<uint64_t> withdrawn;
 
     std::vector<std::vector<std::vector<uint8_t>>> transmissions; // frames, per keying
     std::vector<std::vector<BurstMode>> modes;                    // and their modes
@@ -177,11 +103,6 @@ public:
     bool voiceActive = false;
     bool channelBusy = false;
     bool refuse = false;
-
-    std::set<std::string> reliableTo;
-    std::vector<uint64_t> reliableKeyings;                    // given to transmitReliably(), in order
-    std::vector<std::vector<std::vector<uint8_t>>> reliable;  // and their frames
-    std::vector<KeyingReport> reports;                        // for takeKeyingReports() to hand over
 };
 
 class RecordingObserver : public ITextMessagingObserver
@@ -487,7 +408,7 @@ double glissandoLatency(double frame) { return frame / 4.0 + 1.0; }
 // Given the slowest tempo an answer could come in, the waits cover an answer
 // at our own tempo with the far end's turnaround jitter, and never end before
 // the first frame of an answer at the slowest tempo could have been decoded.
-// Without it (as Data2G calls it) the timings are as they were.
+// Without it the timings are as they were.
 void testAirTimingWaitsForTheSlowestAnswer()
 {
     auto ms = [](double seconds) { return (int)std::lround(seconds * 1000.0); };
@@ -562,9 +483,9 @@ void testReplyWindowEndsAtTheAnswersChord()
                                                   0.6, 0.6, -1.0, sensed);
     CHECK(presto.replyWindowMs > 15000 && presto.replyWindowMs < 17000);
 
-    // Data2G passes no far end, and keeps its window.
-    AirTiming data2g = AirTiming::forFrameSeconds(2.0, 64, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, sensed);
-    CHECK(data2g.replyWindowMs == AirTiming::forFrameSeconds(2.0, 64, 1.0).replyWindowMs);
+    // Without a far end's tempo the window is kept.
+    AirTiming noFarEnd = AirTiming::forFrameSeconds(2.0, 64, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, sensed);
+    CHECK(noFarEnd.replyWindowMs == AirTiming::forFrameSeconds(2.0, 64, 1.0).replyWindowMs);
 }
 
 // A ping sent at Allegro while listening at every tempo, answered at Adagio:
@@ -2425,18 +2346,6 @@ void testDeliveryChip()
     // Nothing or everything confirmed is not progress worth showing.
     CHECK(!kindOf(MessageStatus::AwaitingAck, 0, 0, 8).showsProgress());
     CHECK(!kindOf(MessageStatus::Acknowledged, 0, 8, 8).showsProgress());
-
-    // Handed over but held behind a session with another station: HELD,
-    // naming it, whichever attempt it is. Only while handed over.
-    TextMessage held;
-    held.status = MessageStatus::Transmitting;
-    held.heldBy = "K7ABC";
-    CHECK(deliveryChipState(held).kind == DeliveryChipKind::Held);
-    CHECK(deliveryChipState(held).heldBy == "K7ABC");
-    held.retryCount = 1;
-    CHECK(deliveryChipState(held).kind == DeliveryChipKind::Held);
-    held.status = MessageStatus::AwaitingAck;
-    CHECK(deliveryChipState(held).kind == DeliveryChipKind::Retry);
 }
 
 // Carrier sense: while the receiver is locked onto somebody else's burst,
@@ -3123,441 +3032,6 @@ void testMapFollowsStationsWithKnownLocators()
     CHECK(station.protocol.mapStation() == "VK3ABC");
 }
 
-// A message for a station a link that acknowledges by itself reaches (a
-// Data2G session) goes to that link as soon as it is queued, whatever our
-// turn taking says, and the link's report settles it: no acknowledgement
-// timer, and nothing for the far end's own acknowledgement to do.
-void testReliableLinkDeliversAMessage()
-{
-    Station a("W1AW");
-    a.transport.reliableTo.insert("K1ABC");
-
-    // Our own turn taking would hold an ordinary keying back now.
-    Frame heard;
-    heard.type = FrameType::Broadcast;
-    heard.originCallsign = "N0CALL";
-    heard.airId = 9;
-    heard.fragmentCount = 1;
-    heard.burstsFollowing = 3; // reserves the channel
-    a.protocol.onFrameReceived(heard, 5.0f);
-    a.transport.channelBusy = true;
-
-    std::string error;
-    CHECK(a.protocol.sendMessage("hello", "K1ABC", error));
-    a.protocol.tick();
-
-    CHECK(a.transport.transmissions.empty());
-    CHECK(a.transport.reliable.size() == 1);
-    CHECK(!a.transport.transmitting); // the transmitter was never asked for
-    int64_t id = a.observer.added.back().id;
-    const TextMessage* sending = a.observer.lastUpdateFor(id);
-    CHECK(sending != nullptr && sending->status == MessageStatus::Transmitting);
-
-    // Long past any acknowledgement timer: still the link's to settle.
-    a.nowMs += 10 * 60 * 1000;
-    a.protocol.tick();
-    CHECK(a.protocol.ackWait() == AckWait::Nothing);
-    CHECK(!everUpdatedTo(a.observer, id, MessageStatus::AwaitingAck));
-    CHECK(!everUpdatedTo(a.observer, id, MessageStatus::Retrying));
-
-    a.transport.reports.push_back({a.transport.reliableKeyings[0], KeyingReport::Result::Delivered});
-    a.protocol.tick();
-    const TextMessage* done = a.observer.lastUpdateFor(id);
-    CHECK(done != nullptr && done->status == MessageStatus::Acknowledged);
-    CHECK(done != nullptr && done->fragmentsConfirmed == 1);
-    CHECK(!a.protocol.hasQueuedTransmissions());
-}
-
-// Several messages for the station go to the link back to back, with no
-// turnaround or reply window between them, and each is settled on its own.
-void testReliableLinkTakesMessagesBackToBack()
-{
-    Station a("W1AW");
-    a.transport.reliableTo.insert("K1ABC");
-
-    std::string error;
-    CHECK(a.protocol.sendMessage("one", "K1ABC", error));
-    int64_t first = a.observer.added.back().id;
-    CHECK(a.protocol.sendMessage("two", "K1ABC", error));
-    int64_t second = a.observer.added.back().id;
-    a.protocol.tick();
-    CHECK(a.transport.reliable.size() == 2);
-
-    a.transport.reports.push_back({a.transport.reliableKeyings[1], KeyingReport::Result::Delivered});
-    a.protocol.tick();
-    CHECK(a.observer.lastUpdateFor(second)->status == MessageStatus::Acknowledged);
-    CHECK(a.observer.lastUpdateFor(first)->status == MessageStatus::Transmitting);
-
-    a.transport.reports.push_back({a.transport.reliableKeyings[0], KeyingReport::Result::Delivered});
-    a.protocol.tick();
-    CHECK(a.observer.lastUpdateFor(first)->status == MessageStatus::Acknowledged);
-}
-
-// The link losing the far end fails the message: it has already retried for
-// longer than we would. A ping fails the same way, and one delivered is the
-// pong.
-void testReliableLinkFailureEndsTheMessage()
-{
-    Station a("W1AW");
-    a.transport.reliableTo.insert("K1ABC");
-
-    std::string error;
-    CHECK(a.protocol.sendMessage("hello", "K1ABC", error));
-    int64_t message = a.observer.added.back().id;
-    CHECK(a.protocol.sendPing("K1ABC", error));
-    a.protocol.tick();
-    CHECK(a.transport.reliable.size() == 2);
-
-    a.transport.reports.push_back({a.transport.reliableKeyings[0], KeyingReport::Result::Failed});
-    a.transport.reports.push_back({a.transport.reliableKeyings[1], KeyingReport::Result::Delivered});
-    a.protocol.tick();
-
-    CHECK(a.observer.lastUpdateFor(message)->status == MessageStatus::Failed);
-    CHECK(!everUpdatedTo(a.observer, message, MessageStatus::Retrying));
-    CHECK(hasSystemLine(a.observer, "PING delivered"));
-    CHECK(!a.protocol.hasQueuedTransmissions());
-    CHECK(a.transport.transmissions.empty());
-}
-
-// A link that never got through to the station gives the message back, and
-// it goes the ordinary way, acknowledgement and all.
-void testMessageTheLinkDidNotTakeGoesTheOrdinaryWay()
-{
-    Station a("W1AW");
-    Station b("K1ABC");
-    a.transport.reliableTo.insert("K1ABC");
-
-    std::string error;
-    CHECK(a.protocol.sendMessage("hello", "K1ABC", error));
-    int64_t id = a.observer.added.back().id;
-    a.protocol.tick();
-    CHECK(a.transport.reliable.size() == 1);
-
-    a.transport.reliableTo.clear();
-    a.transport.reports.push_back({a.transport.reliableKeyings[0], KeyingReport::Result::NotTaken});
-    a.protocol.tick();
-    CHECK(everUpdatedTo(a.observer, id, MessageStatus::Queued));
-
-    a.completeOneTransmission();
-    CHECK(a.transport.transmissions.size() == 1);
-    CHECK(a.observer.lastUpdateFor(id)->status == MessageStatus::AwaitingAck);
-
-    b.receiveFrom(a.transport);
-    b.completeOneTransmission();
-    a.receiveFrom(b.transport);
-    CHECK(a.observer.lastUpdateFor(id)->status == MessageStatus::Acknowledged);
-}
-
-// Deselecting a station with a link to it drops everything of ours still
-// outstanding for it, on the air, waiting or queued, and nothing for any
-// other station. Over our own modem deselecting changes nothing.
-void testReleasingAStationDropsWhatIsOutstanding()
-{
-    {
-        Station a("W1AW");
-        std::string error;
-        CHECK(a.protocol.sendMessage("hello", "K1ABC", error));
-        int64_t id = a.observer.added.back().id;
-        a.completeOneTransmission();
-        CHECK(a.protocol.releaseStation("K1ABC") == 0);
-        CHECK(a.observer.lastUpdateFor(id)->status == MessageStatus::AwaitingAck);
-    }
-
-    Station a("W1AW");
-    a.transport.releases = true;
-    a.transport.reliableTo.insert("K1ABC");
-
-    std::string error;
-    CHECK(a.protocol.sendMessage("first", "K1ABC", error));
-    int64_t delivering = a.observer.added.back().id;
-    a.protocol.tick();
-    CHECK(a.transport.reliable.size() == 1);
-    CHECK(a.protocol.sendPing("K1ABC", error));
-    int64_t ping = a.observer.added.back().id;
-    CHECK(a.protocol.sendMessage("for somebody else", "N0CALL", error));
-    int64_t other = a.observer.added.back().id;
-
-    CHECK(a.protocol.releaseStation("K1ABC") == 2);
-    CHECK(a.transport.released == std::vector<std::string>{"K1ABC"});
-    CHECK(a.observer.lastUpdateFor(delivering)->status == MessageStatus::Aborted);
-    CHECK(a.observer.lastUpdateFor(ping)->status != MessageStatus::Acknowledged);
-    CHECK(everUpdatedTo(a.observer, ping, MessageStatus::NotSent) ||
-          everUpdatedTo(a.observer, ping, MessageStatus::Aborted));
-    CHECK(a.protocol.cancelFor(other) != TextMessagingProtocol::Cancel::None);
-
-    // A late report on the dropped keying changes nothing.
-    a.transport.reports.push_back({a.transport.reliableKeyings[0], KeyingReport::Result::Delivered});
-    a.protocol.tick();
-    CHECK(a.observer.lastUpdateFor(delivering)->status == MessageStatus::Aborted);
-}
-
-// What a reliable link holds but has not started on can be cancelled, and
-// is dropped by a transmit inhibit; once it has started, it is the link's.
-void testWhatTheLinkHasNotStartedCanBeTakenBack()
-{
-    Station a("W1AW");
-    a.transport.reliableTo.insert("K1ABC");
-
-    std::string error;
-    CHECK(a.protocol.sendMessage("one", "K1ABC", error));
-    int64_t one = a.observer.added.back().id;
-    CHECK(a.protocol.sendMessage("two", "K1ABC", error));
-    int64_t two = a.observer.added.back().id;
-    CHECK(a.protocol.sendMessage("three", "K1ABC", error));
-    int64_t three = a.observer.added.back().id;
-    a.protocol.tick();
-    CHECK(a.transport.reliableKeyings.size() == 3);
-    a.transport.written.insert(a.transport.reliableKeyings[0]);
-
-    CHECK(a.protocol.cancelMessage(one) == TextMessagingProtocol::Cancel::None);
-    CHECK(a.observer.lastUpdateFor(one)->status == MessageStatus::Transmitting);
-    CHECK(a.protocol.cancelMessage(two) == TextMessagingProtocol::Cancel::Abort);
-    CHECK(a.observer.lastUpdateFor(two)->status == MessageStatus::Aborted);
-    CHECK(a.transport.withdrawn == std::vector<uint64_t>{a.transport.reliableKeyings[1]});
-
-    a.protocol.setTransmitInhibited("outside the data segment");
-    CHECK(a.observer.lastUpdateFor(three)->status == MessageStatus::NotSent);
-    CHECK(a.observer.lastUpdateFor(one)->status == MessageStatus::Transmitting);
-
-    a.transport.reports.push_back({a.transport.reliableKeyings[0], KeyingReport::Result::Delivered});
-    a.protocol.tick();
-    CHECK(a.observer.lastUpdateFor(one)->status == MessageStatus::Acknowledged);
-}
-
-// A transport that takes its own turns gets the next keying as soon as the
-// last has gone, whatever was heard or is on the channel, but only one at a
-// time, so what waits behind it can still be cancelled. Only "Woah!" holds
-// it.
-void testATransportThatPacesItselfGetsNoPauses()
-{
-    Station a("W1AW");
-    a.transport.paced = true;
-
-    // Our own turn taking would hold anything back now.
-    Frame heard;
-    heard.type = FrameType::Broadcast;
-    heard.originCallsign = "N0CALL";
-    heard.airId = 9;
-    heard.fragmentCount = 1;
-    heard.burstsFollowing = 3;
-    a.protocol.onFrameReceived(heard, 5.0f);
-    a.transport.channelBusy = true;
-
-    std::string error;
-    CHECK(a.protocol.sendMessage("first", "", error));
-    int64_t first = a.observer.added.back().id;
-    CHECK(a.protocol.sendMessage("second", "", error));
-    int64_t second = a.observer.added.back().id;
-    CHECK(a.protocol.sendMessage("third", "", error));
-    int64_t third = a.observer.added.back().id;
-    a.protocol.tick();
-    CHECK(a.transport.transmissions.size() == 1);
-    CHECK(a.observer.lastUpdateFor(first)->status == MessageStatus::Transmitting);
-
-    // No countdown for what waits: the transport decides when.
-    for (const QueuedWait& wait : a.protocol.queuedWaits()) CHECK(wait.waitMs == 0 && !wait.channelBusy);
-
-    // Behind the keying, still the operator's to cancel.
-    CHECK(a.protocol.cancelMessage(third) == TextMessagingProtocol::Cancel::Remove);
-
-    // The first gone, the next goes at once: no turnaround.
-    a.transport.transmitting = false;
-    a.protocol.tick();
-    CHECK(a.transport.transmissions.size() == 2);
-    CHECK(a.observer.lastUpdateFor(first)->status == MessageStatus::Sent);
-    CHECK(a.observer.lastUpdateFor(second)->status == MessageStatus::Transmitting);
-
-    // Handed over but not started: taken back and never sent.
-    bool onAir = true;
-    CHECK(a.protocol.cancelMessage(second, &onAir) == TextMessagingProtocol::Cancel::Remove);
-    CHECK(!onAir);
-    CHECK(a.transport.withdrawnKeyings == 1);
-    CHECK(a.observer.lastUpdateFor(second)->status == MessageStatus::NotSent);
-
-    // Started: the transport's to finish.
-    CHECK(a.protocol.sendMessage("fourth", "", error));
-    int64_t fourth = a.observer.added.back().id;
-    a.protocol.tick();
-    a.transport.started = true;
-    CHECK(a.protocol.cancelMessage(fourth) == TextMessagingProtocol::Cancel::None);
-    a.transport.transmitting = false;
-    a.transport.started = false;
-    a.protocol.tick();
-    CHECK(a.observer.lastUpdateFor(fourth)->status == MessageStatus::Sent);
-
-    // "Woah!" still holds it.
-    a.protocol.holdTransmissions();
-    CHECK(a.protocol.sendMessage("fifth", "", error));
-    size_t before = a.transport.transmissions.size();
-    a.protocol.tick();
-    CHECK(a.transport.transmissions.size() == before);
-    a.nowMs += 60 * 1000;
-    a.protocol.tick();
-    CHECK(a.transport.transmissions.size() == before + 1);
-}
-
-// A keying the transport holds behind a session says so on its chat line,
-// and stops saying so once it is let go; one it gives up on unsent is NOT
-// SENT, and a message in it waits for no acknowledgement.
-void testAHeldKeyingSaysSoAndALostOneIsNotSent()
-{
-    Station a("W1AW");
-    a.transport.paced = true;
-
-    std::string error;
-    CHECK(a.protocol.sendMessage("CQ", "", error));
-    int64_t broadcast = a.observer.added.back().id;
-    a.protocol.tick();
-    CHECK(a.transport.transmissions.size() == 1);
-    CHECK(a.observer.lastUpdateFor(broadcast)->heldBy.empty());
-
-    size_t updates = a.observer.updated.size();
-    a.transport.heldBy = "K7ABC";
-    a.protocol.tick();
-    CHECK(a.observer.lastUpdateFor(broadcast)->status == MessageStatus::Transmitting);
-    CHECK(a.observer.lastUpdateFor(broadcast)->heldBy == "K7ABC");
-    a.protocol.tick();
-    CHECK(a.observer.updated.size() == updates + 1); // said once, not every tick
-
-    a.transport.heldBy.clear();
-    a.protocol.tick();
-    CHECK(a.observer.lastUpdateFor(broadcast)->heldBy.empty());
-    a.transport.transmitting = false;
-    a.protocol.tick();
-    CHECK(a.observer.lastUpdateFor(broadcast)->status == MessageStatus::Sent);
-
-    // Held, then given up on: NOT SENT, never SENT or awaiting an answer.
-    CHECK(a.protocol.sendMessage("are you there", "VK3ABC", error));
-    int64_t directed = a.observer.added.back().id;
-    a.protocol.tick();
-    CHECK(a.transport.transmissions.size() == 2);
-    a.transport.heldBy = "K7ABC";
-    a.protocol.tick();
-    CHECK(a.observer.lastUpdateFor(directed)->heldBy == "K7ABC");
-    a.transport.transmitting = false;
-    a.transport.lost = true;
-    a.protocol.tick();
-    CHECK(a.observer.lastUpdateFor(directed)->status == MessageStatus::NotSent);
-    CHECK(a.observer.lastUpdateFor(directed)->heldBy.empty());
-    CHECK(!a.protocol.hasQueuedTransmissions());
-    CHECK(a.protocol.ackWait() == AckWait::Nothing);
-    for (const TextMessage& m : a.observer.updated)
-    {
-        if (m.id == directed) CHECK(m.status != MessageStatus::Sent && m.status != MessageStatus::AwaitingAck);
-    }
-}
-
-// Inhibited, a keying a self-pacing transport has not started on is taken
-// back and dropped with the queue.
-void testAnInhibitTakesBackAnUnstartedKeying()
-{
-    Station a("W1AW");
-    a.transport.paced = true;
-
-    std::string error;
-    CHECK(a.protocol.sendMessage("hello", "", error));
-    int64_t id = a.observer.added.back().id;
-    a.protocol.tick();
-    CHECK(a.transport.transmissions.size() == 1);
-
-    a.protocol.setTransmitInhibited("outside the data segment");
-    CHECK(a.transport.withdrawnKeyings == 1);
-    CHECK(a.observer.lastUpdateFor(id)->status == MessageStatus::NotSent);
-}
-
-// What arrives through such a link has been acknowledged by it: no
-// acknowledgement, pong or report of missing fragments of ours, whatever
-// the Auto acknowledge setting, and nothing held up on the channel.
-void testFramesThroughAReliableLinkAreNotAnswered()
-{
-    Station a("W1AW");
-    Station b("K1ABC");
-    b.transport.reliableTo.insert("W1AW");
-
-    std::string error;
-    CHECK(b.protocol.sendMessage(std::string(perFragment('x') + 3, 'x'), "W1AW", error));
-    CHECK(b.protocol.sendPing("W1AW", error));
-    b.protocol.tick();
-    CHECK(b.transport.reliable.size() == 2);
-
-    // Only the first fragment of the message, then the ping.
-    Frame first = decodeOne(b.transport.reliable[0][0]);
-    CHECK(first.burstsFollowing == 1);
-    a.protocol.onFrameReceived(first, NAN, true);
-    a.protocol.onFrameReceived(decodeOne(b.transport.reliable[1][0]), NAN, true);
-    CHECK(hasSystemLine(a.observer, "PING!"));
-
-    for (int i = 0; i < 10; i++)
-    {
-        a.nowMs += 2000;
-        a.protocol.tick();
-    }
-    CHECK(a.transport.transmissions.empty());
-    CHECK(!a.protocol.hasQueuedTransmissions());
-
-    // The rest of the message completes it, still unanswered.
-    a.protocol.onFrameReceived(decodeOne(b.transport.reliable[0][1]), NAN, true);
-    bool received = std::any_of(a.observer.added.begin(), a.observer.added.end(), [](const TextMessage& m)
-                                { return m.direction == MessageDirection::Received && m.kind == MessageKind::Chat; });
-    CHECK(received);
-    a.protocol.tick();
-    CHECK(a.transport.transmissions.empty());
-    CHECK(!a.protocol.hasQueuedTransmissions());
-
-    // A message of ours goes at once: the frames just heard hold nothing up.
-    CHECK(a.protocol.sendMessage("back", "N0CALL", error));
-    a.protocol.tick();
-    CHECK(a.transport.transmissions.size() == 1);
-}
-
-// A message for the link shows no tempo or wait, and one for anybody else
-// counts down as before.
-void testQueuedWaitsLeaveTheLinkOut()
-{
-    Station a("W1AW");
-    a.transport.reliableTo.insert("K1ABC");
-    a.transport.transmitting = true; // our own keying holds the queue
-
-    std::string error;
-    CHECK(a.protocol.sendMessage("other", "N0CALL", error));
-    int64_t other = a.observer.added.back().id;
-    a.protocol.holdTransmissions(); // "Woah!" holds the link too
-    CHECK(a.protocol.sendMessage("hello", "K1ABC", error));
-    int64_t linked = a.observer.added.back().id;
-    a.protocol.tick();
-    CHECK(a.transport.reliable.empty());
-
-    std::vector<QueuedWait> waits = a.protocol.queuedWaits();
-    CHECK(waits.size() == 2);
-    for (const QueuedWait& wait : waits)
-    {
-        if (wait.messageId == linked) CHECK(wait.reliableLink && wait.waitMs == 0);
-        if (wait.messageId == other) CHECK(!wait.reliableLink);
-    }
-}
-
-// Changing transport while the link holds a message gives it back to the
-// queue, since that link will never report on it.
-void testChangingTransportRequeuesWhatTheLinkHeld()
-{
-    Station a("W1AW");
-    a.transport.reliableTo.insert("K1ABC");
-
-    std::string error;
-    CHECK(a.protocol.sendMessage("hello", "K1ABC", error));
-    int64_t id = a.observer.added.back().id;
-    a.protocol.tick();
-    CHECK(a.transport.reliable.size() == 1);
-
-    FakeTransport plain;
-    a.protocol.setTransport(&plain);
-    a.nowMs += MAX_TURNAROUND_MILLISECONDS + 1;
-    a.protocol.tick();
-    CHECK(plain.transmissions.size() == 1);
-    CHECK(a.observer.lastUpdateFor(id)->status == MessageStatus::Transmitting);
-}
-
-
 int main()
 {
     testAddressedMessageIsAcknowledged();
@@ -3627,18 +3101,6 @@ int main()
     testLocatorRidesToAStationThatTakesIt();
     testLocatorRidesUntilTheStationHasIt();
     testLocatorGoesOnceToAStationWithAutoAckOff();
-    testReliableLinkDeliversAMessage();
-    testReliableLinkTakesMessagesBackToBack();
-    testReliableLinkFailureEndsTheMessage();
-    testMessageTheLinkDidNotTakeGoesTheOrdinaryWay();
-    testFramesThroughAReliableLinkAreNotAnswered();
-    testReleasingAStationDropsWhatIsOutstanding();
-    testATransportThatPacesItselfGetsNoPauses();
-    testAnInhibitTakesBackAnUnstartedKeying();
-    testAHeldKeyingSaysSoAndALostOneIsNotSent();
-    testWhatTheLinkHasNotStartedCanBeTakenBack();
-    testQueuedWaitsLeaveTheLinkOut();
-    testChangingTransportRequeuesWhatTheLinkHeld();
     testOlderStationGetsNoLocator();
     testLocatorEndsTheKeying();
     testDuetFillerCarriesTheLocator();

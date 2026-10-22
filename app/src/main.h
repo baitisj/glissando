@@ -76,7 +76,6 @@
 #include "gui/controls/plot.h"
 #include "gui/controls/plot_scalar.h"
 #include "gui/glissando/GlissandoConsole.h"
-#include "text_messaging/Data2GTransport.h"
 #include "text_messaging/TextMessagingTypes.h"
 #include "sndfile.h"
 #include "comp_prim.h"
@@ -255,7 +254,6 @@ class MainFrame : public TopFrame, public IGlissandoHost
         TextMessagingDialog*    m_textMessagingDialog;
         SnoopDialog*            m_snoopDialog;
         TextMessagingTransport* m_textMessagingTransport;
-        TextMessaging::Data2GTransport* m_data2gTransport;
         GlissandoConsole*       m_glissandoConsole;
         bool                    m_chatUnread = false;
         PlotScalar*             m_panelDemodIn;
@@ -310,18 +308,14 @@ class MainFrame : public TopFrame, public IGlissandoHost
     void startTextMessaging_();
     void stopTextMessaging_();
 
-    // Points text chat at our own modem or at an external data2g-host, as
-    // Preferences say. Call after start and whenever Preferences close.
-    void applyChatModem_();
+    // Applies the chat settings Preferences hold. Call after start and
+    // whenever Preferences close.
+    void applyChatSettings_();
 
 public:
-    // One line for the chat window: which modem chat goes through and, for
-    // Data2G, whether data2g-host is reachable. Empty for our own modem.
-    wxString chatModemStatus();
-
     // How long a chat message of this text would take on the air, in
     // seconds, at the Glissando tempo chat would send it at now; 0 when that
-    // is not known (codec2 modes, or Data2G carrying chat).
+    // is not known (codec2 modes).
     double chatMessageAirSeconds(const std::string& text);
 
     // A chat message has come in while the COMMS window is closed; the
@@ -333,12 +327,11 @@ public:
     void createChatWindow();
 
     // The Glissando tempo a chat keying would go out at now, from the
-    // console or Auto (with Data2G, the tempo that picks its mode); 0 when
-    // chat goes over codec2.
+    // console or Auto; 0 when chat goes over codec2.
     int chatTransmitGear();
 
     // How much of the chat transmission on the air has been sent, 0 to 1;
-    // negative when none is, or when Data2G carries chat and does not say.
+    // negative when none is.
     double chatSendProgress();
 
     // The keying length past which the time-out timer cuts in: the app's,
@@ -347,55 +340,13 @@ public:
     // The smoke off the visi-scope, 0 for none to 1 (see SmokeGauge).
     double smokeLevel() const { return smokeGauge_.level(); }
 
-    // True when chat goes through our own modem and the console is
-    // disengaged: there is no transmitter, so anything queued waits for the
-    // operator to press Engage. Data2G keys its own radio and never waits.
+    // True when the console is disengaged: there is no transmitter, so
+    // anything queued waits for the operator to press Engage.
     bool chatWaitsForEngage();
 
     // Stops the chat keying on the air now, for the operator aborting the
-    // message in it, and leaves the rest of the queue alone. Data2G keys
-    // its own radio, so nothing can be stopped there.
+    // message in it, and leaves the rest of the queue alone.
     void chatStopKeying();
-
-    // Files through a Data2G session with one station (docs/DATA2G.md).
-    // Whether one can be sent now; why not when it can't.
-    bool chatCanSendFiles(wxString& why);
-    uint64_t chatSendFile(const std::string& callsign, const wxString& path, wxString& error);
-    bool chatAcceptFile(uint64_t id, const wxString& path, wxString& error);
-    void chatDeclineFile(uint64_t id);
-    bool chatCancelFile(uint64_t id);
-
-    // Every transfer this run, sent and received, and a count that moves
-    // whenever any of them changes.
-    std::vector<TextMessaging::Data2G::FileTransfer> chatFileTransfers();
-    uint64_t chatFileTransferChanges();
-
-    // Where received files are saved: the folder Preferences name, which
-    // is also the folder a file was last saved to; Documents/Glissando
-    // received files until one is chosen.
-    wxString chatReceivedFilesFolder();
-    void chatSetReceivedFilesFolder(const wxString& folder);
-
-    // Files for everybody on the GLISS group (docs/DATA2G.md). Whether one
-    // can be sent now; why not when it can't.
-    bool chatCanSendGroupFiles(wxString& why);
-    uint64_t chatSendGroupFile(const wxString& path, wxString& error);
-    TextMessaging::Data2G::GroupFileEstimate chatGroupFileEstimate(uint64_t size, int gear);
-    bool chatStopServingGroupFile(uint64_t id);
-    bool chatCancelGroupFile(uint64_t id);
-    bool chatReceiveGroupFile(uint64_t id, const wxString& path, wxString& error);
-    bool chatIgnoreGroupFile(uint64_t id);
-    std::vector<TextMessaging::Data2G::GroupFile> chatGroupFiles();
-    uint64_t chatGroupFileChanges();
-    // Group files are received without asking while the preference is on
-    // and Auto acknowledge is lit; called when either changes.
-    void chatApplyGroupFileAutoReceive();
-    // "Woah!" holds file keyings too.
-    void chatHoldGroupFiles(uint64_t holdMs);
-
-    // The station a Data2G session is connected with now, as data2g-host
-    // names it; empty with none, and always with Data2G off.
-    std::string chatSessionPeer();
 
 private:
 
@@ -421,7 +372,6 @@ public:
     virtual void glissandoSetDriveAuto(bool automatic) override;
     virtual std::vector<double> glissandoFrequencyPresets() override;
     virtual void glissandoShowChat(bool show) override;
-    virtual std::vector<GlissandoScopeFile> glissandoFiles() override;
     virtual bool glissandoChatShown() override;
     virtual void glissandoShowSnoop(bool show) override;
     virtual bool glissandoSnoopShown() override;
@@ -435,13 +385,7 @@ private:
     void applyGlissandoToModem_(bool enabled);
     void closeGlissandoConsole_();
     GlissandoConsoleSettings loadGlissandoSettings_() const;
-    // The Glissando tempo chat sends at now: the console's, or Auto's pick.
-    // With Data2G carrying chat it picks the Data2G mode.
-    int chatTempo_();
     TextMessaging::AirTiming appliedAirTiming_;
-
-    // Set while text chat goes through data2g-host (applyChatModem_()).
-    std::atomic<bool> data2gChatActive_{false};
 
     // Adds a station whose chat was heard to the stations heard log. Called
     // from the receive threads; the log is written on the UI thread.
@@ -449,7 +393,6 @@ private:
     // When each station was last logged, on which frequency, so that one
     // exchange is one line in the log rather than one per frame.
     std::map<std::string, std::pair<std::chrono::steady_clock::time_point, int64_t>> stationsHeardLogged_;
-    TextMessaging::Data2GTransport::Settings appliedData2GSettings_;
 
     bool                    m_schedule_restore;
 

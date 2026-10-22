@@ -287,8 +287,8 @@ bool MessageStore::addMessage(TextMessage& message)
     sqlite3_bind_int(statement, 7, message.direction == MessageDirection::Sent ? 0 : 1);
     sqlite3_bind_int(statement, 8, statusToInt(message.status));
     sqlite3_bind_int(statement, 9, message.retryCount);
-    // A transport that reports no SNR (Data2G) gives NaN, which SQLite would
-    // store as NULL; kept as 0, which the chat window leaves blank.
+    // An SNR that is not a number would be stored by SQLite as NULL; kept
+    // as 0, which the chat window leaves blank.
     sqlite3_bind_double(statement, 10, std::isfinite(message.snr) ? message.snr : 0.0);
     sqlite3_bind_int(statement, 11, message.kind == MessageKind::Chat ? 0 : 1);
 

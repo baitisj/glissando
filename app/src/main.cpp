@@ -24,7 +24,6 @@
 #include <inttypes.h>
 #include <time.h>
 #include <ctime>
-#include <cstring>
 #include <fstream>
 #include <sstream>
 #include <iomanip>
@@ -33,10 +32,10 @@
 #include <random>
 #include <chrono>
 #include <climits>
+#include <cstring>
 #include <wx/cmdline.h>
 #include <wx/stdpaths.h>
 #include <wx/filename.h>
-#include <wx/tokenzr.h>
 #include <wx/uiaction.h>
 
 #if wxCHECK_VERSION(3,2,0)
@@ -58,7 +57,6 @@
 #include "pipeline/TextMessagingModem.h"
 #include "pipeline/TextMessagingTransport.h"
 #include "pipeline/TextMessagingTxQueue.h"
-#include "text_messaging/Data2GTransport.h"
 #include "text_messaging/TextMessagingSession.h"
 #include "text_messaging/UsDataSegments.h"
 #include "gui/util/WindowPositionRestore.h"
@@ -683,7 +681,6 @@ MainFrame::MainFrame(wxWindow *parent) : TopFrame(parent, wxID_ANY, _("Glissando
     m_textMessagingDialog = nullptr;
     m_snoopDialog = nullptr;
     m_textMessagingTransport = nullptr;
-    m_data2gTransport = nullptr;
     m_glissandoConsole = nullptr;
 
     // Initialize panel pointers to null before creation since "page changed" 
@@ -973,24 +970,10 @@ void MainFrame::startTextMessaging_()
     });
 
     textMessagingModem().setFrameCallback([this](const TextMessaging::Frame& frame, float snr) {
-        // With Data2G carrying chat, what our own modem hears is not part of
-        // the conversation: its replies would go out on the other modem.
-        // The snooping window hears it all the same.
         auto& session = TextMessaging::TextMessagingSession::instance();
-        session.snoop().onFrame(frame, snr, TextMessaging::SnoopSource::Glissando, std::time(nullptr));
+        session.snoop().onFrame(frame, snr, std::time(nullptr));
         logStationHeard_(frame.originCallsign, snr, "GLISSANDO");
-        if (data2gChatActive_.load(std::memory_order_acquire)) return;
         session.protocol().onFrameReceived(frame, snr);
-    });
-
-    m_data2gTransport = new TextMessaging::Data2GTransport();
-    m_data2gTransport->setLogFunction([](const std::string& line) { log_info("%s", line.c_str()); });
-    m_data2gTransport->setFrameCallback([this](const TextMessaging::Frame& frame, float snr, bool viaSession) {
-        auto& session = TextMessaging::TextMessagingSession::instance();
-        session.snoop().onFrame(frame, snr, TextMessaging::SnoopSource::Data2G, std::time(nullptr));
-        logStationHeard_(frame.originCallsign, snr, "DATA2G");
-        // A session's own acknowledgements answer what comes through it.
-        session.protocol().onFrameReceived(frame, snr, viaSession);
     });
 
     wxString databasePath = wxStandardPaths::Get().GetUserDataDir();
@@ -1009,7 +992,7 @@ void MainFrame::startTextMessaging_()
         wxGetApp().appConfiguration.reportingConfiguration.reportingCallsign->ToStdString());
     session.snoop().setMyCallsign(session.protocol().myCallsign());
 
-    applyChatModem_();
+    applyChatSettings_();
     updateTextChatTransmitPermission_();
 }
 
@@ -1045,111 +1028,33 @@ void MainFrame::logStationHeard_(std::string const& callsign, float snr, std::st
 }
 
 //-------------------------------------------------------------------------
-// applyChatModem_(): hands text chat to our own modem or to data2g-host.
-// Data2G's transport keeps its connection only while it is chosen; a change
-// of host or port reconnects.
+// applyChatSettings_(): the chat settings Preferences hold, applied.
 //-------------------------------------------------------------------------
-void MainFrame::applyChatModem_()
+void MainFrame::applyChatSettings_()
 {
-    if (m_textMessagingTransport == nullptr || m_data2gTransport == nullptr) return;
+    if (m_textMessagingTransport == nullptr) return;
 
     auto& config = wxGetApp().appConfiguration;
-    auto& protocol = TextMessaging::TextMessagingSession::instance().protocol();
-
-    protocol.setMyLocator(config.reportingConfiguration.reportingGridSquare->ToStdString(),
-                          config.reportingConfiguration.reportingSendGridSquare);
-
-    // data2g-host's MYCALL, BCAST FROM and sessions use the chat callsign.
-    m_data2gTransport->setMyCallsign(config.reportingConfiguration.reportingCallsign->ToStdString());
-
-    // Files from the stations on the auto-accept list go straight into the
-    // received files folder.
-    std::vector<std::string> autoAccept;
-    wxStringTokenizer calls(config.data2gAutoAcceptFilesFrom.get(), " ,;\t");
-    while (calls.HasMoreTokens()) autoAccept.push_back(calls.GetNextToken().ToStdString());
-    m_data2gTransport->setFileAutoAccept(std::string(chatReceivedFilesFolder().utf8_str()), autoAccept);
-    m_data2gTransport->setNarrowModesOnly(config.data2gNarrowModesOnly);
-    chatApplyGroupFileAutoReceive();
-    m_data2gTransport->setFilesInhibited(!protocol.transmitInhibitedReason().empty());
-
-    if (config.data2gEnabled)
-    {
-        TextMessaging::Data2GTransport::Settings settings;
-        settings.host = ((wxString)config.data2gHost).ToStdString();
-        settings.kissPort = config.data2gKissPort;
-        settings.commandPort = config.data2gCommandPort;
-        settings.useSessions = config.data2gSessions;
-
-        bool changed = !data2gChatActive_.load() || settings.host != appliedData2GSettings_.host ||
-                       settings.kissPort != appliedData2GSettings_.kissPort ||
-                       settings.commandPort != appliedData2GSettings_.commandPort ||
-                       settings.useSessions != appliedData2GSettings_.useSessions;
-        if (!changed)
-        {
-            // The modes may have narrowed or widened, and the timers follow
-            // the tempo's mode.
-            TextMessaging::AirTiming timing = m_data2gTransport->airTiming();
-            if (std::memcmp(&timing, &appliedAirTiming_, sizeof(timing)) != 0)
-            {
-                protocol.setAirTiming(timing);
-                appliedAirTiming_ = timing;
-            }
-            return;
-        }
-
-        log_info("Text chat now goes through data2g-host at %s (KISS %d, commands %d)%s", settings.host.c_str(),
-                 settings.kissPort, settings.commandPort,
-                 settings.useSessions ? "" : ", group only");
-        // Anything our own transmitter still had queued for chat goes.
-        m_textMessagingTransport->abort();
-        m_data2gTransport->setGear(chatTempo_());
-        m_data2gTransport->start(settings);
-        appliedData2GSettings_ = settings;
-        data2gChatActive_.store(true, std::memory_order_release);
-        protocol.setTransport(m_data2gTransport);
-
-        // The timers follow the tempo's Data2G mode from here on
-        // (applyGlissandoToModem_()).
-        TextMessaging::AirTiming timing = m_data2gTransport->airTiming();
-        protocol.setAirTiming(timing);
-        appliedAirTiming_ = timing;
-    }
-    else
-    {
-        if (!data2gChatActive_.load()) return;
-
-        log_info("Text chat back on our own modem");
-        data2gChatActive_.store(false, std::memory_order_release);
-        protocol.setTransport(m_textMessagingTransport);
-        m_data2gTransport->stop();
-
-        TextMessaging::AirTiming timing = textMessagingModem().airTiming();
-        protocol.setAirTiming(timing);
-        appliedAirTiming_ = timing;
-    }
+    TextMessaging::TextMessagingSession::instance().protocol().setMyLocator(
+        config.reportingConfiguration.reportingGridSquare->ToStdString(),
+        config.reportingConfiguration.reportingSendGridSquare);
 }
 
 double MainFrame::chatMessageAirSeconds(const std::string& text)
 {
-    // Not estimated for Data2G, whose burst length depends on how the host
-    // packs the frames into codewords.
-    if (data2gChatActive_.load()) return 0.0;
     return textMessagingModem().glissandoMessageSeconds(
         text, wxGetApp().appConfiguration.reportingConfiguration.reportingCallsign->ToStdString());
 }
 
 int MainFrame::chatTransmitGear()
 {
-    // With Data2G each tempo is a Data2G mode, so a message can still take
-    // a tempo of its own.
-    if (data2gChatActive_.load()) return chatTempo_();
     if (!textMessagingModem().glissandoConfig().enabled) return 0;
     return textMessagingModem().glissandoStatus().transmitGear;
 }
 
 double MainFrame::chatSendProgress()
 {
-    if (data2gChatActive_.load() || m_textMessagingTransport == nullptr) return -1.0;
+    if (m_textMessagingTransport == nullptr) return -1.0;
     return m_textMessagingTransport->keyingProgress();
 }
 
@@ -1163,12 +1068,12 @@ int MainFrame::chatTimeOutSeconds()
 
 bool MainFrame::chatWaitsForEngage()
 {
-    return m_textMessagingTransport != nullptr && !data2gChatActive_.load() && !m_RxRunning;
+    return m_textMessagingTransport != nullptr && !m_RxRunning;
 }
 
 void MainFrame::chatStopKeying()
 {
-    if (data2gChatActive_.load() || m_textMessagingTransport == nullptr) return;
+    if (m_textMessagingTransport == nullptr) return;
 
     log_info("Chat keying stopped by the operator");
     m_textMessagingTransport->abort();
@@ -1176,232 +1081,6 @@ void MainFrame::chatStopKeying()
     // What the sound card has not played yet goes too, as for Abort on the
     // console.
     if (g_rxUserdata != nullptr && g_rxUserdata->outfifo1 != nullptr) g_rxUserdata->outfifo1->reset();
-}
-
-bool MainFrame::chatCanSendFiles(wxString& why)
-{
-    if (m_data2gTransport == nullptr || !data2gChatActive_.load())
-    {
-        why = _("Files go through a Data2G session. Choose Send chat through Data2G, with sessions, "
-                "in Preferences.");
-        return false;
-    }
-    if (!appliedData2GSettings_.useSessions)
-    {
-        why = _("Files go through a Data2G session. Turn on Connect a session for messages to one "
-                "station in Preferences.");
-        return false;
-    }
-    if (!m_data2gTransport->sendsFiles())
-    {
-        why = _("data2g-host's command and session ports are not connected yet.");
-        return false;
-    }
-    why.clear();
-    return true;
-}
-
-uint64_t MainFrame::chatSendFile(const std::string& callsign, const wxString& path, wxString& error)
-{
-    wxString why;
-    if (!chatCanSendFiles(why))
-    {
-        error = why;
-        return 0;
-    }
-    std::string reason;
-    uint64_t id = m_data2gTransport->sendFile(callsign, std::string(path.utf8_str()), reason);
-    if (id == 0) error = wxString::FromUTF8(reason);
-    else log_info("File %s queued for %s through Data2G", (const char*)path.utf8_str(), callsign.c_str());
-    return id;
-}
-
-bool MainFrame::chatAcceptFile(uint64_t id, const wxString& path, wxString& error)
-{
-    if (m_data2gTransport == nullptr) return false;
-    std::string reason;
-    if (m_data2gTransport->acceptFile(id, std::string(path.utf8_str()), reason)) return true;
-    error = wxString::FromUTF8(reason);
-    return false;
-}
-
-void MainFrame::chatDeclineFile(uint64_t id)
-{
-    if (m_data2gTransport != nullptr) m_data2gTransport->declineFile(id);
-}
-
-bool MainFrame::chatCancelFile(uint64_t id)
-{
-    return m_data2gTransport != nullptr && m_data2gTransport->cancelFile(id);
-}
-
-std::vector<TextMessaging::Data2G::FileTransfer> MainFrame::chatFileTransfers()
-{
-    if (m_data2gTransport == nullptr) return {};
-    return m_data2gTransport->fileTransfers();
-}
-
-uint64_t MainFrame::chatFileTransferChanges()
-{
-    return m_data2gTransport != nullptr ? m_data2gTransport->fileTransferChanges() : 0;
-}
-
-wxString MainFrame::chatReceivedFilesFolder()
-{
-    wxString folder = wxGetApp().appConfiguration.data2gReceivedFilesFolder;
-    if (!folder.IsEmpty()) return folder;
-    return wxStandardPaths::Get().GetDocumentsDir() + wxFileName::GetPathSeparator() +
-           wxString("Glissando received files");
-}
-
-void MainFrame::chatSetReceivedFilesFolder(const wxString& folder)
-{
-    if (folder.IsEmpty() || folder == wxGetApp().appConfiguration.data2gReceivedFilesFolder.get()) return;
-    wxGetApp().appConfiguration.data2gReceivedFilesFolder = folder;
-    wxGetApp().appConfiguration.save(pConfig);
-    applyChatModem_();
-}
-
-bool MainFrame::chatCanSendGroupFiles(wxString& why)
-{
-    if (m_data2gTransport == nullptr || !data2gChatActive_.load())
-    {
-        why = _("Files for the group go through Data2G. Choose Send chat through Data2G in Preferences.");
-        return false;
-    }
-    std::string reason;
-    if (!m_data2gTransport->sendsGroupFiles(reason))
-    {
-        why = wxString::FromUTF8(reason);
-        return false;
-    }
-    why.clear();
-    return true;
-}
-
-uint64_t MainFrame::chatSendGroupFile(const wxString& path, wxString& error)
-{
-    wxString why;
-    if (!chatCanSendGroupFiles(why))
-    {
-        error = why;
-        return 0;
-    }
-    // The tempo the console has set now: the file's pieces are sized for it.
-    m_data2gTransport->setGear(chatTempo_());
-    std::string reason;
-    uint64_t id = m_data2gTransport->sendGroupFile(std::string(path.utf8_str()), reason);
-    if (id == 0) error = wxString::FromUTF8(reason);
-    else log_info("File %s going to the GLISS group through Data2G", (const char*)path.utf8_str());
-    return id;
-}
-
-TextMessaging::Data2G::GroupFileEstimate MainFrame::chatGroupFileEstimate(uint64_t size, int gear)
-{
-    if (m_data2gTransport == nullptr) return {};
-    return m_data2gTransport->groupFileEstimate(size, gear);
-}
-
-bool MainFrame::chatStopServingGroupFile(uint64_t id)
-{
-    return m_data2gTransport != nullptr && m_data2gTransport->stopServingGroupFile(id);
-}
-
-bool MainFrame::chatCancelGroupFile(uint64_t id)
-{
-    return m_data2gTransport != nullptr && m_data2gTransport->cancelGroupFile(id);
-}
-
-bool MainFrame::chatReceiveGroupFile(uint64_t id, const wxString& path, wxString& error)
-{
-    if (m_data2gTransport == nullptr) return false;
-    std::string reason;
-    if (m_data2gTransport->receiveGroupFile(id, std::string(path.utf8_str()), reason)) return true;
-    error = wxString::FromUTF8(reason);
-    return false;
-}
-
-bool MainFrame::chatIgnoreGroupFile(uint64_t id)
-{
-    return m_data2gTransport != nullptr && m_data2gTransport->ignoreGroupFile(id);
-}
-
-std::vector<TextMessaging::Data2G::GroupFile> MainFrame::chatGroupFiles()
-{
-    if (m_data2gTransport == nullptr) return {};
-    return m_data2gTransport->groupFiles();
-}
-
-uint64_t MainFrame::chatGroupFileChanges()
-{
-    return m_data2gTransport != nullptr ? m_data2gTransport->groupFileChanges() : 0;
-}
-
-void MainFrame::chatApplyGroupFileAutoReceive()
-{
-    if (m_data2gTransport == nullptr) return;
-    bool on = wxGetApp().appConfiguration.data2gReceiveGroupFiles &&
-              TextMessaging::TextMessagingSession::instance().protocol().autoReplyEnabled();
-    m_data2gTransport->setGroupFileAutoReceive(on ? std::string(chatReceivedFilesFolder().utf8_str()) : std::string());
-}
-
-void MainFrame::chatHoldGroupFiles(uint64_t holdMs)
-{
-    if (m_data2gTransport != nullptr) m_data2gTransport->holdGroupFiles(holdMs);
-}
-
-std::string MainFrame::chatSessionPeer()
-{
-    if (!data2gChatActive_.load() || m_data2gTransport == nullptr) return std::string();
-    return m_data2gTransport->status().sessionPeer;
-}
-
-wxString MainFrame::chatModemStatus()
-{
-    if (!data2gChatActive_.load() || m_data2gTransport == nullptr) return wxEmptyString;
-
-    TextMessaging::Data2GTransport::Status status = m_data2gTransport->status();
-    wxString where = wxString::Format("%s:%d", wxString::FromUTF8(appliedData2GSettings_.host),
-                                      appliedData2GSettings_.kissPort);
-    if (!status.kissConnected)
-    {
-        return wxString::Format(_("Data2G: no data2g-host at %s yet; retrying."), where);
-    }
-
-    wxString line = wxString::Format(_("Data2G at %s"), where);
-    if (!status.commandConnected)
-    {
-        line += _(", command port not connected");
-    }
-    else if (status.groupPort == 0)
-    {
-        line += _(", opening the GLISS group");
-    }
-    else if (!status.groupMode.empty())
-    {
-        line += wxString::Format(_(", group GLISS in %s"), wxString::FromUTF8(status.groupMode));
-    }
-    if (!status.sessionPeer.empty())
-    {
-        line += wxString::Format(_(", session with %s"), wxString::FromUTF8(status.sessionPeer));
-        if (status.sessionUnacked > 0 && status.sessionUnackedExact)
-        {
-            line += wxString::Format(_(" (%lld bytes not yet acknowledged)"), (long long)status.sessionUnacked);
-        }
-        else if (status.sessionUnacked > 0)
-        {
-            line += _(" (not all acknowledged yet)");
-        }
-    }
-    else if (status.sessionConnecting)
-    {
-        line += _(", calling for a session");
-    }
-    if (!status.error.empty() && !status.commandConnected)
-    {
-        line += wxString::Format(" (%s)", wxString::FromUTF8(status.error));
-    }
-    return line + ".";
 }
 
 //-------------------------------------------------------------------------
@@ -1437,10 +1116,6 @@ void MainFrame::updateTextChatTransmitPermission_()
     }
 
     protocol.setTransmitInhibited(reason);
-
-    // Files, on the GLISS group and through sessions, key the transmitter
-    // outside the protocol.
-    if (m_data2gTransport != nullptr) m_data2gTransport->setFilesInhibited(!reason.empty());
 }
 
 //-------------------------------------------------------------------------
@@ -1450,17 +1125,10 @@ void MainFrame::stopTextMessaging_()
 {
     if (m_textMessagingTransport != nullptr) m_textMessagingTransport->abort();
 
-    // Its thread hands frames to the protocol, so it goes first.
-    if (m_data2gTransport != nullptr) m_data2gTransport->stop();
-    data2gChatActive_.store(false, std::memory_order_release);
-
     TextMessaging::TextMessagingSession::instance().stop();
 
     textMessagingModem().setFrameCallback(nullptr);
     textMessagingModem().close();
-
-    delete m_data2gTransport;
-    m_data2gTransport = nullptr;
 
     delete m_textMessagingTransport;
     m_textMessagingTransport = nullptr;

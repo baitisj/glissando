@@ -162,7 +162,7 @@ void MainFrame::OnToolsOptions(wxCommandEvent& event)
         updateReportingFreqList_();
 
         // The text chat preferences may have changed.
-        applyChatModem_();
+        applyChatSettings_();
         if (m_glissandoConsole != nullptr)
         {
             m_glissandoConsole->showMarquee(wxGetApp().appConfiguration.glissandoShowMarquee, true);

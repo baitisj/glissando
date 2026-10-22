@@ -61,7 +61,7 @@ wxString formatTime(std::time_t when)
 
 wxString formatSnr(float snr)
 {
-    // Data2G does not report one.
+    // None was reported.
     if (!std::isfinite(snr)) return wxEmptyString;
     return wxString::Format("%.1f dB", (double)snr);
 }
@@ -198,7 +198,6 @@ void SnoopDialog::render()
     {
         if (!shown(event)) continue;
 
-        wxString source = event.source == SnoopSource::Data2G ? " &middot; DATA2G" : "";
         wxString snr = formatSnr(event.snr);
 
         if (event.kind == SnoopEvent::Kind::Message)
@@ -217,7 +216,7 @@ void SnoopDialog::render()
                    "<td align=\"left\"><font color=\"" + heading + "\"><b>" + route(event) + "</b></font>" +
                    tag + "</td>"
                    "<td align=\"right\"><font size=\"-2\" color=\"" + dim + "\">" + formatTime(event.timestamp) +
-                   (snr.empty() ? "" : " &middot; " + snr) + source + "</font></td></tr></table>";
+                   (snr.empty() ? "" : " &middot; " + snr) + "</font></td></tr></table>";
             out += "<font color=\"" + (event.toMe ? glow : bone) + "\">" + escapeHtml(event.text) + "</font>";
             out += "</td></tr></table>";
             out += "</td></tr><tr><td height=\"6\"><font size=\"1\">&nbsp;</font></td></tr></table>";
@@ -231,7 +230,7 @@ void SnoopDialog::render()
         out += "<table width=\"100%\" cellpadding=\"1\" cellspacing=\"0\"><tr>"
                "<td nowrap><tt><font size=\"-1\" color=\"" + dim + "\">" + formatTime(event.timestamp) +
                "&nbsp; " + route(event) + "&nbsp; " + what + "</font></tt></td>"
-               "<td align=\"right\" nowrap><font size=\"-2\" color=\"" + dim + "\">" + snr + source +
+               "<td align=\"right\" nowrap><font size=\"-2\" color=\"" + dim + "\">" + snr +
                "</font></td></tr></table>";
     }
 
