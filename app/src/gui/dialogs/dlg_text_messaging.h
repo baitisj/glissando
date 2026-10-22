@@ -37,7 +37,6 @@
 
 #include <ctime>
 #include <map>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -49,18 +48,13 @@
 #include <wx/textctrl.h>
 #include <wx/timer.h>
 
-#include "text_messaging/Data2GBroadcast.h"
-#include "text_messaging/Data2GFileTransfer.h"
 #include "text_messaging/TextMessagingTypes.h"
 #include "text_messaging/TextMessagingProtocol.h"
 
 namespace Chaotica
 {
 class Button;
-class Lamp;
 }
-
-class TransferStatusArea;
 
 // A label that wraps to whatever width the layout gives it, and wraps again
 // when the window is resized, rather than running off the edge. Set its text
@@ -136,20 +130,9 @@ private:
     void appendMessage(const TextMessaging::TextMessage& message);
     void updateTransmitControls();
     void setColumnIfChanged(long item, int column, const wxString& text);
-    int rowAt(const wxPoint& point) const;
+    int messageAt(const wxPoint& point) const;
     static std::string stationOf(const TextMessaging::TextMessage& message);
     void selectStation(const std::string& callsign, bool addIfMissing);
-
-    // Removing a station ends a Data2G session with it and cancels the files
-    // going to or from it, so the removal asks first while either is so.
-    // Choosing another station, or none, leaves both alone.
-    bool askToLetGo(const std::string& callsign, const wxString& title);
-
-    // The Data2G session's far end as the station list names it, or as
-    // data2g-host does when it is not listed; empty with no session.
-    std::string sessionStation() const;
-    bool sessionWith(const std::string& callsign) const;
-    void updateSessionPlate();
 
     // The status line says one of three kinds of thing, and each stops being
     // true at a different moment.
@@ -163,60 +146,15 @@ private:
 
     void setStatus(const wxString& status, StatusKind kind = StatusKind::Sticky);
     void updateAckWaitStatus();
-    void updateModemStatus();
     void updateSmokeWarning();
     wxString transmittingStatus() const;
 
     // Writes how long the message being typed would take on the air under
-    // the send button, in red past the time-out timer. Nothing for codec2
-    // or Data2G, which do not say.
+    // the send button, in red past the time-out timer. Nothing for codec2,
+    // which does not say.
     void updateAirTime();
     void updatePhraseHighlight();
     void updateSendToolTip();
-
-    // Files through a Data2G session: each one a line of the chat, and an
-    // offer to us a box over it until the operator answers.
-    // A file to or from the whole GLISS group is a line too, with group
-    // set and groupFile, not transfer, telling its story.
-    // The chat shows two lines for each: one when it starts, and one
-    // saying how it ended. How it is getting on is shown over the chat,
-    // in the transfer's status area.
-    struct FileLine
-    {
-        TextMessaging::Data2G::FileTransfer transfer;  // as last seen
-        std::time_t at = 0;                             // when it first appeared
-        bool group = false;
-        TextMessaging::Data2G::GroupFile groupFile;     // as last seen
-        double readAt = 0.0;        // steady clock seconds it was last seen
-        std::time_t endedAt = 0;    // when it was first seen over; 0 while live
-        double endedSteady = 0.0;   // the same on the steady clock
-        double rateSince = -1.0;    // steady clock seconds bytes began to move, -1 until they did
-        uint64_t rateBytes = 0;     // and how many had moved then
-        wxString shown;             // its lines as the chat last drew them
-
-        bool live() const { return group ? groupFile.live() : transfer.live(); }
-    };
-    void updateFileTransfers();
-    void updateGroupFiles(bool& added, bool& changed, bool& incoming);
-    void updateOfferBox();
-    void paintOfferBox(wxPaintEvent& event);
-    void updateTransferStatus();
-    void describeTransfer(const FileLine& line, double now, TransferStatusArea* row, int others);
-    void statusCancel(size_t row, wxCommandEvent& event);
-    void statusReceive(size_t row);
-    // The line it starts with, or (result) the one saying how it ended.
-    wxString fileLineHtml(const FileLine& line, const Palette& colors, bool result) const;
-    wxString groupLineHtml(const FileLine& line, const Palette& colors, bool result) const;
-    // Both, as the chat would draw them now: when this changes, it is drawn again.
-    wxString fileLinesShown(const FileLine& line) const;
-    // When a line ended, the first time it is seen over.
-    static void noteEnded(FileLine& line);
-    void sendFileTo(const std::string& callsign);
-    // Files going to or from the station, which letting go of it cancels.
-    int liveFilesWith(const std::string& callsign) const;
-    void sendFileToGroup();
-    void receiveGroupFile(uint64_t id);
-    void ignoreGroupFile(uint64_t id);
 
     void OnSend(wxCommandEvent& event);
     void OnPing(wxCommandEvent& event);
@@ -227,23 +165,12 @@ private:
     void OnMenuSelectStation(wxCommandEvent& event);
     void OnMenuRemoveStation(wxCommandEvent& event);
     void OnChatDoubleClick(wxMouseEvent& event);
-    void OnDisconnect(wxCommandEvent& event);
     void OnChatContextMenu(wxContextMenuEvent& event);
     void OnMenuCancelMessage(wxCommandEvent& event);
     void OnMenuWoah(wxCommandEvent& event);
     void OnMenuResend(wxCommandEvent& event);
     void OnMenuTempo(wxCommandEvent& event);
     void OnMenuClearMessages(wxCommandEvent& event);
-    void OnMenuSendFile(wxCommandEvent& event);
-    void OnMenuCancelTransfer(wxCommandEvent& event);
-    void OnMenuSendGroupFile(wxCommandEvent& event);
-    void OnMenuStopServing(wxCommandEvent& event);
-    void OnMenuCancelGroupFile(wxCommandEvent& event);
-    void OnMenuReceiveGroupFile(wxCommandEvent& event);
-    void OnMenuIgnoreGroupFile(wxCommandEvent& event);
-    void OnChatLink(wxHtmlLinkEvent& event);
-    void OnOfferSave(wxCommandEvent& event);
-    void OnOfferDecline(wxCommandEvent& event);
     void OnAddStationText(wxCommandEvent& event);
     void OnAddStation(wxCommandEvent& event);
     void OnAutoReplyToggled(wxCommandEvent& event);
@@ -258,13 +185,6 @@ private:
     Chaotica::Button* m_btnAddStation;
     Chaotica::Button* m_btnPing;
 
-    // A Data2G session's lamp and Disconnect button on the station plate,
-    // shown only while one is connected.
-    wxSizer* m_stationSizer = nullptr;
-    wxSizer* m_sessionSizer = nullptr;
-    Chaotica::Lamp* m_sessionLamp = nullptr;
-    WrappingText* m_sessionText = nullptr;
-    std::string m_sessionShown;     // the far end the plate shows; empty while hidden
     wxHtmlWindow* m_chatWindow;
     wxTextCtrl* m_txtEntry;
     Chaotica::Button* m_btnSend;
@@ -274,7 +194,6 @@ private:
     Chaotica::Button* m_chkAutoReply;
     WrappingText* m_txtStatus;
     WrappingText* m_txtInhibited;
-    WrappingText* m_txtModem;       // Data2G's connection, while chat uses it
     wxTimer m_refreshTimer;
     wxTimer m_blinkTimer;
 
@@ -326,50 +245,6 @@ private:
     TextMessaging::TextMessage m_menuResend; // the message Re-send would copy; id 0 for none
 
     std::vector<TextMessaging::TextMessage> m_messages;
-
-    // Files sent and received this run, oldest first.
-    std::vector<FileLine> m_fileLines;
-    uint64_t m_fileChanges = 0;     // the transport's count when they were last read
-    bool m_fileLinesRead = false;
-    std::set<uint64_t> m_clearedFiles; // finished ones Clear Messages took away, not to come back
-    uint64_t m_menuTransferId = 0;  // the file line the chat log's menu was opened on; 0 for none
-
-    // Files to and from the group, which the transport numbers apart.
-    uint64_t m_groupFileChanges = 0;
-    bool m_groupLinesRead = false;
-    std::set<uint64_t> m_clearedGroupFiles;
-    uint64_t m_menuGroupFileId = 0; // the group file line the chat log's menu was opened on; 0 for none
-
-    // The box over the chat asking whether to save a file offered to us,
-    // red, its border flashing, counting down to the offer's expiry.
-    wxPanel* m_offerBox = nullptr;
-    WrappingText* m_offerText = nullptr;
-    wxStaticText* m_offerCountdown = nullptr;
-    uint64_t m_offerId = 0;         // the offer it shows; 0 while hidden
-    bool m_offerLit = false;        // its border, as last painted
-    std::set<uint64_t> m_offersRaised; // offers COMMS has come forward for
-
-    // The transfer under way, over the chat: one at a time, the newest.
-    static constexpr size_t STATUS_ROWS = 3;
-    std::vector<TransferStatusArea*> m_transferRows;
-    struct StatusKey
-    {
-        bool group = false;
-        uint64_t id = 0;
-
-        bool operator==(const StatusKey&) const = default;
-    };
-    std::vector<StatusKey> m_statusShown;   // what each row shows, top down
-
-    // What each line of the chat is, top to bottom, for a click to find:
-    // a message (an index into m_messages) or a file (into m_fileLines).
-    struct ChatRow
-    {
-        bool file = false;
-        size_t index = 0;
-        bool result = false;    // a file's line saying how it ended
-    };
-    std::vector<ChatRow> m_rows;
 };
 
 #endif // __FDV_TEXT_MESSAGING_DIALOG__

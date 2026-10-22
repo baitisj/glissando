@@ -122,7 +122,7 @@ void SnoopFeed::recordLocked(SnoopEvent& event, std::vector<SnoopEvent>& out)
     out.push_back(event);
 }
 
-void SnoopFeed::onFrame(const Frame& frame, float snr, SnoopSource source, std::time_t now)
+void SnoopFeed::onFrame(const Frame& frame, float snr, std::time_t now)
 {
     std::vector<SnoopEvent> events;
 
@@ -138,7 +138,6 @@ void SnoopFeed::onFrame(const Frame& frame, float snr, SnoopSource source, std::
         SnoopEvent event;
         event.kind = SnoopEvent::Kind::Frame;
         event.timestamp = now;
-        event.source = source;
         event.frameType = frame.type;
         event.origin = frame.originCallsign;
         event.broadcast = frame.type == FrameType::Broadcast || frame.destinationCrc == 0;

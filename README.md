@@ -157,6 +157,12 @@ their own key, at no cost in sensitivity or false decodes (DESIGN.md 3.1b). List
 This work represents a long-standing dream of the inventor: to make amateur radio
 bands sound better, and to encourage harmonious interoperability.
 
+## Data2G
+
+Glissando is the chirp mode only. For chat and files over
+[Data2G](https://github.com/arodland/Data2G), use its sibling
+[Ragtime](https://github.com/baitisj/ragtime).
+
 ## More Information
 [Visit us on Discord: https://discord.gg/za4eYraFdX](https://discord.gg/za4eYraFdX)
 

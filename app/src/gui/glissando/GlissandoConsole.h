@@ -74,7 +74,6 @@ struct GlissandoTelemetry
     bool driveAutoDeaf = false;     // pushed in, but the radio connected can't report ALC
     bool alcOver = false;           // the ALC read over target just now
     double smoke = 0.0;             // the easter egg: smoke off the scope, 0 to 1 (see SmokeGauge)
-    bool data2g = false;            // chat goes through Data2G, not our own modem
     bool chatUnread = false;        // a message has come in since the COMMS window was last open
     bool channelHeld = false;       // somebody else has the channel: our transmit queue waits
     std::vector<double> carrierHz;  // the notes carrier sense hears holding it, if it hears any
@@ -130,6 +129,9 @@ public:
     // The operator's list of favourite dial frequencies, in Hz.
     virtual std::vector<double> glissandoFrequencyPresets() = 0;
 
+    // The version, as the title shows it, for the About screen's credits.
+    virtual wxString glissandoVersion() = 0;
+
     // The chat window: shows or hides it, and says whether it is showing.
     virtual void glissandoShowChat(bool show) = 0;
     virtual bool glissandoChatShown() = 0;
@@ -138,11 +140,6 @@ public:
     // and says whether it is showing.
     virtual void glissandoShowSnoop(bool show) = 0;
     virtual bool glissandoSnoopShown() = 0;
-
-    // The files going through Data2G and those finished this run, for the
-    // FILE lamp and the visi-scope's scene. Asked only while Data2G has
-    // the chat.
-    virtual std::vector<GlissandoScopeFile> glissandoFiles() = 0;
 
     // Some setup can only change while the audio is stopped.
     virtual bool glissandoSetupAvailable(GlissandoSetup setup) = 0;
@@ -185,8 +182,9 @@ private:
     void showFrequencyPresets();
     void updateBandWidthWarning(const GlissandoTelemetry& t);
     void updateDrive(const GlissandoTelemetry& t);
-    void updateFileLamp(const std::vector<GlissandoScopeFile>& files);
     void showPreferences();
+    // The credits, rolled on the visi-scope with the cat.
+    void showAbout();
 
     void OnTimer(wxTimerEvent& event);
     void OnClose(wxCloseEvent& event);
@@ -229,7 +227,6 @@ private:
     Chaotica::Lamp* engagedLamp_;
     Chaotica::Lamp* receivingLamp_;
     Chaotica::Lamp* transmittingLamp_;
-    Chaotica::Lamp* fileLamp_;
     MapBall* mapBall_;
 };
 

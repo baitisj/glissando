@@ -86,80 +86,6 @@ public:
         (void)gear;
         return 1.0;
     }
-
-    // A transport that takes its own turns on the channel, as data2g-host
-    // does for the GLISS group: it waits for a clear channel and for any
-    // session to end, so the protocol keeps none of its own pauses (no
-    // turnarounds, reply windows, channel-busy holds or retry backoffs) and
-    // hands over the next keying as soon as the last has gone out. Only
-    // "Woah!" holds it. One keying at a time still, so what waits behind it
-    // can be cancelled. Our own modem says no.
-    virtual bool pacesItself() const { return false; }
-
-    // Takes back the keying given to transmit() if none of it has started
-    // to go out. False once it has, or with nothing to take back.
-    virtual bool withdrawKeying() { return false; }
-
-    // While the keying given to transmit() waits at the transport only
-    // because a connected session with one station holds the channel, as
-    // data2g-host holds group bursts during a session: that station. Empty
-    // otherwise, and always for our own modem.
-    virtual std::string keyingHeldBy() const { return std::string(); }
-
-    // True, once, when the keying given to transmit() has finished without
-    // the transport reporting all of it sent: given up on, or dropped. The
-    // protocol then reports it NOT SENT, not SENT. Our own modem says no.
-    virtual bool takeKeyingLost() { return false; }
-
-    // A station heard by other means than a frame from it, once each: the
-    // far end of a Data2G session it called us for, which may not have sent
-    // a word yet. It goes on the heard list. Our own modem has none.
-    virtual bool takeStationHeard(std::string& callsign) { (void)callsign; return false; }
-
-    // A link that acknowledges, retries and paces what it carries by itself,
-    // such as a Data2G connected session. Nothing else has one: the defaults
-    // say no, and the protocol then works exactly as it does without them.
-    //
-    // Whether a keying for this one station would go through such a link now.
-    virtual bool deliversReliablyTo(const std::string& destination) const
-    {
-        (void)destination;
-        return false;
-    }
-
-    // Hands a keying for one station to that link, without holding the
-    // transmitter: the link sends it when it can, and says what became of it
-    // in a report carrying keyingId. False if it cannot take it now.
-    virtual bool transmitReliably(const std::vector<OutgoingBurst>& bursts, uint64_t keyingId)
-    {
-        (void)bursts;
-        (void)keyingId;
-        return false;
-    }
-
-    // The reports on keyings given to transmitReliably() since the last call,
-    // in the order they were settled.
-    virtual std::vector<KeyingReport> takeKeyingReports() { return {}; }
-
-    // Takes back a keying given to transmitReliably() that has not yet gone
-    // into the link. False once it has (it is the link's to finish and
-    // report on), or for one it never had.
-    virtual bool withdrawReliably(uint64_t keyingId)
-    {
-        (void)keyingId;
-        return false;
-    }
-
-    // The operator has let go of this station. A transport that keeps
-    // something open for one station, as Data2G keeps a session, ends it
-    // at once, forgets every keying for the station it still holds without
-    // reporting it, and says true, so the protocol drops what it has
-    // outstanding for the station too. Nothing else does anything: false.
-    virtual bool releaseStation(const std::string& destination)
-    {
-        (void)destination;
-        return false;
-    }
 };
 
 // Implemented by the dialog. Callbacks arrive on whichever thread drove the
@@ -282,10 +208,7 @@ public:
     bool sendPing(const std::string& destination, std::string& errorOut);
 
     // Called by the receive step for every frame the modem decodes.
-    // viaReliableLink: it came through a link that acknowledges by itself
-    // (see ITextMessagingTransport::transmitReliably), so it is answered by
-    // that link, and says nothing about who has the channel.
-    void onFrameReceived(const Frame& frame, float snr, bool viaReliableLink = false);
+    void onFrameReceived(const Frame& frame, float snr);
 
     // Drives transmission, retries and timeouts. Call it a few times a second
     // from the GUI timer; it does no work of its own when nothing is pending.
@@ -351,13 +274,6 @@ public:
     // which this cannot do. Whatever else was queued carries on.
     Cancel cancelMessage(int64_t messageId, bool* onAirOut = nullptr);
 
-    // The operator has deselected the station. If the transport keeps a
-    // link to it (a Data2G session), the link is ended at once and every
-    // message and ping of ours for the station still outstanding is dropped
-    // as cancelMessage() would drop it. With any other transport, nothing
-    // changes. Returns how many were dropped.
-    int releaseStation(const std::string& destination);
-
     // The chat messages and pings still outstanding, by message store id.
     std::vector<int64_t> outstandingMessageIds() const;
 
@@ -367,7 +283,6 @@ private:
         Queued,        // waiting for a clear transmitter
         Transmitting,  // handed to the transport, burst in progress
         AwaitingAck,   // burst finished, acknowledgement timer running
-        Delivering,    // with a link that acknowledges by itself, waiting on its report
     };
 
     struct PendingTransmission
@@ -393,8 +308,6 @@ private:
         uint64_t sentAtMs = 0;   // end of our burst, for the reply window
         uint64_t notBeforeMs = 0; // retry backoff; nothing to do with the far end
         int gear = 0;            // the tempo the operator chose; 0 for the one set now
-        uint64_t keyingId = 0;   // while Delivering: the keying the link reports on
-        bool locatorRode = false; // while Delivering: our locator went in the same keying
         TransmissionState state = TransmissionState::Queued;
     };
 
@@ -467,7 +380,7 @@ private:
     void queuePongLocked(const std::string& destination, float snr);
     void reserveChannelForKeyingLocked(const Frame& frame, uint64_t nowMs);
     void handleIncomingFragmentLocked(const Frame& frame, float snr,
-                                      std::vector<PendingEvent>& events, bool viaReliableLink);
+                                      std::vector<PendingEvent>& events);
     void handleAckLocked(const Frame& frame, std::vector<PendingEvent>& events);
     void handlePartialAckLocked(const Frame& frame, std::vector<PendingEvent>& events);
     bool retryOrFailLocked(size_t index, uint64_t nowMs, std::vector<PendingEvent>& events);
@@ -475,8 +388,7 @@ private:
     std::vector<OutgoingBurst> keyingBurstsLocked(
         const std::vector<const PendingTransmission*>& entries, uint64_t nowMs,
         std::string* locatorToOut);
-    void handlePingLocked(const Frame& frame, float snr, std::vector<PendingEvent>& events,
-                          bool viaReliableLink);
+    void handlePingLocked(const Frame& frame, float snr, std::vector<PendingEvent>& events);
     void handlePongLocked(const Frame& frame, float snr, std::vector<PendingEvent>& events);
     void addSystemMessageLocked(const std::string& text, const std::string& destination,
                                 std::vector<PendingEvent>& events);
@@ -486,7 +398,6 @@ private:
     void discardQueuedLocked(std::vector<PendingEvent>& events);
     void dropOutboxLocked(MessageStatus status, bool everything, std::vector<PendingEvent>& events);
     Cancel cancelForLocked(const PendingTransmission& pending) const;
-    bool withdrawKeyingLocked();
 
     // Holds the transmitter off until the far end has had its turn. Never
     // shortens a wait that is already running.
@@ -496,12 +407,7 @@ private:
     bool channelFrozenLocked(uint64_t nowMs);
     void holdTimersLocked(uint64_t pausedMs);
     uint32_t randomDelayLocked(int maxMs);
-    void noteStationsHeardLocked(std::vector<PendingEvent>& events);
     void serviceOutboxLocked(uint64_t nowMs, bool frozen, std::vector<PendingEvent>& events);
-    bool goesReliablyLocked(const PendingTransmission& pending) const;
-    void sendReliablyLocked(uint64_t nowMs, std::vector<PendingEvent>& events);
-    void settleReliableKeyingsLocked(std::vector<PendingEvent>& events);
-    void noteKeyingHeldLocked(std::vector<PendingEvent>& events);
     uint16_t nextAirIdLocked();
     Frame makeFrameLocked(FrameType type, const std::string& destination, uint16_t airId,
                           uint8_t fragmentIndex, uint8_t fragmentCount,
@@ -573,7 +479,6 @@ private:
     // is queued, so a busy spell is measured from when it really began.
     bool channelBusy_;
     bool channelHeld_ = false;        // channelFrozenLocked() at the last tick
-    uint64_t nextKeyingId_ = 0;       // for keyings given to a link that acknowledges by itself
     uint64_t channelBusySinceMs_;
     uint64_t channelReservedUntilMs_; // a fragmented message still on the air
     std::string channelReservedBy_;   // whose, when it was a text frame's count
