@@ -61,15 +61,6 @@ FreeDVConfiguration::FreeDVConfiguration()
         
     , halfDuplexMode("/Rig/HalfDuplex", true)
     , textChatUsDataSegmentsOnly("/TextChat/UsDataSegmentsOnly", true)
-    , data2gEnabled("/Data2G/Enabled", false)
-    , data2gHost("/Data2G/Host", "127.0.0.1")
-    , data2gKissPort("/Data2G/KissPort", 8100)
-    , data2gCommandPort("/Data2G/CommandPort", 8300)
-    , data2gSessions("/Data2G/Sessions", true)
-    , data2gNarrowModesOnly("/Data2G/NarrowModesOnly", false)
-    , data2gReceivedFilesFolder("/Data2G/ReceivedFilesFolder", "")
-    , data2gAutoAcceptFilesFrom("/Data2G/AutoAcceptFilesFrom", "")
-    , data2gReceiveGroupFiles("/Data2G/ReceiveGroupFiles", false)
     , glissandoGear("/Glissando/Gear", 3)
     , glissandoAutoGear("/Glissando/AutoGear", true)
     , glissandoScale("/Glissando/Scale", "pentatonic")
@@ -148,15 +139,6 @@ void FreeDVConfiguration::load(wxConfigBase* config)
     
     load_(config, halfDuplexMode);
     load_(config, textChatUsDataSegmentsOnly);
-    load_(config, data2gEnabled);
-    load_(config, data2gHost);
-    load_(config, data2gKissPort);
-    load_(config, data2gCommandPort);
-    load_(config, data2gSessions);
-    load_(config, data2gNarrowModesOnly);
-    load_(config, data2gReceivedFilesFolder);
-    load_(config, data2gAutoAcceptFilesFrom);
-    load_(config, data2gReceiveGroupFiles);
     load_(config, glissandoGear);
     load_(config, glissandoAutoGear);
     load_(config, glissandoScale);
@@ -243,15 +225,6 @@ void FreeDVConfiguration::save(wxConfigBase* config)
     
     save_(config, halfDuplexMode);
     save_(config, textChatUsDataSegmentsOnly);
-    save_(config, data2gEnabled);
-    save_(config, data2gHost);
-    save_(config, data2gKissPort);
-    save_(config, data2gCommandPort);
-    save_(config, data2gSessions);
-    save_(config, data2gNarrowModesOnly);
-    save_(config, data2gReceivedFilesFolder);
-    save_(config, data2gAutoAcceptFilesFrom);
-    save_(config, data2gReceiveGroupFiles);
     save_(config, glissandoGear);
     save_(config, glissandoAutoGear);
     save_(config, glissandoScale);

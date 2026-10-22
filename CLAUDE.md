@@ -16,8 +16,7 @@ episodes of *Star Trek: Voyager*).
 
 Start with `README.md`. Then read `docs/DESIGN.md` for the reasoning,
 `docs/HOW_IT_HEARS.md` for the receiver explained from first principles,
-`docs/APP.md` for the app, building and packaging, and `docs/DATA2G.md` for
-the Data2G transport.
+and `docs/APP.md` for the app, building and packaging.
 
 ## Layout
 
@@ -26,7 +25,7 @@ the Data2G transport.
 | `prototype/` | NumPy reference modem, simulator (`sim.py`), PulseAudio bench (`bench.py`), ham text table generator (`ham_table/`), map data generator (`globe/`) | MIT |
 | `modem/` | C++17 modem: `GlissandoModem` (modulate and batch receive), `GlissandoReceiver` (streaming), `GlissandoFec`, `GlissandoChord` (opening chord and listener), `GlissandoCw` (CW tail), `GlissandoLink`. No wx or codec2 dependencies | MIT |
 | `app/` | The desktop app. It started as a fork of freedv-gui and was never merged back | LGPL-2.1 (`app/COPYING`) |
-| `app/src/text_messaging/` | Chat link layer: `FrameCodec` (bit-packed headers), `HamText` (Huffman text table, generated into `HamTextTable.h`), `TextMessagingProtocol` (queue, ACKs, retries, pings, locators), `Data2G*` (the Data2G transport, file transfer) | |
+| `app/src/text_messaging/` | Chat link layer: `FrameCodec` (bit-packed headers), `HamText` (Huffman text table, generated into `HamTextTable.h`), `TextMessagingProtocol` (queue, ACKs, retries, pings, locators) | |
 | `app/src/gui/glissando/` | The console: `GlissandoConsole`, `GlissandoScope` (visi-scope waterfall and its art), `MapBall`/`Globe`, `ChaoticaTheme`/`ChaoticaControls` | |
 | `app/src/pipeline/TextMessagingModem.cpp` | Where a keying is assembled: opening chord, frames, closing chord or CW tail | |
 | `docs/` | Markdown docs. Figures are SVG in `docs/images/` with white backgrounds | |
@@ -119,16 +118,15 @@ There is no ARM build yet either.
 - **The console is the only main window.** COMMS and Snooper float, and
   their console buttons light while they are open.
 - **Long keyings split** under the 180 s transmit time-out.
-- **Data2G** (https://github.com/arodland/Data2G) is an external modem
-  reached over TCP:
-  - Never pull its code in: no vendoring, submodule, linking or copying.
-  - Never start `data2g-host`; the operator runs it.
-  - With Data2G off, the chirp modem's behaviour and performance must not
-    change at all. Jeff called this "very important". Transport hooks
-    default to no-ops for that reason.
+- **No Data2G here.** Since 2026-10-22, chat and files over
+  [Data2G](https://github.com/arodland/Data2G) belong to Ragtime
+  (`baitisj/ragtime`), Glissando's sibling. Glissando is the chirp mode only:
+  don't add a Data2G path back. Old `/Data2G/...` keys in a config file are
+  ignored.
 - **Compatibility:** say in every release whether it chats with the last one.
-  0.4 broke compatibility with 0.3 (Huffman text, packed headers). Over Data2G,
-  0.6 broke compatibility with 0.5 (GLISS group).
+  0.4 broke compatibility with 0.3 (Huffman text, packed headers). 0.6 broke
+  Data2G compatibility with 0.5 (GLISS group), and the release after 0.9.8
+  drops Data2G altogether.
 
 ## Working on Jeff's radio PC
 
@@ -153,6 +151,4 @@ Some work runs on Jeff's own Linux machine, which is connected to his radio
 - **Roadmap:** `docs/DESIGN.md` section 10. The next big item is
   LDPC(174,91) in place of the convolutional code. The app's streaming
   receiver and repeat averaging already exist.
-- **Data2G:** sessions and file transfer have been tested only against fake
-  hosts. The real check is two `data2g-host`s.
 - **Microcontroller transmitters:** see `docs/ESP.md`.

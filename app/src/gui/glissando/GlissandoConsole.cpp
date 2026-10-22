@@ -436,15 +436,9 @@ void GlissandoConsole::buildControls()
     engagedLamp_ = new Lamp(scopePlate, _("Engaged"), wxSize(160, 22));
     receivingLamp_ = new Lamp(scopePlate, _("Receiving"), wxSize(160, 22));
     transmittingLamp_ = new Lamp(scopePlate, _("Transmitting"), wxSize(160, 22));
-    fileLamp_ = new Lamp(scopePlate, _("File"), wxSize(160, 22));
-    fileLamp_->SetClickable(true);
-    fileLamp_->SetToolTip(_("Files through Data2G. Flashing red: a station offers you a file. Amber: a file "
-                            "for the group is on the air, and you have not said whether to receive it. "
-                            "White, with its bar: a file is moving. Click to open COMMS."));
     lamps->Add(engagedLamp_, 0, wxBOTTOM, 4);
     lamps->Add(receivingLamp_, 0, wxBOTTOM, 4);
-    lamps->Add(transmittingLamp_, 0, wxBOTTOM, 4);
-    lamps->Add(fileLamp_, 0);
+    lamps->Add(transmittingLamp_, 0);
     scopeControls->Add(lamps, 0, wxALIGN_CENTER_VERTICAL);
     mapBall_ = new MapBall(scopePlate);
     scopeControls->Add(mapBall_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 12);
@@ -688,11 +682,6 @@ void GlissandoConsole::buildControls()
         }
         refreshTelemetry();
     });
-    fileLamp_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
-        // COMMS shows the offer, or the transfer, at its top.
-        host_->glissandoShowChat(true);
-        chatButton_->SetChecked(host_->glissandoChatShown());
-    });
     chatButton_->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent&) {
         host_->glissandoShowChat(chatButton_->IsChecked());
         chatButton_->SetChecked(host_->glissandoChatShown());
@@ -755,14 +744,57 @@ void GlissandoConsole::showPreferences()
         choices.push_back({entry.label, available,
                            available ? entry.tooltip : _("Disengage first: this can't change while audio runs.")});
     }
+    // And last, who made it, on the visi-scope.
+    choices.push_back({_("About"), true, _("The credits, on the visi-scope. Click the screen to bring the waterfall back.")});
 
     // Lit while its column is down and while the setup dialog it opens is
     // up; those dialogs are modal, so closed comes once they have gone.
     preferencesButton_->SetChecked(true);
     ShowChoices(
         preferencesButton_, choices,
-        [this, entries](int index) { host_->glissandoOpenSetup(entries[index].setup); },
+        [this, entries](int index) {
+            if (index < (int)entries.size())
+                host_->glissandoOpenSetup(entries[(size_t)index].setup);
+            else
+                showAbout();
+        },
         [this]() { preferencesButton_->SetChecked(false); });
+}
+
+void GlissandoConsole::showAbout()
+{
+    // Headings are in capitals, and the scope draws them brighter.
+    const std::vector<wxString> credits = {
+        _("GLISSANDO") + " " + host_->glissandoVersion(),
+        _("Keyboard chat that sounds like a melody"),
+        "",
+        _("DESIGNED BY"),
+        "Jeff Baitis, AG7EW",
+        "",
+        _("WRITTEN BY"),
+        "Jeff Baitis and Claude (Anthropic)",
+        "",
+        _("ON THE AIR WITH"),
+        "Andrew Rodland, KC2G",
+        "",
+        _("BUILT ON"),
+        _("FreeDV, by David Rowe, VK5DGR,"),
+        _("Mooneer Salem, K6AQ, and the FreeDV team"),
+        _("codec2 and its DATAC modems"),
+        "Hamlib, wxWidgets, SQLite,",
+        "libsamplerate and libsndfile",
+        _("Maps from Natural Earth"),
+        "",
+        _("INSPIRED BY"),
+        _("Captain Proton and the Bride of Chaotica"),
+        _("(Star Trek: Voyager)"),
+        "",
+        _("THE CAT'S GLASSES"),
+        _("Digital Oddballs Radio Club"),
+        "",
+        "73",
+    };
+    scope_->setAbout(true, credits);
 }
 
 void GlissandoConsole::selectGear(int gear)
@@ -871,15 +903,6 @@ void GlissandoConsole::refreshTelemetry()
     receivingLamp_->SetLit(t.receiving);
     transmittingLamp_->SetLit(t.transmitting);
     scope_->setActivity(t.receiving, t.transmitting);
-    scope_->setData2G(t.data2g);
-    // Files go only through Data2G: without it, nothing is asked for.
-    std::vector<GlissandoScopeFile> files;
-    if (t.data2g)
-    {
-        files = host_->glissandoFiles();
-        scope_->setFiles(files);
-    }
-    updateFileLamp(files);
     scope_->setSmoke(t.smoke);
     scope_->setCarrierSense(t.channelHeld, t.carrierHz);
     mapBall_->setLocators(t.homeLocator, t.stationLocator, t.stationLocatorCurrent);
@@ -936,47 +959,6 @@ void GlissandoConsole::refreshTelemetry()
     // A message waiting in a closed COMMS window: the button flashes red,
     // in step with ENGAGE TO SEND, until the window is opened.
     chatButton_->SetAlarm(t.chatUnread && Chaotica::blinkLit());
-}
-
-// The FILE lamp says what most wants the operator: an offer waiting for an
-// answer flashes red, in step with everything else that flashes; a group
-// file heard and not yet answered is amber, steady, since its stream goes
-// on regardless; a file moving is white, with a bar of how far it has got,
-// or two thin ones when files go both ways at once (sent over received).
-void GlissandoConsole::updateFileLamp(const std::vector<GlissandoScopeFile>& files)
-{
-    bool offered = false, heard = false;
-    const GlissandoScopeFile* sending = nullptr;
-    const GlissandoScopeFile* receiving = nullptr;
-    for (const GlissandoScopeFile& f : files)
-    {
-        offered = offered || f.offered;
-        heard = heard || f.heard;
-        if (!f.moving || f.heard) continue;
-        if (f.outgoing && sending == nullptr) sending = &f;
-        if (!f.outgoing && receiving == nullptr) receiving = &f;
-    }
-
-    if (offered)
-    {
-        fileLamp_->SetTint(Lamp::Tint::Red);
-        fileLamp_->SetLit(Chaotica::blinkLit());
-        fileLamp_->SetProgress(-1.0);
-    }
-    else if (heard)
-    {
-        fileLamp_->SetTint(Lamp::Tint::Amber);
-        fileLamp_->SetLit(true);
-        fileLamp_->SetProgress(-1.0);
-    }
-    else
-    {
-        fileLamp_->SetTint(Lamp::Tint::White);
-        fileLamp_->SetLit(sending != nullptr || receiving != nullptr);
-        if (sending != nullptr && receiving != nullptr) fileLamp_->SetProgress(sending->fraction, receiving->fraction);
-        else if (sending != nullptr) fileLamp_->SetProgress(sending->fraction);
-        else fileLamp_->SetProgress(receiving != nullptr ? receiving->fraction : -1.0);
-    }
 }
 
 // Much of the world holds 30 m to 500 Hz (the IARU Region 1 band plan, which

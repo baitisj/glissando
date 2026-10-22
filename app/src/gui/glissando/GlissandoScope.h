@@ -24,10 +24,8 @@
 #define GUI_GLISSANDO__GLISSANDO_SCOPE_H
 
 #include <array>
-#include <cstdint>
 #include <deque>
 #include <functional>
-#include <utility>
 #include <vector>
 
 #include <wx/control.h>
@@ -84,25 +82,6 @@ struct GlissandoScopeSent
     double tailSeconds = 0.0;       // the closing chord, sung after it
 };
 
-// A file going through Data2G, or one finished this run, for the scene the
-// visi-scope shows while Data2G has the chat (see setFiles()).
-struct GlissandoScopeFile
-{
-    uint64_t key = 0;               // unique this run
-    bool outgoing = false;
-    wxString station;               // the far end, or GLISS for the group
-    wxString name;
-    uint64_t size = 0;
-    bool live = false;              // still going, or waiting to
-    bool moving = false;            // its pieces are going or coming now
-    bool offered = false;           // a station offers it, and the operator has yet to answer
-    bool heard = false;             // a group file heard, and the operator has yet to answer
-    double fraction = 0.0;          // how much has gone or come, 0 to 1
-    std::vector<uint8_t> pieceMap;  // a group file's pieces: 0 not yet, 1 held, 2 missed
-    int moved = 0;                  // pieces moved so far (a session's in twentieths): a floppy each
-    wxString result;                // once over: SAVED, DELIVERED, FAILED and so on
-};
-
 class GlissandoScope : public wxControl
 {
 public:
@@ -132,19 +111,16 @@ public:
 
     void clear();
 
-    // Whether chat goes through Data2G rather than our own modem. Going
-    // over, the screen switches off like an old television, the picture
-    // squeezing to a line and then a dot, and shows a little scene while
-    // Data2G has the chat; coming back, the waterfall returns warped and
-    // wobbling and settles straight. Only the drawing changes.
-    void setData2G(bool on);
-
-    // The files going through Data2G and those finished: the scene shows
-    // the finished ones as a history across the top, one line each, and
-    // the one moving with a bar under them and floppies flying in (or
-    // tossed away by the cat). Without any, it is the plain scene. Only
-    // drawn while Data2G has the chat; the console calls it only then.
-    void setFiles(const std::vector<GlissandoScopeFile>& files);
+    // The About screen: the screen switches off like an old television, the
+    // picture squeezing to a line and then a dot. A cat sits at the bottom
+    // and has a pair of DORC glasses lowered onto it; the credits drift down
+    // from the top, pushing a row of invaders ahead of them until they are
+    // squashed flat over the cat, who hops up and bonks them off the screen.
+    // Once the credits have gone by, or on setAbout(false) or a click on the
+    // screen, the waterfall comes back warped and wobbling and settles
+    // straight. The history goes on filling meanwhile; only the drawing
+    // changes.
+    void setAbout(bool on, const std::vector<wxString>& credits = {});
 
     // Smoke seeping out all round the screen, 0 for none to 1 at its
     // thickest: an easter egg for a transmitter kept keyed too long (see
@@ -183,6 +159,7 @@ private:
     void OnPaint(wxPaintEvent& event);
     void OnSize(wxSizeEvent& event);
     void OnTimer(wxTimerEvent& event);
+    void OnClick(wxMouseEvent& event);
     void OnDoubleClick(wxMouseEvent& event);
     void OnWheel(wxMouseEvent& event);
     void OnMotion(wxMouseEvent& event);
@@ -214,19 +191,14 @@ private:
     void renderTrace(wxImage& image);
     void paintHeard(wxGraphicsContext* gc, const wxRect& trace);
 
-    // The television effects for Data2G (see setData2G()): which one is
-    // showing, and how far into it.
+    // The television effects for the About screen (see setAbout()): which
+    // one is showing, and how far into it.
     enum class Tv { Normal, SwitchingOff, Scene, WarmingUp };
     Tv tvState(double now, double& seconds) const;
     void switchOffTrace(wxImage& image, double seconds) const;
     void switchOnTrace(wxImage& image, double seconds) const;
     void paintTv(wxGraphicsContext* gc, const wxRect& trace, Tv tv, double seconds);
-
-    // The scene with files: the history along the top, the invaders under
-    // it, and the cat along the bottom, keeping them off.
-    void paintFilesScene(wxGraphicsContext* gc, const wxRect& trace, int fade);
-    void stepFilesScene(double now, double width, double invaderBottom, double catTop, double catWidth,
-                        double scale);
+    void stepAboutScene(double dt, double width, double height, bool close, double catWidth, double catPx);
 
     // Lets off puffs of smoke while there is any, forgets the ones gone,
     // and stops its timer once the last has.
@@ -340,55 +312,29 @@ private:
         double driftY = 0.0;
     };
     wxTimer tvTimer_;
-    bool data2g_ = false;
-    double tvSwitchedAt_ = -1e9;    // steady clock seconds, when data2g_ last changed
+    bool about_ = false;
+    double tvSwitchedAt_ = -1e9;    // steady clock seconds, when about_ last changed
+    std::vector<wxString> credits_;
+    bool creditsRolledBy_ = false;  // the last line has faded out at the bottom
+    double creditsRolled_ = 0.0;    // pixels the credits have come down
 
-    // The files scene. History is this run's, oldest first.
-    struct ShelfLine
-    {
-        uint64_t key = 0;
-        wxString time;              // HH:MM it finished
-        bool outgoing = false;
-        wxString station;
-        wxString name;
-        uint64_t size = 0;
-        wxString result;
-    };
-    std::vector<ShelfLine> shelf_;
-    std::vector<uint64_t> shelved_;     // keys on the shelf, so each goes on once
-    int shelfDropped_ = 0;              // the oldest, let go of once there were very many
-    static constexpr size_t MOVING_SHOWN = 3;
-    std::vector<GlissandoScopeFile> moving_;    // the ones moving, a bar each, oldest first
-    std::vector<std::pair<uint64_t, int>> movedSeen_;   // pieces each had moved when last seen
-    struct Floppy
-    {
-        double born;                // steady clock seconds; may be just ahead, to stagger them
-        bool outgoing;
-        double fromY;               // a received one's start, as a fraction of the trace's height
-        uint64_t key;               // the file it belongs to, whose bar a received one lands on
-    };
-    std::deque<Floppy> floppies_;
+    // The About scene's invaders and cat.
     struct Invader
     {
         int slot = 0;               // its place in the row
         int kind = 0;
-        bool flying = false;        // pawed off: tumbling away
+        bool flying = false;        // bonked: tumbling away
         double fx = 0.0, fy = 0.0, vx = 0.0, vy = 0.0, angle = 0.0, spin = 0.0;
     };
     std::vector<Invader> invaders_;
-    double waveStart_ = 0.0;        // scene seconds the wave came in
-    double waveGoneAt_ = -1.0;      // and when the last of it went, -1 while any are left
-    double sceneClock_ = 0.0;       // seconds of scene played
     double sceneLast_ = 0.0;        // steady clock seconds of the last step
     double catX_ = -1.0;            // pixels from the trace's left; -1 until placed
     int catDir_ = 1;
-    enum class CatMode { Walk, ToSmack, Smack };
-    CatMode catMode_ = CatMode::Walk;
+    enum class CatMode { Sit, ToSmack, Smack, Home };
+    CatMode catMode_ = CatMode::Sit;
     int catTarget_ = -1;
     double catJump_ = 0.0;          // through a smack, 0 to 1
     double catStep_ = 0.0;          // its legs
-    double invaderY_ = 0.0;         // the row's top as last drawn
-    double invaderDrop_ = 0.0;      // how far the wave has crept down
     unsigned sceneRandom_ = 12345;
     double sceneRandomUnit();
 

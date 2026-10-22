@@ -335,91 +335,6 @@ OptionsDlg::OptionsDlg(wxWindow* parent, wxWindowID id, const wxString& title, c
     smokeSizer->Add(new wxStaticText(sb_textChat, wxID_ANY, _("seconds")), 0, wxALIGN_CENTER_VERTICAL);
     sbSizer_textChat->Add(smokeSizer, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
 
-    // Data2G: an external modem program the operator runs; chat reaches it
-    // over TCP (docs/DATA2G.md).
-    m_ckboxData2G = new wxCheckBox(
-        sb_textChat, wxID_ANY, _("Send chat through Data2G (a data2g-host you run separately)"),
-        wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    m_ckboxData2G->SetToolTip(
-        _("Chat goes out through data2g-host instead of Glissando. Start data2g-host yourself, "
-          "with its own sound card and rigctld PTT settings; this program only connects to it, "
-          "and does not key the radio for chat while this is checked."));
-    sbSizer_textChat->Add(m_ckboxData2G, 0, static_cast<int>(wxALL) | wxALIGN_LEFT, 5);
-
-    wxBoxSizer* data2gSizer = new wxBoxSizer(wxHORIZONTAL);
-    data2gSizer->Add(new wxStaticText(sb_textChat, wxID_ANY, _("Host:")), 0,
-                     static_cast<int>(wxLEFT) | wxALIGN_CENTER_VERTICAL, 25);
-    m_txtData2GHost = new wxTextCtrl(sb_textChat, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(140, -1));
-    data2gSizer->Add(m_txtData2GHost, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    data2gSizer->Add(new wxStaticText(sb_textChat, wxID_ANY, _("KISS port:")), 0, wxALIGN_CENTER_VERTICAL, 0);
-    m_txtData2GKissPort = new wxTextCtrl(sb_textChat, wxID_ANY, wxEmptyString, wxDefaultPosition,
-                                         wxSize(70, -1), 0, wxTextValidator(wxFILTER_DIGITS));
-    data2gSizer->Add(m_txtData2GKissPort, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    data2gSizer->Add(new wxStaticText(sb_textChat, wxID_ANY, _("Command port:")), 0,
-                     static_cast<int>(wxLEFT) | wxALIGN_CENTER_VERTICAL, 10);
-    m_txtData2GCommandPort = new wxTextCtrl(sb_textChat, wxID_ANY, wxEmptyString, wxDefaultPosition,
-                                            wxSize(70, -1), 0, wxTextValidator(wxFILTER_DIGITS));
-    m_txtData2GCommandPort->SetToolTip(
-        _("Chat opens the GLISS broadcast group here, picks each tempo's Data2G mode, and reads "
-          "data2g-host's PTT and BUSY reports. Sessions use the next port up for their data. "
-          "data2g-host serves one command client at a time."));
-    data2gSizer->Add(m_txtData2GCommandPort, 0, static_cast<int>(wxALL) | wxALIGN_CENTER_VERTICAL, 5);
-    sbSizer_textChat->Add(data2gSizer, 0, wxALIGN_LEFT, 0);
-
-    m_ckboxData2GSessions = new wxCheckBox(
-        sb_textChat, wxID_ANY, _("Connect a session for messages to one station"), wxDefaultPosition,
-        wxDefaultSize, wxCHK_2STATE);
-    m_ckboxData2GSessions->SetToolTip(
-        _("A message to a station picked in the call roster goes through a connected Data2G session, "
-          "which negotiates its own speed and retries. When that station does not answer, the "
-          "message goes to the GLISS group instead. Unchecked, everything goes to the group."));
-    sbSizer_textChat->Add(m_ckboxData2GSessions, 0, static_cast<int>(wxLEFT) | wxALIGN_LEFT, 25);
-
-    m_ckboxData2GNarrowModes = new wxCheckBox(sb_textChat, wxID_ANY, _("500 Hz wide modes only"), wxDefaultPosition,
-                                              wxDefaultSize, wxCHK_2STATE);
-    m_ckboxData2GNarrowModes->SetToolTip(
-        _("Every tempo, and files to the GLISS group, use Data2G's modes no wider than 500 Hz: Adagio and "
-          "Andante as before, Allegro, Presto and Duet in the 500 Hz OFDM modes. For a narrow filter or a "
-          "crowded band. data2g-host is told BW500, so the sessions it opens stay within 500 Hz too."));
-    sbSizer_textChat->Add(m_ckboxData2GNarrowModes, 0, static_cast<int>(wxLEFT | wxTOP) | wxALIGN_LEFT, 25);
-
-    // Files through a session: where they are saved, and from whom they
-    // are taken without asking.
-    wxFlexGridSizer* filesSizer = new wxFlexGridSizer(2, 5, 5);
-    filesSizer->AddGrowableCol(1);
-    filesSizer->Add(new wxStaticText(sb_textChat, wxID_ANY, _("Save received files in:")), 0,
-                    wxALIGN_CENTER_VERTICAL, 0);
-    m_dirData2GReceivedFiles = new wxDirPickerCtrl(sb_textChat, wxID_ANY, wxEmptyString,
-                                                   _("Folder for received files"), wxDefaultPosition,
-                                                   wxSize(300, -1), wxDIRP_USE_TEXTCTRL);
-    m_dirData2GReceivedFiles->SetToolTip(
-        _("Where the chat window saves files sent to you through a Data2G session. Saving a file "
-          "somewhere else makes that folder the one used next time."));
-    filesSizer->Add(m_dirData2GReceivedFiles, 1, wxEXPAND, 0);
-    filesSizer->Add(new wxStaticText(sb_textChat, wxID_ANY, _("Accept files without asking from:")), 0,
-                    wxALIGN_CENTER_VERTICAL, 0);
-    m_txtData2GAutoAcceptFiles = new wxTextCtrl(sb_textChat, wxID_ANY, wxEmptyString, wxDefaultPosition,
-                                                wxSize(300, -1));
-    m_txtData2GAutoAcceptFiles->SetHint(_("Callsigns, separated by spaces"));
-    m_txtData2GAutoAcceptFiles->SetToolTip(
-        _("Files these stations offer are saved in the folder above straight away, without asking. "
-          "Nothing received is ever opened or run."));
-    filesSizer->Add(m_txtData2GAutoAcceptFiles, 1, wxEXPAND, 0);
-    sbSizer_textChat->Add(filesSizer, 0, static_cast<int>(wxLEFT) | static_cast<int>(wxTOP) | static_cast<int>(wxEXPAND),
-                          25);
-
-    // Files broadcast to the GLISS group: asked about (the default), or
-    // received into the folder above without asking.
-    m_ckboxData2GReceiveGroupFiles = new wxCheckBox(sb_textChat, wxID_ANY, _("Receive group files automatically"),
-                                                    wxDefaultPosition, wxDefaultSize, wxCHK_2STATE);
-    m_ckboxData2GReceiveGroupFiles->SetToolTip(
-        _("Files a station sends to the whole GLISS group are saved in the folder above without asking, and "
-          "this station asks for the pieces it missed. Only while Auto acknowledge is lit in the chat window, "
-          "since asking transmits. Unchecked, the chat window asks first. Nothing received is ever opened or run."));
-    sbSizer_textChat->Add(m_ckboxData2GReceiveGroupFiles, 0, static_cast<int>(wxLEFT) | static_cast<int>(wxTOP) | wxALIGN_LEFT,
-                          25);
-
-    m_ckboxData2G->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent&) { updateData2GControls_(); });
     m_choiceGlissandoTail->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { updateCwTailControls_(); });
     m_txtGlissandoCwText->Bind(wxEVT_TEXT, [this](wxCommandEvent&) { updateCwTailControls_(); });
     m_spinGlissandoCwWpm->Bind(wxEVT_SPINCTRL, [this](wxSpinEvent&) { updateCwTailControls_(); });
@@ -660,18 +575,6 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         m_ckboxGlissandoMapBrushedMetal->SetValue(wxGetApp().appConfiguration.glissandoMapBrushedMetal);
         m_txtGlissandoSmokeSeconds->SetValue(
             wxString::Format("%d", wxGetApp().appConfiguration.glissandoSmokeSeconds.get()));
-        m_ckboxData2G->SetValue(wxGetApp().appConfiguration.data2gEnabled);
-        m_txtData2GHost->SetValue(wxGetApp().appConfiguration.data2gHost);
-        m_txtData2GKissPort->SetValue(wxString::Format("%d", wxGetApp().appConfiguration.data2gKissPort.get()));
-        m_txtData2GCommandPort->SetValue(wxString::Format("%d", wxGetApp().appConfiguration.data2gCommandPort.get()));
-        m_ckboxData2GSessions->SetValue(wxGetApp().appConfiguration.data2gSessions);
-        m_ckboxData2GNarrowModes->SetValue(wxGetApp().appConfiguration.data2gNarrowModesOnly);
-        m_dirData2GReceivedFiles->SetPath(wxGetApp().frame != nullptr
-                                              ? wxGetApp().frame->chatReceivedFilesFolder()
-                                              : (wxString)wxGetApp().appConfiguration.data2gReceivedFilesFolder);
-        m_txtData2GAutoAcceptFiles->SetValue(wxGetApp().appConfiguration.data2gAutoAcceptFilesFrom);
-        m_ckboxData2GReceiveGroupFiles->SetValue(wxGetApp().appConfiguration.data2gReceiveGroupFiles);
-        updateData2GControls_();
         updateCwTailControls_();
         
 
@@ -753,22 +656,6 @@ void OptionsDlg::ExchangeData(int inout, bool storePersistent)
         long smokeSeconds = 0;
         if (m_txtGlissandoSmokeSeconds->GetValue().ToLong(&smokeSeconds))
             wxGetApp().appConfiguration.glissandoSmokeSeconds = (int)std::min(smokeSeconds, 100000L);
-        wxGetApp().appConfiguration.data2gEnabled = m_ckboxData2G->GetValue();
-        wxString data2gHost = m_txtData2GHost->GetValue().Strip(wxString::both);
-        wxGetApp().appConfiguration.data2gHost = data2gHost.IsEmpty() ? wxString("127.0.0.1") : data2gHost;
-        auto port = [](wxTextCtrl* box, int fallback) {
-            int value = wxAtoi(box->GetValue());
-            return value > 0 && value < 65536 ? value : fallback;
-        };
-        wxGetApp().appConfiguration.data2gKissPort = port(m_txtData2GKissPort, 8100);
-        wxGetApp().appConfiguration.data2gCommandPort = port(m_txtData2GCommandPort, 8300);
-        wxGetApp().appConfiguration.data2gSessions = m_ckboxData2GSessions->GetValue();
-        wxGetApp().appConfiguration.data2gNarrowModesOnly = m_ckboxData2GNarrowModes->GetValue();
-        wxString receivedFiles = m_dirData2GReceivedFiles->GetPath().Strip(wxString::both);
-        if (!receivedFiles.IsEmpty()) wxGetApp().appConfiguration.data2gReceivedFilesFolder = receivedFiles;
-        wxGetApp().appConfiguration.data2gAutoAcceptFilesFrom =
-            m_txtData2GAutoAcceptFiles->GetValue().Strip(wxString::both).Upper();
-        wxGetApp().appConfiguration.data2gReceiveGroupFiles = m_ckboxData2GReceiveGroupFiles->GetValue();
         
         long FifoSize_ms;
         m_txtCtrlFifoSize->GetValue().ToLong(&FifoSize_ms);
@@ -1075,23 +962,6 @@ void OptionsDlg::OnReportingFreqMoveDown(wxCommandEvent&)
     
     // Refresh button status
     m_txtCtrlNewFrequency->SetValue(prevStr);
-}
-
-//-------------------------------------------------------------------------
-// updateData2GControls_(): the connection settings only matter with Data2G
-// chosen.
-//-------------------------------------------------------------------------
-void OptionsDlg::updateData2GControls_()
-{
-    bool on = m_ckboxData2G->GetValue();
-    m_txtData2GHost->Enable(on);
-    m_txtData2GKissPort->Enable(on);
-    m_txtData2GCommandPort->Enable(on);
-    m_ckboxData2GSessions->Enable(on);
-    m_ckboxData2GNarrowModes->Enable(on);
-    m_dirData2GReceivedFiles->Enable(on);
-    m_txtData2GAutoAcceptFiles->Enable(on);
-    m_ckboxData2GReceiveGroupFiles->Enable(on);
 }
 
 //-------------------------------------------------------------------------

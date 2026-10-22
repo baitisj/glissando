@@ -29,13 +29,6 @@
 namespace TextMessaging
 {
 
-// Which modem decoded the frame.
-enum class SnoopSource
-{
-    Glissando,
-    Data2G,
-};
-
 struct SnoopEvent
 {
     enum class Kind
@@ -47,7 +40,6 @@ struct SnoopEvent
     Kind kind = Kind::Frame;
     uint64_t sequence = 0;          // counts up from 1 over the feed's life
     std::time_t timestamp = 0;
-    SnoopSource source = SnoopSource::Glissando;
     FrameType frameType = FrameType::Broadcast;
 
     std::string origin;
@@ -117,7 +109,7 @@ public:
     // feed's state locked, so they may call recent(); they must not add or
     // remove listeners. Once removeListener() returns, its listener is not
     // running and will not be called again.
-    void onFrame(const Frame& frame, float snr, SnoopSource source, std::time_t now);
+    void onFrame(const Frame& frame, float snr, std::time_t now);
 
     // Returns an id for removeListener().
     int addListener(Listener listener);

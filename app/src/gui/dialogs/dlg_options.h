@@ -24,7 +24,6 @@
 
 #include "../../main.h"
 #include "defines.h"
-#include <wx/filepicker.h>
 #include <wx/spinctrl.h>
 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=--=-=-=-=
@@ -127,16 +126,6 @@ class OptionsDlg : public wxDialog
         wxTextCtrl*  m_txtGlissandoSmokeSeconds;
         wxCheckBox*  m_ckboxGlissandoMapBorders;
         wxCheckBox*  m_ckboxGlissandoMapBrushedMetal;
-        wxCheckBox*  m_ckboxData2G;
-        wxTextCtrl*  m_txtData2GHost;
-        wxTextCtrl*  m_txtData2GKissPort;
-        wxTextCtrl*  m_txtData2GCommandPort;
-        wxCheckBox*  m_ckboxData2GSessions;
-        wxCheckBox*  m_ckboxData2GNarrowModes;
-        wxDirPickerCtrl* m_dirData2GReceivedFiles;
-        wxTextCtrl*  m_txtData2GAutoAcceptFiles;
-        wxCheckBox*  m_ckboxData2GReceiveGroupFiles;
-        void updateData2GControls_();
         
         wxListBox*  m_freqList;
         wxStaticText* m_labelEnterFreq;

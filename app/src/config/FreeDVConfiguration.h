@@ -72,29 +72,6 @@ public:
     // default: an operator elsewhere turns it off.
     ConfigurationDataElement<bool> textChatUsDataSegmentsOnly;
 
-    // Text chat through a separately running data2g-host instead of our own
-    // modem (docs/DATA2G.md): the GLISS broadcast group on the KISS port, the
-    // command port to open it and pick its mode, and, with sessions on,
-    // connected sessions (data on the command port + 1) for messages to one
-    // station.
-    ConfigurationDataElement<bool> data2gEnabled;
-    ConfigurationDataElement<wxString> data2gHost;
-    ConfigurationDataElement<int> data2gKissPort;
-    ConfigurationDataElement<int> data2gCommandPort;
-    ConfigurationDataElement<bool> data2gSessions;
-    ConfigurationDataElement<bool> data2gNarrowModesOnly;
-
-    // Files through a Data2G session: where received ones are saved (empty
-    // for the default under Documents), kept as the folder last saved to;
-    // and the stations whose files are taken without asking (callsigns,
-    // separated by spaces or commas).
-    ConfigurationDataElement<wxString> data2gReceivedFilesFolder;
-    ConfigurationDataElement<wxString> data2gAutoAcceptFilesFrom;
-
-    // Files broadcast to the GLISS group are received into that folder
-    // without asking (only while Auto acknowledge is lit too).
-    ConfigurationDataElement<bool> data2gReceiveGroupFiles;
-
     // The Glissando console and the melodic chirp mode it drives. Tuning
     // offset and scan rate are stored in tenths (Hz, rows per second) so
     // they fit the integer config type.

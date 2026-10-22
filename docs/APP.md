@@ -98,7 +98,7 @@ longer changes anything.
 | Engage | Starts and stops audio. |
 | Comms | Lit while the COMMS window is up. Press it to open or close that window. While it is closed, a chat message received, directed to you or broadcast, makes the button flash red, in step with ENGAGE TO SEND, until the window is opened; pongs, acknowledgements and the window's own notices do not. |
 | Snooper | Lit while the snooping window is up. Press it to open or close that window. |
-| Preferences | Drops down Options, Sound cards, CAT/PTT (how the radio is keyed and tuned, whether the app may set its frequency, and the ALC Target the Drive knob holds to; it scrolls when the screen is short) and Easy setup. Sound cards, CAT/PTT and easy setup only change while disengaged. The app opens only the radio's two audio streams, input from the radio and output to it, so Sound cards and Easy setup ask for nothing else; leave the output as none to only listen. Options has four tabs: Station (your callsign, and the Stations Heard log file, a CSV line for each station whose chat frame is heard), Rig Control (under Transmit, the TX/RX delay, a wait between keying the radio and the audio for a slow amplifier or relay, and the time-out timer that caps each keying; and the SWR switches: show SWR on the meter while transmitting, on by default, and abort the transmission at the first reading over 3:1, off by default), Modem (start on launch, half duplex, and the Text Chat switches, among them the opening chord and the tail that ends each transmission: off, a chord, or the station's call in Morse, sung on the scale or keyed straight on E4+D5, see [CW_TAIL.md](CW_TAIL.md)) and Debugging. |
+| Preferences | Drops down Options, Sound cards, CAT/PTT (how the radio is keyed and tuned, whether the app may set its frequency, and the ALC Target the Drive knob holds to; it scrolls when the screen is short), Easy setup and About. About switches the visi-scope off like an old television set. The cat has its DORC glasses lowered on, with a nod to the Digital Oddballs Radio Club, then the credits drift down from the top, pressing the invaders down until they are squashed flat over the cat, who hops up and bonks them off the screen. Click the screen, or wait for the credits to end, and the waterfall warms back up with nothing lost. Sound cards, CAT/PTT and easy setup only change while disengaged. The app opens only the radio's two audio streams, input from the radio and output to it, so Sound cards and Easy setup ask for nothing else; leave the output as none to only listen. Options has four tabs: Station (your callsign, and the Stations Heard log file, a CSV line for each station whose chat frame is heard), Rig Control (under Transmit, the TX/RX delay, a wait between keying the radio and the audio for a slow amplifier or relay, and the time-out timer that caps each keying; and the SWR switches: show SWR on the meter while transmitting, on by default, and abort the transmission at the first reading over 3:1, off by default), Modem (start on launch, half duplex, and the Text Chat switches, among them the opening chord and the tail that ends each transmission: off, a chord, or the station's call in Morse, sung on the scale or keyed straight on E4+D5, see [CW_TAIL.md](CW_TAIL.md)) and Debugging. |
 
 ![The visi-scope at Presto, 10 rows a second, with a message from K6ABC and W1AW's acknowledgement written on it as each frame decoded (a simulated channel, drawn by the scope's own code)](images/visi-scope-captions.png)
 
@@ -345,12 +345,12 @@ for the GLISSANDO title over the visi-scope.
 The COMMS window's send button shows how long the message being typed will be
 on the air at the tempo it would go out at now, in red once that is longer
 than the transmit time-out (Preferences, Options, Rig Control; 180 s when the app's
-timer is off, the usual rig setting). Nothing is shown for codec2 or Data2G.
+timer is off, the usual rig setting). Nothing is shown for codec2.
 
 More messages can be queued while the transmitter is keyed; they go when it
 is free. In COMMS, double-clicking a message selects the station it
 is with in the heard list (a single click only places the caret, so a stray
-click can't end a Data2G session), putting the station back if it has aged out, and a
+click changes nothing), putting the station back if it has aged out, and a
 directed message for you selects its sender when no station is selected. A
 right click offers `Clear Messages`, which keeps only messages still being
 sent, and, on a message or ping of yours still outstanding, `Remove from
@@ -403,8 +403,7 @@ acknowledgement, and nothing queued behind it rides there instead.
 Once a message is on the air its chip, SENDING (or RETRY or RESEND), sits
 over a bar in the same style that fills from the left as the audio plays
 out, across the whole transmission when it is split into several keyings
-for the time-out timer. Data2G does not say how far it has got, so its chip
-stays plain.
+for the time-out timer.
 
 A chat keying runs the time-out timer set under Rig Control, Transmit. When one would outlast
 it, the transport sends it as several keyings, each at least 20 s short of the
@@ -417,25 +416,12 @@ the far end rejoins segments by order, so the pauses cost nothing but the
 them. If the operator keys for voice during a pause, voice wins: the transport
 waits up to 10 s for the radio to come free, then drops the rest of the burst.
 
-## Chat through Data2G
+## Data2G
 
-Chat can also go out through [Data2G](https://github.com/arodland/Data2G), a
-separate HF data modem program. The app does not start it or include any of
-it: run `data2g-host` yourself (with its own sound card and rigctld PTT
-settings), then tick **Send chat through Data2G** under Preferences, Modem,
-Text Chat, and give its host and ports (KISS 8100, command 8300; sessions
-use the command port + 1). Chat opens Data2G's GLISS broadcast group and
-sends its frames there as they are. The tempo buttons pick the Data2G mode:
-Adagio its most sensitive (`fsk16r25-r1/3`), Duet a fast 2.4 kHz one
-(`w48-16qam-r1/2`). With **Connect a session for messages to one station**
-ticked, a message to a station picked in the call roster goes through a
-connected Data2G session, and to the group if that station doesn't answer.
-In a session the modem's own acknowledgements turn each message OK (or NO
-ACK if the session is lost), with no pauses, no tempo and no chat
-acknowledgements of ours, so Auto acknowledge makes no difference there.
-The chat window shows whether data2g-host is reachable, the group's mode, and
-any session. data2g-host serves one command client at a time, so VarAC or Pat
-can't share it. docs/DATA2G.md has the details.
+Glissando no longer carries chat over [Data2G](https://github.com/arodland/Data2G).
+[Ragtime](https://github.com/baitisj/ragtime), a separate chat and
+file-transfer client, is the place for Data2G now. Old Data2G settings in
+`~/.glissando.conf` are ignored.
 
 ## Modem
 
