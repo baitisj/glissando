@@ -1,4 +1,4 @@
-add_library(fdv_gui_dialogs STATIC
+add_library(gliss_gui_dialogs STATIC
     dlg_audiooptions.cpp
     dlg_easy_setup.cpp
     dlg_options.cpp
@@ -8,18 +8,18 @@ add_library(fdv_gui_dialogs STATIC
     monitor_volume_adj.cpp
     tot_warning.cpp)
 
-target_include_directories(fdv_gui_dialogs PRIVATE ${CODEC2_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}/../.. ${CMAKE_CURRENT_BINARY_DIR}/../..)
+target_include_directories(gliss_gui_dialogs PRIVATE ${CODEC2_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}/../.. ${CMAKE_CURRENT_BINARY_DIR}/../..)
 
-target_link_libraries(fdv_gui_dialogs PUBLIC samplerate fdv_gui_controls fdv_gui_glissando fdv_audio_pipeline_extra fdv_text_messaging)
+target_link_libraries(gliss_gui_dialogs PUBLIC samplerate gliss_gui_controls gliss_gui_glissando gliss_audio_pipeline_extra gliss_text_messaging)
 
-target_compile_options(fdv_gui_dialogs PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
+target_compile_options(gliss_gui_dialogs PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
 
 if(HAMLIB_ADD_DEPENDENCY)
-add_dependencies(fdv_gui_dialogs hamlib)
+add_dependencies(gliss_gui_dialogs hamlib)
 endif(HAMLIB_ADD_DEPENDENCY)
 
 if(BOOTSTRAP_WXWIDGETS)
-    add_dependencies(fdv_gui_dialogs wx::core wx::base wx::aui wx::html wx::net wx::adv wx::propgrid wx::xrc)
-    target_compile_definitions(fdv_gui_dialogs PRIVATE ${WXBUILD_BUILD_DEFS})
-    target_include_directories(fdv_gui_dialogs PRIVATE ${WXBUILD_INCLUDES})
+    add_dependencies(gliss_gui_dialogs wx::core wx::base wx::aui wx::html wx::net wx::adv wx::propgrid wx::xrc)
+    target_compile_definitions(gliss_gui_dialogs PRIVATE ${WXBUILD_BUILD_DEFS})
+    target_include_directories(gliss_gui_dialogs PRIVATE ${WXBUILD_INCLUDES})
 endif(BOOTSTRAP_WXWIDGETS)

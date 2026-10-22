@@ -6,13 +6,13 @@ else()
     set(OS_WRAP_FILES osx_stubs.cpp)
 endif()
 
-add_library(fdv_os_wrapper STATIC
+add_library(gliss_os_wrapper STATIC
     ${OS_WRAP_FILES}
 )
 
 if(APPLE)
-target_link_libraries(fdv_os_wrapper "-framework AppKit -framework CoreGraphics -framework CoreFoundation -framework AVFoundation")
+target_link_libraries(gliss_os_wrapper "-framework AppKit -framework CoreGraphics -framework CoreFoundation -framework AVFoundation")
 endif(APPLE)
 
-target_compile_options(fdv_os_wrapper PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
-target_include_directories(fdv_os_wrapper PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_BINARY_DIR}/..)
+target_compile_options(gliss_os_wrapper PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
+target_include_directories(gliss_os_wrapper PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_BINARY_DIR}/..)

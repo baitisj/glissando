@@ -35,13 +35,13 @@ add_subdirectory(text_messaging)
 add_executable(glissando WIN32 ${FREEDV_SOURCES} ${RES_FILES})
 
 target_compile_options(glissando PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
-target_link_libraries(glissando fdv_audio fdv_audio_pipeline fdv_audio_pipeline_extra fdv_config fdv_gui_controls fdv_gui_dialogs fdv_gui_glissando fdv_gui_util fdv_os_wrapper fdv_rig_control fdv_reporting fdv_text_messaging fdv_util codec2 git_version)
+target_link_libraries(glissando gliss_audio gliss_audio_pipeline gliss_audio_pipeline_extra gliss_config gliss_gui_controls gliss_gui_dialogs gliss_gui_glissando gliss_gui_util gliss_os_wrapper gliss_rig_control gliss_reporting gliss_text_messaging gliss_util codec2 git_version)
 
 # Add dependencies for other statically built libraries, if applicable.
 if(FREEDV_STATIC_DEPS)
     add_dependencies(glissando ${FREEDV_STATIC_DEPS})
-    add_dependencies(fdv_audio ${FREEDV_STATIC_DEPS})
-    add_dependencies(fdv_audio_pipeline_extra ${FREEDV_STATIC_DEPS})
+    add_dependencies(gliss_audio ${FREEDV_STATIC_DEPS})
+    add_dependencies(gliss_audio_pipeline_extra ${FREEDV_STATIC_DEPS})
 endif(FREEDV_STATIC_DEPS)
 
 # Link other dependencies
@@ -121,13 +121,13 @@ if(LINUX)
                 target_link_libraries(glissando ${GTK3_LIBRARIES})
                 add_definitions(-DHAS_GTK3)
 
-                # fdv_gui_util (added via add_subdirectory(gui) above, before this
+                # gliss_gui_util (added via add_subdirectory(gui) above, before this
                 # point) needs these too -- WindowPositionRestore.cpp lives there,
                 # not in glissando's own sources. add_definitions()/directory-scoped
                 # include dirs only propagate to subdirectories added *after* this
                 # point, so it has to be set on the already-created target directly.
-                target_compile_definitions(fdv_gui_util PRIVATE HAS_GTK3)
-                target_include_directories(fdv_gui_util PRIVATE ${GTK3_INCLUDE_DIRS})
+                target_compile_definitions(gliss_gui_util PRIVATE HAS_GTK3)
+                target_include_directories(gliss_gui_util PRIVATE ${GTK3_INCLUDE_DIRS})
             else(WX_BUILT_FOR_GTK3)
                 message(WARNING "GTK3 development files (gtk+-3.0.pc) were found, but the detected wxWidgets does not define __WXGTK3__ (it appears to target GTK2) -- including <gtk/gtk.h> directly alongside wx headers would conflict, so Linux-specific GUI workarounds (including window position restore) will be disabled")
             endif(WX_BUILT_FOR_GTK3)

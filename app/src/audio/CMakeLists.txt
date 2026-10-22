@@ -28,7 +28,7 @@ else()
     )
 endif(NATIVE_AUDIO_AVAILABLE)
 
-add_library(fdv_audio STATIC
+add_library(gliss_audio STATIC
     AudioDeviceSpecification.cpp
     AudioEngineFactory.cpp
     IAudioDevice.cpp
@@ -36,24 +36,24 @@ add_library(fdv_audio STATIC
     ${AUDIO_ENGINE_LIBRARY_SPECIFIC_FILES}
 )
 
-target_link_libraries(fdv_audio PUBLIC fdv_util)
+target_link_libraries(gliss_audio PUBLIC gliss_util)
 
 if(APPLE AND NATIVE_AUDIO_AVAILABLE)
-    target_link_libraries(fdv_audio PUBLIC
+    target_link_libraries(gliss_audio PUBLIC
         "-framework AVFoundation"
         "-framework CoreAudio")
 elseif(WIN32 AND NATIVE_AUDIO_AVAILABLE)
-    target_link_libraries(fdv_audio PRIVATE uuid avrt winmm ksuser)
+    target_link_libraries(gliss_audio PRIVATE uuid avrt winmm ksuser)
 elseif(LINUX AND NATIVE_AUDIO_AVAILABLE AND DBus_FOUND)
-    target_include_directories(fdv_audio PRIVATE ${DBus_INCLUDE_DIRS})
-    target_compile_definitions(fdv_audio PRIVATE -DUSE_RTKIT)
-    target_link_libraries(fdv_audio PRIVATE ${DBus_LIBRARIES})
+    target_include_directories(gliss_audio PRIVATE ${DBus_INCLUDE_DIRS})
+    target_compile_definitions(gliss_audio PRIVATE -DUSE_RTKIT)
+    target_link_libraries(gliss_audio PRIVATE ${DBus_LIBRARIES})
 endif()
 
-target_compile_options(fdv_audio PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
+target_compile_options(gliss_audio PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
 
 if(BOOTSTRAP_WXWIDGETS)
-    add_dependencies(fdv_audio wx::core wx::base wx::aui wx::html wx::net wx::adv wx::propgrid wx::xrc)
-    target_compile_definitions(fdv_audio PRIVATE ${WXBUILD_BUILD_DEFS})
-    target_include_directories(fdv_audio PRIVATE ${WXBUILD_INCLUDES})
+    add_dependencies(gliss_audio wx::core wx::base wx::aui wx::html wx::net wx::adv wx::propgrid wx::xrc)
+    target_compile_definitions(gliss_audio PRIVATE ${WXBUILD_BUILD_DEFS})
+    target_include_directories(gliss_audio PRIVATE ${WXBUILD_INCLUDES})
 endif(BOOTSTRAP_WXWIDGETS)
