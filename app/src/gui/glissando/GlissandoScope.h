@@ -111,6 +111,15 @@ public:
 
     void clear();
 
+    // The About screen: the screen switches off like an old television, the picture
+    // squeezing to a line and then a dot; invaders march across the top, a
+    // cat sits below them and now and then has a pair of DORC glasses
+    // lowered onto it, and the credits roll up between them. Once they have
+    // rolled by, or on setAbout(false) or a click on the screen, the
+    // waterfall comes back warped and wobbling and settles straight. The
+    // history goes on filling meanwhile; only the drawing changes.
+    void setAbout(bool on, const std::vector<wxString>& credits = {});
+
     // Smoke seeping out all round the screen, 0 for none to 1 at its
     // thickest: an easter egg for a transmitter kept keyed too long (see
     // SmokeGauge). Even at its thickest it is faint.
@@ -148,6 +157,7 @@ private:
     void OnPaint(wxPaintEvent& event);
     void OnSize(wxSizeEvent& event);
     void OnTimer(wxTimerEvent& event);
+    void OnClick(wxMouseEvent& event);
     void OnDoubleClick(wxMouseEvent& event);
     void OnWheel(wxMouseEvent& event);
     void OnMotion(wxMouseEvent& event);
@@ -179,8 +189,16 @@ private:
     void renderTrace(wxImage& image);
     void paintHeard(wxGraphicsContext* gc, const wxRect& trace);
 
-    // Lights the fires when smoke starts, lets off puffs while there is
-    // any, forgets the ones gone, and stops its timer once the last has.
+    // The television effects for the About screen (see setAbout()): which
+    // one is showing, and how far into it.
+    enum class Tv { Normal, SwitchingOff, Scene, WarmingUp };
+    Tv tvState(double now, double& seconds) const;
+    void switchOffTrace(wxImage& image, double seconds) const;
+    void switchOnTrace(wxImage& image, double seconds) const;
+    void paintTv(wxGraphicsContext* gc, const wxRect& trace, Tv tv, double seconds);
+
+    // Lets off puffs of smoke while there is any, forgets the ones gone,
+    // and stops its timer once the last has.
     void tickSmoke();
     void paintSmoke(wxGraphicsContext* gc, const wxRect& trace);
 
@@ -290,6 +308,12 @@ private:
         double driftX = 0.0;        // and how fast it is still drifting from that, pixels a second
         double driftY = 0.0;
     };
+    wxTimer tvTimer_;
+    bool about_ = false;
+    double tvSwitchedAt_ = -1e9;    // steady clock seconds, when about_ last changed
+    std::vector<wxString> credits_;
+    bool creditsRolledBy_ = false;  // the last line has gone off the top
+
     wxTimer smokeTimer_;
     double smoke_ = 0.0;
     unsigned puffSerial_ = 0;

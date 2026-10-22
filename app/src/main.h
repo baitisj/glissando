@@ -371,6 +371,7 @@ public:
     virtual void glissandoSetDrive(double db) override;
     virtual void glissandoSetDriveAuto(bool automatic) override;
     virtual std::vector<double> glissandoFrequencyPresets() override;
+    virtual wxString glissandoVersion() override;
     virtual void glissandoShowChat(bool show) override;
     virtual bool glissandoChatShown() override;
     virtual void glissandoShowSnoop(bool show) override;

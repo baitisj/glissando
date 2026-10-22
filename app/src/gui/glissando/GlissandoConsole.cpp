@@ -744,14 +744,57 @@ void GlissandoConsole::showPreferences()
         choices.push_back({entry.label, available,
                            available ? entry.tooltip : _("Disengage first: this can't change while audio runs.")});
     }
+    // And last, who made it, on the visi-scope.
+    choices.push_back({_("About"), true, _("The credits, on the visi-scope. Click the screen to bring the waterfall back.")});
 
     // Lit while its column is down and while the setup dialog it opens is
     // up; those dialogs are modal, so closed comes once they have gone.
     preferencesButton_->SetChecked(true);
     ShowChoices(
         preferencesButton_, choices,
-        [this, entries](int index) { host_->glissandoOpenSetup(entries[index].setup); },
+        [this, entries](int index) {
+            if (index < (int)entries.size())
+                host_->glissandoOpenSetup(entries[(size_t)index].setup);
+            else
+                showAbout();
+        },
         [this]() { preferencesButton_->SetChecked(false); });
+}
+
+void GlissandoConsole::showAbout()
+{
+    // Headings are in capitals, and the scope draws them brighter.
+    const std::vector<wxString> credits = {
+        _("GLISSANDO") + " " + host_->glissandoVersion(),
+        _("Keyboard chat that sounds like a melody"),
+        "",
+        _("DESIGNED BY"),
+        "Jeff Baitis, AG7EW",
+        "",
+        _("WRITTEN BY"),
+        "Jeff Baitis and Claude (Anthropic)",
+        "",
+        _("ON THE AIR WITH"),
+        "Andrew Rodland, KC2G",
+        "",
+        _("BUILT ON"),
+        _("FreeDV, by David Rowe, VK5DGR,"),
+        _("Mooneer Salem, K6AQ, and the FreeDV team"),
+        _("codec2 and its DATAC modems"),
+        "Hamlib, wxWidgets, SQLite,",
+        "libsamplerate and libsndfile",
+        _("Maps from Natural Earth"),
+        "",
+        _("INSPIRED BY"),
+        _("Captain Proton and the Bride of Chaotica"),
+        _("(Star Trek: Voyager)"),
+        "",
+        _("THE CAT'S GLASSES"),
+        _("Digital Oddballs Radio Club"),
+        "",
+        "73",
+    };
+    scope_->setAbout(true, credits);
 }
 
 void GlissandoConsole::selectGear(int gear)

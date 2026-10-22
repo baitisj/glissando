@@ -129,6 +129,9 @@ public:
     // The operator's list of favourite dial frequencies, in Hz.
     virtual std::vector<double> glissandoFrequencyPresets() = 0;
 
+    // The version, as the title shows it, for the About screen's credits.
+    virtual wxString glissandoVersion() = 0;
+
     // The chat window: shows or hides it, and says whether it is showing.
     virtual void glissandoShowChat(bool show) = 0;
     virtual bool glissandoChatShown() = 0;
@@ -180,6 +183,8 @@ private:
     void updateBandWidthWarning(const GlissandoTelemetry& t);
     void updateDrive(const GlissandoTelemetry& t);
     void showPreferences();
+    // The credits, rolled on the visi-scope with the cat.
+    void showAbout();
 
     void OnTimer(wxTimerEvent& event);
     void OnClose(wxCloseEvent& event);

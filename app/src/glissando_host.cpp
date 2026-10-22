@@ -534,6 +534,11 @@ void MainFrame::glissandoSetRigFrequency(double hz)
     OnChangeReportFrequency(event);
 }
 
+wxString MainFrame::glissandoVersion()
+{
+    return wxString::FromUTF8(GetFreeDVVersion().c_str());
+}
+
 std::vector<double> MainFrame::glissandoFrequencyPresets()
 {
     auto& reporting = wxGetApp().appConfiguration.reportingConfiguration;
