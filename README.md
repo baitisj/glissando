@@ -26,6 +26,8 @@ consonant. It shifts gears (tempo) to match the HF path.
   [docs/HOW_IT_HEARS.md](docs/HOW_IT_HEARS.md)
 - The chord that opens and closes each transmission, and why it is for
   the ear and not the receiver: [docs/CHORDS.md](docs/CHORDS.md)
+- How Glissando compares with JTTY (WSJT-X 3.2), what it borrowed from
+  JTTY's receiver, and ideas kept for later: [docs/JTTY.md](docs/JTTY.md)
 - Transmitting Glissando from a microcontroller (ESP8266, Si5351):
   [docs/ESP.md](docs/ESP.md)
 - Listen: [samples/](samples/) (8 kHz WAV; `g3-allegro-moderate-hf-minus10db.wav`
