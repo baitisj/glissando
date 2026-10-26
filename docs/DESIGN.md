@@ -310,6 +310,8 @@ audio -> analytic signal -> sync search (dechirp + FFT, all gears)
 The last two steps are ideas from JTTY's decoder, in the streaming
 receiver: signal subtraction, and list decoding with a grammar check
 (Lessons 10 and 11 of [HOW_IT_HEARS.md](HOW_IT_HEARS.md)).
+[JTTY.md](JTTY.md) compares the two modes and keeps JTTY's other ideas
+for later.
 
 ## 7. Measured performance
 
@@ -408,6 +410,9 @@ code should more than close that gap (an estimate, not yet measured).
    in tune.
 6. Explore a glide-fraction and scale per gear (e.g. major pentatonic for
    the duet), and a longer-message / file-transfer gear with ARQ.
+7. JTTY's ideas not yet taken: typed atoms for reports and exchanges, a
+   tail-biting code, F-key macros and a silence gate
+   ([JTTY.md](JTTY.md)).
 
 ## References
 

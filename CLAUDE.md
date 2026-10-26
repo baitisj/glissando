@@ -156,4 +156,8 @@ Some work runs on Jeff's own Linux machine, which is connected to his radio
 - **Roadmap:** `docs/DESIGN.md` section 10. The next big item is
   LDPC(174,91) in place of the convolutional code. The app's streaming
   receiver and repeat averaging already exist.
+- **JTTY:** `docs/JTTY.md` compares the modes. List decoding, subtraction
+  and partial copy came from JTTY in PR #109. Typed atoms, a tail-biting
+  code, macros and a silence gate are not built yet. WSJT-X is GPL-3, so
+  never copy its code.
 - **Microcontroller transmitters:** see `docs/ESP.md`.
