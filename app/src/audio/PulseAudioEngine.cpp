@@ -32,6 +32,9 @@
 
 PulseAudioEngine::PulseAudioEngine()
     : initialized_(false)
+    , mainloop_(nullptr)
+    , mainloopApi_(nullptr)
+    , context_(nullptr)
 {
     // empty
 }
@@ -182,14 +185,35 @@ void PulseAudioEngine::start()
         pa_threaded_mainloop_stop(mainloop_);
         pa_context_unref(context_);
         pa_threaded_mainloop_free(mainloop_);
+        mainloop_ = nullptr;
+        mainloopApi_ = nullptr;
+        context_ = nullptr;
         return;
     }
 
-    // Wait for the context to be ready
+    // Wait for the context to be ready. With no sound server running, it
+    // fails instead, and the engine stays uninitialized: no devices, but the
+    // app still opens.
     for(;;) 
     {
         pa_context_state_t context_state = pa_context_get_state(context_);
-        assert(PA_CONTEXT_IS_GOOD(context_state));
+        if (!PA_CONTEXT_IS_GOOD(context_state))
+        {
+            pa_threaded_mainloop_unlock(mainloop_);
+
+            if (onAudioErrorFunction)
+            {
+                onAudioErrorFunction(*this, "Could not connect to the PulseAudio server.", onAudioErrorState);
+            }
+
+            pa_threaded_mainloop_stop(mainloop_);
+            pa_context_unref(context_);
+            pa_threaded_mainloop_free(mainloop_);
+            mainloop_ = nullptr;
+            mainloopApi_ = nullptr;
+            context_ = nullptr;
+            return;
+        }
         if (context_state == PA_CONTEXT_READY) break;
         pa_threaded_mainloop_wait(mainloop_);
     }
@@ -233,6 +257,11 @@ struct PulseAudioDeviceListTemp
 
 std::vector<AudioDeviceSpecification> PulseAudioEngine::getAudioDeviceList(AudioDirection direction)
 {
+    if (!initialized_)
+    {
+        return {};
+    }
+
     PulseAudioDeviceListTemp tempObj;
     tempObj.thisPtr = this;
     
@@ -370,6 +399,11 @@ struct PaDefaultAudioDeviceTemp
 
 AudioDeviceSpecification PulseAudioEngine::getDefaultAudioDevice(AudioDirection direction)
 {
+    if (!initialized_)
+    {
+        return AudioDeviceSpecification::GetInvalidDevice();
+    }
+
     PaDefaultAudioDeviceTemp tempData;
     tempData.mainloop = mainloop_;
     

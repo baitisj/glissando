@@ -456,14 +456,22 @@ them; empty for none).
 `app/appimage/make-appimage.sh` builds a Release tree in
 `app/build-appimage` and packages it as
 `app/appimage/Glissando-<version>-x86_64.AppImage` with the Arachnia icon.
-The version comes from `app/CMakeLists.txt` (`PROJECT_VERSION`) plus the
-`FREEDV_VERSION_TAG` (`beta` by default) and the git hash, for example
-`0.1.0-beta-1a2b3c4`; it shows in the console's title and the log. Set
-`BUILD_DIR` to package a tree you have already built.
+The version comes from `app/CMakeLists.txt` (`PROJECT_VERSION`), for example
+`1.0.0`; it shows in the console's title and the log. Configure with
+`-DFREEDV_VERSION_TAG=beta` (or any word) to add the tag and the git hash,
+as in `1.0.0-beta-1a2b3c4`. Set `BUILD_DIR` to package a tree you have
+already built.
 
-The AppImage carries the libraries of the system it was built on, so build
-it on the oldest Linux you want it to run on (the beta 0.1 AppImage was
-built on Ubuntu 24.04 and needs glibc 2.39 or newer).
+The AppImage carries most libraries of the system it was built on, but
+uses the C library of the system it runs on, so it needs a glibc no newer
+than the one it was built against. Built on Ubuntu 24.04 it needs glibc 2.38
+or later, which is why the AppImage catalog turned beta 0.9.8 away. Release
+AppImages are built on Ubuntu 22.04 (glibc 2.35) instead, in Docker:
+
+    app/appimage/make-appimage-jammy.sh
+
+It builds in `app/build-appimage-jammy`, compiles wxWidgets 3.2 from source
+(22.04 ships 3.0), and leaves the AppImage in `app/appimage`.
 
 ### Windows
 

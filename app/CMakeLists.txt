@@ -15,7 +15,7 @@ endif()
 set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum OS X deployment version")
 
 set(PROJECT_NAME Glissando)
-set(PROJECT_VERSION 0.9.8)
+set(PROJECT_VERSION 1.0.0)
 set(PROJECT_DESCRIPTION "Chirp text chat for HF amateur radio")
 set(PROJECT_HOMEPAGE_URL "https://github.com/baitisj/glissando")
 
@@ -56,10 +56,11 @@ if(NOT DEFINED LINUX)
     endif((${LINUX_LOC} GREATER 0) OR (${LINUX_LOC} EQUAL 0))
 endif(NOT DEFINED LINUX)
 
-# Adds a tag to the end of the version string (with the git hash).
-# Pass -DFREEDV_VERSION_TAG= (empty) for a bare version number.
+# Adds a tag to the end of the version string (with the git hash), for
+# example -DFREEDV_VERSION_TAG=beta gives 1.0.0-beta-1a2b3c4. Releases
+# leave it empty for a bare version number.
 if(NOT DEFINED FREEDV_VERSION_TAG)
-set(FREEDV_VERSION_TAG "beta")
+set(FREEDV_VERSION_TAG "")
 endif(NOT DEFINED FREEDV_VERSION_TAG)
 
 # Prevent in-source builds to protect automake/autoconf config.

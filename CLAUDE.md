@@ -77,16 +77,23 @@ and `PULSE_SERVER=unix:<path from pactl info>`, or Engage aborts.
    full CI run, started by hand on its branch: no `[skip ci]` on a release
    PR, even when earlier PRs skipped it at Jeff's request.
 2. After Jeff merges it, build from the merge commit:
-   - The Linux AppImage: `app/appimage/make-appimage.sh`, which builds a
-     Release tree in `app/build-appimage`.
+   - The Linux AppImage: `app/appimage/make-appimage-jammy.sh`, which
+     builds in an Ubuntu 22.04 Docker container (in this cloud sandbox,
+     start `dockerd` first and set `SSL_CERT_FILE` to the proxy's CA
+     bundle). Don't release one built by plain `make-appimage.sh` on 24.04:
+     it needs glibc 2.38, and the AppImage catalog tests on 22.04.
    - The portable Windows zip, cross-compiled with MinGW-w64 as in
      `docs/APP.md`. Strip the exe and DLLs with
      `x86_64-w64-mingw32-strip`, or the zip is 120 MB instead of 10 MB.
-3. Write `SHA256SUMS-<version>-beta`, and smoke-test headless (AppImage
+3. Write `SHA256SUMS-<version>`, and smoke-test headless (AppImage
    under Xvfb, Windows build under Wine).
 4. Draft release notes that say whether the new version can chat with the
    last one.
-5. Jeff tags `v<version>-beta` on the merge commit and publishes.
+5. Jeff tags the merge commit and publishes. From 1.0 on, versions have no
+   "beta" tag (`v1.0.0`, `Glissando-1.0.0-x86_64.AppImage`), and a release
+   should not be marked pre-release: the AppImage catalog
+   (`data/Glissando` in AppImage/appimage.github.io) tests the latest
+   release.
 
 There is no Mac build. The proposed route is an unsigned GitHub Actions job.
 There is no ARM build yet either.
