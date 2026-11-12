@@ -1,6 +1,8 @@
 /build/
 /build_linux/
 /build-appimage/
+/build-appimage-jammy/
+appimage/runtime-*
 appimage/linuxdeploy-plugin-gtk.sh
 /build_osx/
 /codec2/
