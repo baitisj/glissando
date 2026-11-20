@@ -123,7 +123,7 @@ Enable=0
 Address=224.0.0.1
 Port=7177
 [Reporting/CSV]
-LogFilePath=/home/baitisj/.local/share/freedv/freedv_rx_log.csv
+LogFilePath=@STATION_DIR@/freedv_rx_log.csv
 [CallsignList]
 UseUTCTime=0
 [MainFrame]
@@ -143,7 +143,7 @@ height=-1
 playFileToMicInPath=
 playFileFromRadioPath=
 [VoiceKeyer]
-WaveFilePath=/home/baitisj/
+WaveFilePath=@STATION_DIR@/
 WaveFile=voicekeyer.wav
 RxPause=10
 Repeats=5
@@ -170,8 +170,8 @@ TransmitAudio=0
 VoiceKeyerAudioVol=0
 TransmitAudioVol=0
 [QuickRecord]
-SavePath=/home/baitisj/
-SaveDecodedPath=/home/baitisj/
+SavePath=@STATION_DIR@/
+SaveDecodedPath=@STATION_DIR@/
 [Modem]
 enableLegacyModes=0
 autoStartOnLaunch=0

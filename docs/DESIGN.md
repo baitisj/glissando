@@ -208,7 +208,7 @@ time-frequency coupling), then re-times. After that, blind sync decodes
 36 of 40 frames that genie sync decodes at G1, -25 dB (and the receiver
 tries the three best sync candidates, which recovers most of the rest).
 The upside is that Glissando timing is precise enough to measure
-multipath delay; see the roadmap.
+multipath delay; see section 10.
 
 Each keying also opens and closes with a chord of every note in the
 scale. It is there for the ear; the receiver syncs on the motif alone. See
@@ -395,22 +395,21 @@ The honest headline: at a similar transmission length G3 lands about
 0.5 dB behind FT8 and G1 matches JT65, while sounding like music. The LDPC
 code should more than close that gap (an estimate, not yet measured).
 
-## 10. Roadmap
+## 10. Not built yet
 
-1. Swap in LDPC(174,91) and a real FT8-compatible 77-bit message packer.
-2. Real-time implementation (C or Rust library, sound card I/O, CAT/PTT),
-   decoding every gear every slot, several signals per slot.
-3. Averaging of repeated transmissions (as Q65 does) for a "Largo" gear
-   below G1 without longer symbols, which HF Doppler would punish. The
-   streaming receiver already averages a repeat with failed copies it
+1. LDPC(174,91) in place of the convolutional code, and a real
+   FT8-compatible 77-bit message packer.
+2. A "Largo" gear below G1 that averages repeated transmissions (as Q65
+   does) instead of using longer symbols, which HF Doppler would punish.
+   The streaming receiver already averages a repeat with failed copies it
    heard earlier (about 0.9 dB for two copies at G4; see Lesson 9 of
    [HOW_IT_HEARS.md](HOW_IT_HEARS.md)).
-4. Over-the-air tests on 40 m and 20 m against the simulator's predictions.
-5. AFC that also corrects the audible pitch, so a mistuned rig still sounds
+3. Over-the-air tests on 40 m and 20 m against the simulator's predictions.
+4. AFC that also corrects the audible pitch, so a mistuned rig still sounds
    in tune.
-6. Explore a glide-fraction and scale per gear (e.g. major pentatonic for
+5. A glide-fraction and scale per gear (e.g. major pentatonic for
    the duet), and a longer-message / file-transfer gear with ARQ.
-7. JTTY's ideas not yet taken: typed atoms for reports and exchanges, a
+6. JTTY's ideas not yet taken: typed atoms for reports and exchanges, a
    tail-biting code, F-key macros and a silence gate
    ([JTTY.md](JTTY.md)).
 

@@ -67,7 +67,7 @@ int main()
     level = servo.reading(1.0, level);
     check(level == FLOOR, "and stays there");
 
-    // Jeff's IC-7100: about 0.5 at -14 dB, a little over at -12.
+    // An IC-7100: about 0.5 at -14 dB, a little over at -12.
     DriveServo rig(FLOOR, 0.5);
     level = -120;
     for (int second = 0; second < 30; second++)

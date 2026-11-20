@@ -47,9 +47,11 @@ install `libgtk-3-dev`, or the window-position restore quietly compiles out.
 Run only the `glissando|text_messaging` tests. Some of the inherited
 FreeDV tests hang. Unit tests need `-DUNITTEST=ON`, and without it ctest
 finds nothing. CI runs only the modem job on each PR, and nothing on a
-push to `main` (Jeff's choice, 2026-10-22). The app job runs only when
-started by hand (Actions > Build and test > Run workflow, or the GitHub
-`actions_run_trigger` tool on the branch), which runs both jobs. Threads
+push to `main` (Jeff's choice, 2026-10-22). The full run is started by
+hand (Actions > Build and test > Run workflow, or the GitHub
+`actions_run_trigger` tool on the branch): the modem and app tests, the
+release AppImage and the Windows zip, which it keeps as the run's
+artifacts with their SHA-256 in the run summary. Threads
 build the app and run its tests themselves before pushing; start a full
 run when Jeff asks, and always on a release PR.
 
@@ -62,29 +64,22 @@ stations (TEST1/P and TEST2/P) joined by PulseAudio null sinks, with a dummy
 rig. Always run `... down` afterwards. Headless, it needs `pulseaudio`, Xvfb
 and `PULSE_SERVER=unix:<path from pactl info>`, or Engage aborts.
 
-## Cloud sandbox quirks
-
-- These hosts are blocked: `media.xiph.org`, `codeload.github.com`, and
-  GitHub archive and release downloads. `git clone` works, so point CMake
-  `ExternalProject` URLs at local clones for a cloud-only build. Never commit
-  that change.
-- Tag pushes are refused, and a session can't create GitHub releases. Jeff
-  tags and publishes in the GitHub UI.
-
 ## Releases
 
 1. A PR bumps `PROJECT_VERSION` in `app/CMakeLists.txt`. It always gets a
    full CI run, started by hand on its branch: no `[skip ci]` on a release
    PR, even when earlier PRs skipped it at Jeff's request.
-2. After Jeff merges it, build from the merge commit:
+2. After Jeff merges it, build from the merge commit, or take both files
+   from a full CI run on it (check each against the SHA-256 in its run
+   summary):
    - The Linux AppImage: `app/appimage/make-appimage-jammy.sh`, which
-     builds in an Ubuntu 22.04 Docker container (in this cloud sandbox,
-     start `dockerd` first and set `SSL_CERT_FILE` to the proxy's CA
-     bundle). Don't release one built by plain `make-appimage.sh` on 24.04:
-     it needs glibc 2.38, and the AppImage catalog tests on 22.04.
-   - The portable Windows zip, cross-compiled with MinGW-w64 as in
-     `docs/APP.md`. Strip the exe and DLLs with
-     `x86_64-w64-mingw32-strip`, or the zip is 120 MB instead of 10 MB.
+     builds in an Ubuntu 22.04 Docker container (it passes a proxy and
+     `SSL_CERT_FILE` through). Don't release one built by plain
+     `make-appimage.sh` on 24.04: it needs glibc 2.38, and the AppImage
+     catalog tests on 22.04.
+   - The portable Windows zip: `app/windows/make-zip.sh`, which
+     cross-compiles with MinGW-w64, gathers the DLLs, strips everything
+     (or the zip is 120 MB instead of 10 MB) and writes the README.
 3. Write `SHA256SUMS-<version>`, and smoke-test headless (AppImage
    under Xvfb, Windows build under Wine).
 4. Draft release notes that say whether the new version can chat with the
@@ -97,6 +92,23 @@ and `PULSE_SERVER=unix:<path from pactl info>`, or Engage aborts.
 
 There is no Mac build. The proposed route is an unsigned GitHub Actions job.
 There is no ARM build yet either.
+
+## The repository
+
+Jeff's rules (2026-11-20):
+
+- No localisms: no hostnames, absolute paths of anyone's machine, private
+  links (Claude Docs, artifacts) or notes about one build sandbox. Write
+  for someone who has only this repository. Paths in examples are
+  relative to the checkout, or plainly made up (`/home/op/...`).
+- No development-only documents: no handoffs, roadmaps, work logs or
+  dated test reports. Docs describe what Glissando is and does, how to build, test
+  and release it, and what goes on the air.
+- No one-off test setups: tests and benches are ones anyone can run from
+  the checkout (ctest, the two-station bench, `prototype/sim.py`). Setups
+  tied to particular hardware or machines stay out.
+- Every platform with a build has a release recipe and a job in the full
+  CI run that builds it and keeps its files.
 
 ## How Jeff works
 
@@ -140,27 +152,9 @@ There is no ARM build yet either.
   Data2G compatibility with 0.5 (GLISS group), and the release after 0.9.8
   drops Data2G altogether.
 
-## Working on Jeff's radio PC
+## Further work
 
-Some work runs on Jeff's own Linux machine, which is connected to his radio
-(an IC-7100 through Hamlib). Its rules:
-
-- Never launch Glissando with his configuration, and never click its GUI,
-  without his OK. It keys the radio, and the screen is shared.
-- The system `rigctld` (localhost:4532, shared with fldigi) is his. Never
-  kill or restart it, and send only read-only frequency and mode queries.
-  The test bench uses its own dummy rig.
-- Tests never use the radio's USB audio codec.
-- Build PR branches in a separate worktree, so his own checkout and Release
-  build stay untouched.
-- Read `RADIO_SETUP.md` in his checkout before starting.
-
-## Open threads
-
-- **VFO jump on launch:** a launch may retune the radio to the last saved
-  frequency. It is unconfirmed. The suspects are the Engage path
-  (`onRadioConnected_` in `ongui.cpp`) and fldigi.
-- **Roadmap:** `docs/DESIGN.md` section 10. The next big item is
+- **Not built yet:** `docs/DESIGN.md` section 10. The next big item is
   LDPC(174,91) in place of the convolutional code. The app's streaming
   receiver and repeat averaging already exist.
 - **JTTY:** `docs/JTTY.md` compares the modes. List decoding, subtraction

@@ -88,6 +88,7 @@ writeStationConfig () {
         -e "s|@FREEDV_CALLSIGN@|$callsign|g" \
         -e "s|@FREEDV_GRID_SQUARE@|$grid|g" \
         -e "s|@FREEDV_FREQUENCY_HZ@|$FREEDV_TEXT_CHAT_FREQUENCY_HZ|g" \
+        -e "s|@STATION_DIR@|$dir|g" \
         "$SCRIPTPATH/freedv-text-chat-station.conf.tmpl" > "$dir/freedv.conf"
 }
 
