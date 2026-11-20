@@ -475,15 +475,22 @@ It builds in `app/build-appimage-jammy`, compiles wxWidgets 3.2 from source
 
 ### Windows
 
-A portable 64-bit Windows build cross-compiles on Ubuntu 24.04:
+A portable 64-bit Windows zip cross-compiles on Ubuntu 24.04:
 
-    sudo apt-get install g++-mingw-w64-x86-64-posix libltdl-dev autoconf automake libtool
-    cmake -S app -B build-win -DCMAKE_TOOLCHAIN_FILE=$PWD/app/cmake/Toolchain-Ubuntu-mingw64.cmake \
-        -DCMAKE_BUILD_TYPE=Release -DUSE_NATIVE_AUDIO=1 -DBOOTSTRAP_WXWIDGETS=TRUE -DwxUSE_WEBVIEW=OFF
-    cmake --build build-win -j$(nproc)
+    sudo apt-get install g++-mingw-w64-x86-64-posix libltdl-dev autoconf automake libtool zip
+    app/windows/make-zip.sh
 
-The build fetches and compiles wxWidgets, Hamlib and libsndfile. Put `build-win/src/glissando.exe`
-in a folder with the DLLs it names (`x86_64-w64-mingw32-objdump -p`):
-`libhamlib-4.dll` from `build-win/external/dist/bin`, and
-`libstdc++-6.dll`, `libgcc_s_seh-1.dll`, `libssp-0.dll` and
-`libwinpthread-1.dll` from the MinGW-w64 install. There is no installer.
+It builds in `app/build-win` (fetching and compiling wxWidgets, Hamlib and
+libsndfile the first time) and leaves
+`app/windows/Glissando-<version>-windows-x86_64.zip`. The zip holds
+`glissando.exe`, the DLLs it names that Windows doesn't have
+(`libhamlib-4.dll` and the MinGW-w64 runtime: `libstdc++-6.dll`,
+`libgcc_s_seh-1.dll`, `libssp-0.dll`, `libwinpthread-1.dll`), all
+stripped, with a README and the licence. There is no installer.
+
+### In CI
+
+The full CI run (Actions > Build and test > Run workflow) builds both,
+the AppImage with `make-appimage-jammy.sh` and the zip with
+`make-zip.sh`, prints their SHA-256 in the run summary, and keeps them as
+the run's `glissando-appimage` and `glissando-windows-x86_64` artifacts.

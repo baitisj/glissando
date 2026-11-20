@@ -138,7 +138,7 @@ would break compatibility with 0.9.8; macros and a silence gate would not.
 2. **Tail-biting code.** JTTY's code has no tail. Glissando spends 6 tail
    bits, 12 coded bits or 4 notes a frame, on terminating the code. A
    tail-biting version would save about 5 % of airtime. It breaks
-   compatibility, and the LDPC change on the roadmap removes the tail
+   compatibility, and the planned LDPC change removes the tail
    anyway, so it is only worth doing if LDPC slips.
 3. **Macros and a silence gate.** F1 to F8 with %M and %H would make CQ and
    reply calls one key. One implementer notes JTTY's rolling rescan keeps a

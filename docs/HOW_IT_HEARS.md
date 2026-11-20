@@ -559,7 +559,7 @@ receiver detects each note by its power, not its phase, and power detection
 loses more of a weak signal than it keeps, so each copy brings in less than
 its share. And each copy must still be found on its own: the sync search of
 Lesson 3 has to pick it out of the noise before there is anything to stack.
-A slower "Largo" gear, on the roadmap, could stack copies whose timing is
+A slower "Largo" gear, not built yet (DESIGN.md section 10), could stack copies whose timing is
 already known, which avoids the second loss.
 
 ## Lesson 10: the runners-up, and a referee who knows the rules

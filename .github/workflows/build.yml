@@ -1,9 +1,10 @@
 name: Build and test
 
-# Each PR gets the quick modem build and tests. The app build runs only
-# when started by hand: Actions > Build and test > Run workflow, which runs
-# both jobs. Jeff chose this on 2026-10-22, since threads build and test
-# before every push.
+# Each PR gets the quick modem build and tests. The rest runs only when
+# started by hand: Actions > Build and test > Run workflow, which runs the
+# modem and app tests and builds the release AppImage and Windows zip,
+# kept as the run's artifacts. Jeff chose this on 2026-10-22, since
+# threads build and test before every push.
 on:
   pull_request:
   workflow_dispatch:
@@ -39,3 +40,43 @@ jobs:
         cmake --build build -j$(nproc)
     - name: Test
       run: ctest --test-dir build -R "glissando|text_messaging" --output-on-failure
+
+  appimage:
+    name: Linux AppImage (built on Ubuntu 22.04)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build
+      run: app/appimage/make-appimage-jammy.sh
+    - name: Checksum
+      run: |
+        cd app/appimage
+        sha256sum Glissando-*.AppImage | tee -a "$GITHUB_STEP_SUMMARY"
+    - uses: actions/upload-artifact@v4
+      with:
+        name: glissando-appimage
+        path: app/appimage/Glissando-*.AppImage
+        if-no-files-found: error
+
+  windows:
+    name: Windows zip (MinGW-w64 cross build)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install packages
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y g++-mingw-w64-x86-64-posix libltdl-dev autoconf automake libtool zip
+    - name: Build
+      run: app/windows/make-zip.sh
+    - name: Checksum
+      run: |
+        cd app/windows
+        sha256sum Glissando-*.zip | tee -a "$GITHUB_STEP_SUMMARY"
+    - uses: actions/upload-artifact@v4
+      with:
+        name: glissando-windows-x86_64
+        path: app/windows/Glissando-*.zip
+        if-no-files-found: error
