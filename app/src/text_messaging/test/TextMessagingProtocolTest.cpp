@@ -147,7 +147,7 @@ struct Station
         protocol.setTransport(&transport);
         protocol.setObserver(&observer);
         protocol.setMyCallsign(callsign);
-        protocol.setClocks([this]() { return nowMs; }, [this]() { return (std::time_t)1750000000; });
+        protocol.setClocks([this]() { return nowMs; }, []() { return (std::time_t)1750000000; });
     }
 
     // Runs the protocol far enough to put a queued transmission on the air and

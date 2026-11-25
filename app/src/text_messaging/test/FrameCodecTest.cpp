@@ -574,7 +574,7 @@ void testExpectedFrameStart()
         FrameCodec::expectedFrameStart("vk3abc/p", sender, fromSender, fromSenderMask);
         FrameCodec::expectedFrameStart("VK3ABC/P", "", anybody, anybodyMask);
 
-        auto matches = [n](const std::vector<uint8_t>& frame, const uint8_t* bytes, const uint8_t* masks) {
+        auto matches = [&](const std::vector<uint8_t>& frame, const uint8_t* bytes, const uint8_t* masks) {
             for (int i = 0; i < n; i++)
                 if ((frame[(size_t)i] ^ bytes[i]) & masks[i]) return false;
             return true;
