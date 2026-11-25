@@ -103,6 +103,21 @@ jobs:
       run: brew install autoconf automake libtool
     - name: Build, test and zip
       run: app/macos/make-zip.sh
+    - name: Smoke test
+      # The zipped app starts and is still running 20 s later.
+      run: |
+        mkdir smoke
+        ditto -x -k app/macos/Glissando-*.zip smoke
+        smoke/Glissando-*/Glissando.app/Contents/MacOS/Glissando > smoke.log 2>&1 &
+        pid=$!
+        sleep 20
+        if ! kill -0 "$pid"; then
+          tail -50 smoke.log
+          echo "Glissando quit or crashed within 20 s."
+          exit 1
+        fi
+        kill "$pid"
+        tail -20 smoke.log
     - name: Checksum
       run: |
         cd app/macos
