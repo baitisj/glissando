@@ -60,7 +60,7 @@ python3 -m pytest                    # tests (the PulseAudio test skips without 
 The desktop app builds on Linux with CMake. These steps are tested on
 Ubuntu 24.04; other distributions need the same libraries under their own
 package names. [docs/APP.md](docs/APP.md) has the details, the Windows
-cross-compile and the AppImage.
+cross-compile, the macOS build and the AppImage.
 
 Install the build tools and libraries (Debian or Ubuntu):
 
@@ -105,6 +105,21 @@ cmake -S app -B build-release -DUSE_NATIVE_AUDIO=1 -DCMAKE_BUILD_TYPE=Release -D
 cmake --build build-release -j$(nproc)
 ctest --test-dir build-release -R "glissando|text_messaging" --output-on-failure
 ```
+
+**macOS.** On a Mac (Apple Silicon or Intel) with the Xcode command line
+tools, CMake and Homebrew, `app/macos/make-zip.sh` builds `Glissando.app`
+for that Mac, with every library it needs built in, runs the tests and
+zips it:
+
+```sh
+brew install autoconf automake libtool
+app/macos/make-zip.sh
+```
+
+The macOS build follows Tim Vetter's
+([@finitor](https://github.com/finitor)) macOS port of
+[Ragtime](https://github.com/baitisj/ragtime); see
+[docs/APP.md](docs/APP.md#macos).
 
 The C++ modem also builds and tests on its own, with no wxWidgets or codec2:
 
