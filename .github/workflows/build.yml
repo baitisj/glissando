@@ -2,8 +2,8 @@ name: Build and test
 
 # Each PR gets the quick modem build and tests. The rest runs only when
 # started by hand: Actions > Build and test > Run workflow, which runs the
-# modem and app tests and builds the release AppImage and Windows zip,
-# kept as the run's artifacts. Jeff chose this on 2026-10-22, since
+# modem and app tests and builds the release AppImage, Windows zip and
+# macOS zips, kept as the run's artifacts. Jeff chose this on 2026-10-22, since
 # threads build and test before every push.
 on:
   pull_request:
@@ -79,4 +79,36 @@ jobs:
       with:
         name: glissando-windows-x86_64
         path: app/windows/Glissando-*.zip
+        if-no-files-found: error
+
+  macos:
+    # The macOS app, zipped, for Apple Silicon and Intel: wxWidgets (Cocoa),
+    # Hamlib, libsndfile and libsamplerate built statically, the app's tests
+    # run, signed ad hoc. The recipe follows Tim Vetter's macOS port of
+    # Ragtime.
+    name: macOS zip (${{ matrix.arch }})
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - arch: arm64
+          runner: macos-15
+        - arch: x86_64
+          runner: macos-15-intel
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install packages
+      run: brew install autoconf automake libtool
+    - name: Build, test and zip
+      run: app/macos/make-zip.sh
+    - name: Checksum
+      run: |
+        cd app/macos
+        shasum -a 256 Glissando-*.zip | tee -a "$GITHUB_STEP_SUMMARY"
+    - uses: actions/upload-artifact@v4
+      with:
+        name: glissando-macos-${{ matrix.arch }}
+        path: app/macos/Glissando-*.zip
         if-no-files-found: error

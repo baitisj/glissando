@@ -22,3 +22,5 @@ a.out
 appimage/.cache/
 /build-win/
 windows/*.zip
+/build-macos/
+macos/*.zip

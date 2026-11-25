@@ -6,11 +6,23 @@ if(MINGW AND CMAKE_CROSSCOMPILING)
 else(MINGW AND CMAKE_CROSSCOMPILING)
     set(HAMLIB_PATCH_CMD "")
 if(APPLE)
-if(BUILD_OSX_UNIVERSAL)
-    set(CONFIGURE_COMMAND ./configure --enable-shared --prefix=${CMAKE_BINARY_DIR}/external/dist --without-cxx-binding --without-libusb CC=${EXTERNAL_PROJECT_CC} CXX=${EXTERNAL_PROJECT_CXX} CPPFLAGS=${EXTERNAL_PROJECT_APPLE_ISYSROOT} CFLAGS=${EXTERNAL_PROJECT_APPLE_ISYSROOT}\ -g\ -O3\ -mmacosx-version-min=11.0\ -arch\ x86_64\ -arch\ arm64 CXXFLAGS=${EXTERNAL_PROJECT_APPLE_ISYSROOT}\ -g\ -O3\ -mmacosx-version-min=11.0\ -arch\ x86_64\ -arch\ arm64)
-else()
-    set(CONFIGURE_COMMAND ./configure --enable-shared --prefix=${CMAKE_BINARY_DIR}/external/dist --without-cxx-binding --without-libusb CC=${EXTERNAL_PROJECT_CC} CXX=${EXTERNAL_PROJECT_CXX} CPPFLAGS=${EXTERNAL_PROJECT_APPLE_ISYSROOT} CFLAGS=${EXTERNAL_PROJECT_APPLE_ISYSROOT}\ -g\ -O3\ -mmacosx-version-min=11.0 CXXFLAGS=${EXTERNAL_PROJECT_APPLE_ISYSROOT}\ -g\ -O3\ -mmacosx-version-min=11.0)
-endif(BUILD_OSX_UNIVERSAL)
+    # On macOS Hamlib is built static, the library and its backends only,
+    # as Tim Vetter's macOS port of Ragtime builds it: the app bundle then
+    # carries no Hamlib dylib, and Hamlib's command-line programs and
+    # documentation, with their platform assumptions, stay out.
+    set(HAMLIB_APPLE_CFLAGS "-g -O3 -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    if(CMAKE_OSX_SYSROOT)
+        string(APPEND HAMLIB_APPLE_CFLAGS " -isysroot ${CMAKE_OSX_SYSROOT}")
+    endif()
+    foreach(arch IN LISTS CMAKE_OSX_ARCHITECTURES)
+        string(APPEND HAMLIB_APPLE_CFLAGS " -arch ${arch}")
+    endforeach()
+    set(CONFIGURE_COMMAND ./configure --disable-shared --enable-static --prefix=${CMAKE_BINARY_DIR}/external/dist
+        --without-cxx-binding --without-libusb --without-readline --without-xml-support --without-indi
+        --without-libsndfile --disable-html-matrix --disable-winradio
+        CC=${EXTERNAL_PROJECT_CC} "CFLAGS=${HAMLIB_APPLE_CFLAGS}")
+    # src builds the backends it links on its own.
+    set(HAMLIB_SUBDIRS "SUBDIRS=include lib security src")
 else()
     set(CONFIGURE_COMMAND ./configure --enable-shared --prefix=${CMAKE_BINARY_DIR}/external/dist --without-cxx-binding --without-libusb CC=${EXTERNAL_PROJECT_CC} CXX=${EXTERNAL_PROJECT_CXX})
 endif()
@@ -23,19 +35,25 @@ ExternalProject_Add(build_hamlib
     INSTALL_DIR external/dist
     PATCH_COMMAND ${HAMLIB_PATCH_CMD}
     CONFIGURE_COMMAND ./bootstrap && ${CONFIGURE_COMMAND}
-    BUILD_COMMAND $(MAKE)
-    INSTALL_COMMAND $(MAKE) install
+    BUILD_COMMAND $(MAKE) ${HAMLIB_SUBDIRS}
+    INSTALL_COMMAND $(MAKE) install ${HAMLIB_SUBDIRS}
 )
 
 ExternalProject_Get_Property(build_hamlib BINARY_DIR)
 ExternalProject_Get_Property(build_hamlib SOURCE_DIR)
+if(APPLE)
+add_library(hamlib STATIC IMPORTED)
+set_target_properties(hamlib PROPERTIES
+    IMPORTED_LOCATION "${CMAKE_BINARY_DIR}/external/dist/lib/libhamlib.a"
+)
+else(APPLE)
 add_library(hamlib SHARED IMPORTED)
-add_dependencies(hamlib build_hamlib)
-
 set_target_properties(hamlib PROPERTIES
     IMPORTED_LOCATION "${CMAKE_BINARY_DIR}/external/dist/lib/libhamlib${CMAKE_SHARED_LIBRARY_SUFFIX}"
     IMPORTED_IMPLIB   "${CMAKE_BINARY_DIR}/external/dist/lib/libhamlib${CMAKE_IMPORT_LIBRARY_SUFFIX}"
 )
+endif(APPLE)
+add_dependencies(hamlib build_hamlib)
 
 message(STATUS "hamlib path" "${CMAKE_BINARY_DIR}/external/dist/lib/libhamlib${CMAKE_IMPORT_LIBRARY_SUFFIX}")
 
