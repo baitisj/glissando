@@ -488,9 +488,51 @@ libsndfile the first time) and leaves
 `libgcc_s_seh-1.dll`, `libssp-0.dll`, `libwinpthread-1.dll`), all
 stripped, with a README and the licence. There is no installer.
 
+### macOS
+
+The macOS app builds natively, on the Mac it is for: Apple Silicon gives
+an arm64 build, Intel an x86_64 one. With the Xcode command line tools,
+CMake and three Homebrew packages:
+
+    brew install autoconf automake libtool
+    app/macos/make-zip.sh
+
+It builds in `app/build-macos` (`BUILD_DIR` to use another folder),
+fetching and compiling wxWidgets (Cocoa), Hamlib, libsndfile (with mpg123
+and LAME) and libsamplerate statically the first time, and leaves Homebrew's
+own libraries out, so `Glissando.app` needs nothing outside macOS 11 or
+later. It runs the app's tests, signs the app ad hoc, and checks the
+bundle with `app/macos/check-bundle.py`: one architecture, no library from
+outside macOS, no binary needing a newer macOS than `Info.plist` says, the
+icon, the microphone notice and the libraries' licences under
+`Contents/Resources/licences`. It leaves
+`app/macos/Glissando-<version>-macos-<arch>.zip`, with the app, a README
+and the licence.
+
+On macOS the `glissando` target is the bundle (`app/macos/Bundle.cmake`),
+its icon drawn from `app/contrib/glissando256x256.png` by
+`app/macos/make-icon.sh`, and Hamlib is built static, library and backends
+only (`app/cmake/BuildHamlib.cmake`). Sound goes through Core Audio
+(`MacAudioEngine`, from FreeDV), and macOS asks the operator for
+microphone access the first time the console listens.
+
+An ad-hoc signed app opens only after Open Anyway in System Settings >
+Privacy & Security. Set `MACOS_SIGN_IDENTITY` to a Developer ID
+Application identity to sign it properly (with the hardened runtime and
+`app/macos/entitlements.plist`, which allows audio input), and
+`MACOS_NOTARY_PROFILE` to a `notarytool` keychain profile to have Apple
+notarize it as well.
+
+The recipe follows Tim Vetter's (GitHub `finitor`) macOS port of Ragtime,
+Glissando's sibling: the zip script, the bundle check, the icon script,
+the entitlements and the `Info.plist` are adapted from his.
+
 ### In CI
 
-The full CI run (Actions > Build and test > Run workflow) builds both,
-the AppImage with `make-appimage-jammy.sh` and the zip with
-`make-zip.sh`, prints their SHA-256 in the run summary, and keeps them as
-the run's `glissando-appimage` and `glissando-windows-x86_64` artifacts.
+The full CI run (Actions > Build and test > Run workflow) builds all
+three: the AppImage with `make-appimage-jammy.sh`, the Windows zip with
+`app/windows/make-zip.sh`, and the macOS zips with `app/macos/make-zip.sh`
+on GitHub's Apple Silicon (`macos-15`) and Intel (`macos-15-intel`)
+runners. It prints their SHA-256 in the run summary and keeps them as the
+run's `glissando-appimage`, `glissando-windows-x86_64`,
+`glissando-macos-arm64` and `glissando-macos-x86_64` artifacts.

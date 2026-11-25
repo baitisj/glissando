@@ -28,6 +28,7 @@ and `docs/APP.md` for the app, building and packaging.
 | `app/src/text_messaging/` | Chat link layer: `FrameCodec` (bit-packed headers), `HamText` (Huffman text table, generated into `HamTextTable.h`), `TextMessagingProtocol` (queue, ACKs, retries, pings, locators) | |
 | `app/src/gui/glissando/` | The console: `GlissandoConsole`, `GlissandoScope` (visi-scope waterfall and its art), `MapBall`/`Globe`, `ChaoticaTheme`/`ChaoticaControls` | |
 | `app/src/pipeline/TextMessagingModem.cpp` | Where a keying is assembled: opening chord, frames, closing chord or CW tail | |
+| `app/macos/` | The macOS bundle and zip: `make-zip.sh`, `Bundle.cmake`, `check-bundle.py`, `Info.plist.in` | |
 | `docs/` | Markdown docs. Figures are SVG in `docs/images/` with white backgrounds | |
 
 ## Build and test
@@ -50,7 +51,7 @@ finds nothing. CI runs only the modem job on each PR, and nothing on a
 push to `main` (Jeff's choice, 2026-10-22). The full run is started by
 hand (Actions > Build and test > Run workflow, or the GitHub
 `actions_run_trigger` tool on the branch): the modem and app tests, the
-release AppImage and the Windows zip, which it keeps as the run's
+release AppImage, the Windows zip and the macOS zips, which it keeps as the run's
 artifacts with their SHA-256 in the run summary. Threads
 build the app and run its tests themselves before pushing; start a full
 run when Jeff asks, and always on a release PR.
@@ -80,6 +81,8 @@ and `PULSE_SERVER=unix:<path from pactl info>`, or Engage aborts.
    - The portable Windows zip: `app/windows/make-zip.sh`, which
      cross-compiles with MinGW-w64, gathers the DLLs, strips everything
      (or the zip is 120 MB instead of 10 MB) and writes the README.
+   - The macOS zips, for Apple Silicon and Intel, from the full CI run
+     (or `app/macos/make-zip.sh` on each kind of Mac).
 3. Write `SHA256SUMS-<version>`, and smoke-test headless (AppImage
    under Xvfb, Windows build under Wine).
 4. Draft release notes that say whether the new version can chat with the
@@ -90,8 +93,12 @@ and `PULSE_SERVER=unix:<path from pactl info>`, or Engage aborts.
    (`data/Glissando` in AppImage/appimage.github.io) tests the latest
    release.
 
-There is no Mac build. The proposed route is an unsigned GitHub Actions job.
-There is no ARM build yet either.
+The macOS zips, `Glissando-<version>-macos-arm64.zip` and
+`...-macos-x86_64.zip`, come from `app/macos/make-zip.sh` on a Mac, or
+from the full CI run's macOS jobs (Apple Silicon and Intel runners),
+signed ad hoc. The recipe follows Tim Vetter's (GitHub `finitor`) macOS
+port of Ragtime: credit him when it changes much. There is no Linux or
+Windows ARM build yet.
 
 ## The repository
 

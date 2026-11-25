@@ -560,7 +560,7 @@ void Lamp::paint(wxGraphicsContext* gc, const wxSize& size)
 
     if (lit_) drawGlow(gc, cx, cy, std::min(r * 3.0, size.y / 2.0), 0.9);
 
-    gc->SetPen(wxPen(Colour::Chrome, 1.5));
+    gc->SetPen(wxPen(Colour::Chrome, 1));
     gc->SetBrush(lit_ ? gc->CreateRadialGradientBrush(cx - r * 0.3, cy - r * 0.3, cx, cy, r,
                                                       Colour::Glow, Colour::Chrome)
                       : gc->CreateRadialGradientBrush(cx - r * 0.3, cy - r * 0.3, cx, cy, r,

@@ -34,6 +34,11 @@ add_subdirectory(text_messaging)
 # WIN32 is needed for Windows GUI apps and is ignored for UNIX like systems.
 add_executable(glissando WIN32 ${FREEDV_SOURCES} ${RES_FILES})
 
+# On macOS the app is Glissando.app (macos/Bundle.cmake).
+if(APPLE)
+    include(${CMAKE_SOURCE_DIR}/macos/Bundle.cmake)
+endif(APPLE)
+
 target_compile_options(glissando PRIVATE ${WARNINGS_AS_ERRORS_FLAGS})
 target_link_libraries(glissando gliss_audio gliss_audio_pipeline gliss_audio_pipeline_extra gliss_config gliss_gui_controls gliss_gui_dialogs gliss_gui_glissando gliss_gui_util gliss_os_wrapper gliss_rig_control gliss_reporting gliss_text_messaging gliss_util codec2 git_version)
 
@@ -149,5 +154,6 @@ include_directories(BEFORE ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DI
 
 install(TARGETS glissando
     RUNTIME DESTINATION bin
+    BUNDLE DESTINATION .
 )
 
